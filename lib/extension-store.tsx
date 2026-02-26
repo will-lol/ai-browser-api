@@ -1,6 +1,9 @@
 "use client"
 
-import React, { createContext, useContext, useState, useCallback, type ReactNode } from "react"
+import type { ReactNode } from "react"
+import { create } from "zustand"
+import { createJSONStorage, persist } from "zustand/middleware"
+import { browser } from "wxt/browser"
 import {
   PROVIDERS,
   INITIAL_PERMISSIONS,
@@ -13,131 +16,190 @@ import {
   type PermissionStatus,
 } from "@/lib/mock-data"
 
-interface ExtensionState {
+const STORE_KEY = "llm-bridge-extension-state"
+
+interface AvailableModel {
+  modelId: string
+  modelName: string
+  provider: string
+  capabilities: string[]
+}
+
+interface ExtensionStoreState {
   providers: Provider[]
   permissions: ModelPermission[]
   pendingRequests: PermissionRequest[]
   currentOrigin: string
+}
+
+interface ExtensionStoreActions {
   toggleProvider: (providerId: string) => void
   respondToRequest: (requestId: string, decision: "allowed" | "denied") => void
   dismissRequest: (requestId: string) => void
   updatePermission: (modelId: string, status: PermissionStatus) => void
-  getAllAvailableModels: () => { modelId: string; modelName: string; provider: string; capabilities: string[] }[]
+  getAllAvailableModels: () => AvailableModel[]
   getModelPermission: (modelId: string) => PermissionStatus
 }
 
-const ExtensionContext = createContext<ExtensionState | null>(null)
+type ExtensionState = ExtensionStoreState & ExtensionStoreActions
 
-export function ExtensionProvider({ children }: { children: ReactNode }) {
-  const [providers, setProviders] = useState<Provider[]>(PROVIDERS)
-  const [permissions, setPermissions] = useState<ModelPermission[]>(INITIAL_PERMISSIONS)
-  const [pendingRequests, setPendingRequests] = useState<PermissionRequest[]>(INITIAL_PENDING_REQUESTS)
+const initialState: ExtensionStoreState = {
+  providers: PROVIDERS,
+  permissions: INITIAL_PERMISSIONS,
+  pendingRequests: INITIAL_PENDING_REQUESTS,
+  currentOrigin: CURRENT_ORIGIN,
+}
 
-  const toggleProvider = useCallback((providerId: string) => {
-    setProviders((prev) =>
-      prev.map((p) => (p.id === providerId ? { ...p, connected: !p.connected } : p))
-    )
-  }, [])
+const storage = createJSONStorage<ExtensionStoreState>(() => ({
+  getItem: async (name) => {
+    const value = await browser.storage.local.get(name)
+    return value[name] ?? null
+  },
+  setItem: async (name, value) => {
+    await browser.storage.local.set({ [name]: value })
+  },
+  removeItem: async (name) => {
+    await browser.storage.local.remove(name)
+  },
+}))
 
-  const respondToRequest = useCallback(
-    (requestId: string, decision: "allowed" | "denied") => {
-      setPendingRequests((prev) => prev.filter((r) => r.id !== requestId))
-      const request = pendingRequests.find((r) => r.id === requestId)
-      if (request) {
-        setPermissions((prev) => {
-          const existing = prev.findIndex((p) => p.modelId === request.modelId)
-          const newPerm: ModelPermission = {
+export const useExtensionStore = create<ExtensionState>()(
+  persist(
+    (set, get) => ({
+      ...initialState,
+      toggleProvider: (providerId) => {
+        set((state) => ({
+          providers: state.providers.map((provider) =>
+            provider.id === providerId
+              ? { ...provider, connected: !provider.connected }
+              : provider
+          ),
+        }))
+      },
+      respondToRequest: (requestId, decision) => {
+        set((state) => {
+          const request = state.pendingRequests.find((item) => item.id === requestId)
+          const pendingRequests = state.pendingRequests.filter(
+            (item) => item.id !== requestId
+          )
+
+          if (!request) return { pendingRequests }
+
+          const nextPermission: ModelPermission = {
             modelId: request.modelId,
             modelName: request.modelName,
             provider: request.provider,
             status: decision,
             capabilities: request.capabilities,
           }
-          if (existing >= 0) {
-            const updated = [...prev]
-            updated[existing] = newPerm
-            return updated
+
+          const existingIndex = state.permissions.findIndex(
+            (permission) => permission.modelId === request.modelId
+          )
+
+          const permissions = [...state.permissions]
+          if (existingIndex >= 0) {
+            permissions[existingIndex] = nextPermission
+          } else {
+            permissions.push(nextPermission)
           }
-          return [...prev, newPerm]
+
+          return { pendingRequests, permissions }
         })
-      }
-    },
-    [pendingRequests]
+      },
+      dismissRequest: (requestId) => {
+        set((state) => ({
+          pendingRequests: state.pendingRequests.map((request) =>
+            request.id === requestId
+              ? { ...request, dismissed: true }
+              : request
+          ),
+        }))
+      },
+      updatePermission: (modelId, status) => {
+        set((state) => {
+          const existingIndex = state.permissions.findIndex(
+            (permission) => permission.modelId === modelId
+          )
+
+          if (existingIndex >= 0) {
+            const permissions = [...state.permissions]
+            permissions[existingIndex] = {
+              ...permissions[existingIndex],
+              status,
+            }
+            return { permissions }
+          }
+
+          const [providerId, modelName] = modelId.split("/")
+          const provider = state.providers.find((item) => item.id === providerId)
+          if (!provider) return {}
+
+          return {
+            permissions: [
+              ...state.permissions,
+              {
+                modelId,
+                modelName,
+                provider: providerId,
+                status,
+                capabilities: getCapabilitiesForModel(modelName),
+              },
+            ],
+          }
+        })
+      },
+      getAllAvailableModels: () => {
+        const { providers } = get()
+        return providers
+          .filter((provider) => provider.connected)
+          .flatMap((provider) =>
+            provider.models.map((modelName) => ({
+              modelId: `${provider.id}/${modelName}`,
+              modelName,
+              provider: provider.id,
+              capabilities: getCapabilitiesForModel(modelName),
+            }))
+          )
+      },
+      getModelPermission: (modelId) => {
+        const { permissions } = get()
+        const permission = permissions.find((item) => item.modelId === modelId)
+        return permission?.status ?? "denied"
+      },
+    }),
+    {
+      name: STORE_KEY,
+      storage,
+      partialize: (state) => ({
+        providers: state.providers,
+        permissions: state.permissions,
+        pendingRequests: state.pendingRequests,
+        currentOrigin: state.currentOrigin,
+      }),
+    }
   )
+)
 
-  const dismissRequest = useCallback((requestId: string) => {
-    setPendingRequests((prev) =>
-      prev.map((r) => (r.id === requestId ? { ...r, dismissed: true } : r))
-    )
-  }, [])
+let attachedStorageSyncListener = false
 
-  const updatePermission = useCallback((modelId: string, status: PermissionStatus) => {
-    setPermissions((prev) => {
-      const existing = prev.findIndex((p) => p.modelId === modelId)
-      if (existing >= 0) {
-        const updated = [...prev]
-        updated[existing] = { ...updated[existing], status }
-        return updated
-      }
-      // Find model info from providers
-      const parts = modelId.split("/")
-      const providerId = parts[0]
-      const modelName = parts[1]
-      const provider = providers.find((p) => p.id === providerId)
-      if (!provider) return prev
-      return [
-        ...prev,
-        {
-          modelId,
-          modelName,
-          provider: providerId,
-          status,
-          capabilities: getCapabilitiesForModel(modelName),
-        },
-      ]
-    })
-  }, [providers])
+function attachStorageSyncListener() {
+  if (attachedStorageSyncListener) return
+  attachedStorageSyncListener = true
 
-  const getAllAvailableModels = useCallback(() => {
-    const connected = providers.filter((p) => p.connected)
-    return connected.flatMap((p) =>
-      p.models.map((m) => ({
-        modelId: `${p.id}/${m}`,
-        modelName: m,
-        provider: p.id,
-        capabilities: getCapabilitiesForModel(m),
-      }))
-    )
-  }, [providers])
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return
+    if (!changes[STORE_KEY]) return
+    void useExtensionStore.persist.rehydrate()
+  })
+}
 
-  const getModelPermission = useCallback(
-    (modelId: string): PermissionStatus => {
-      const perm = permissions.find((p) => p.modelId === modelId)
-      return perm?.status ?? "denied"
-    },
-    [permissions]
-  )
+attachStorageSyncListener()
 
-  return (
-    <ExtensionContext value={{
-      providers,
-      permissions,
-      pendingRequests,
-      currentOrigin: CURRENT_ORIGIN,
-      toggleProvider,
-      respondToRequest,
-      dismissRequest,
-      updatePermission,
-      getAllAvailableModels,
-      getModelPermission,
-    }}>
-      {children}
-    </ExtensionContext>
-  )
+export function ExtensionProvider({ children }: { children: ReactNode }) {
+  return children
 }
 
 export function useExtension() {
-  const ctx = useContext(ExtensionContext)
-  if (!ctx) throw new Error("useExtension must be used within ExtensionProvider")
-  return ctx
+  return useExtensionStore()
 }

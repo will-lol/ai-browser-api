@@ -1,11 +1,13 @@
 "use client"
 
-import { useMemo, useState, useRef, useEffect } from "react"
+import { useMemo, useState } from "react"
 import { useExtension } from "@/lib/extension-store"
 import { ModelRow } from "@/components/extension/model-row"
 import { PendingRequestCard } from "@/components/extension/pending-request-card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Search, Blocks } from "lucide-react"
+import { Blocks } from "lucide-react"
+import { SearchInput } from "@/components/extension/search-input"
+import { useFrozenOrder } from "@/hooks/use-frozen-order"
 
 interface SitePermissionsViewProps {
   onNavigateToProviders: () => void
@@ -14,9 +16,12 @@ interface SitePermissionsViewProps {
 export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsViewProps) {
   const { getAllAvailableModels, getModelPermission, pendingRequests } = useExtension()
   const [search, setSearch] = useState("")
-  const searchRef = useRef<HTMLInputElement>(null)
 
   const allModels = getAllAvailableModels()
+  const dismissedPendingModelIds = useMemo(
+    () => new Set(pendingRequests.filter((r) => r.dismissed).map((r) => r.modelId)),
+    [pendingRequests]
+  )
 
   // Dismissed pending requests for this origin
   const dismissedRequests = pendingRequests.filter((r) => r.dismissed)
@@ -24,35 +29,26 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
   // Compute a frozen sort order ONCE on mount. The order stays stable while
   // the panel is open -- it naturally resets on reopen because the popup is
   // conditionally rendered and this component remounts.
-  const frozenOrder = useRef<string[] | null>(null)
-  if (frozenOrder.current === null) {
-    const pendingModelIds = new Set(
-      pendingRequests.filter((r) => r.dismissed).map((r) => r.modelId)
-    )
-    const snapshot = allModels.map((m) => ({
-      modelId: m.modelId,
-      modelName: m.modelName,
-      permission: getModelPermission(m.modelId),
-      isPending: pendingModelIds.has(m.modelId),
-    }))
+  const frozenOrder = useFrozenOrder(
+    allModels,
+    (model) => model.modelId,
+    (a, b) => {
+      const aPending = dismissedPendingModelIds.has(a.modelId)
+      const bPending = dismissedPendingModelIds.has(b.modelId)
+      if (aPending && !bPending) return -1
+      if (!aPending && bPending) return 1
 
-    snapshot.sort((a, b) => {
-      // Pending first
-      if (a.isPending && !b.isPending) return -1
-      if (!a.isPending && b.isPending) return 1
-      // Allowed before denied
-      if (a.permission === "allowed" && b.permission !== "allowed") return -1
-      if (a.permission !== "allowed" && b.permission === "allowed") return 1
-      // Alphabetical within group
+      const aPermission = getModelPermission(a.modelId)
+      const bPermission = getModelPermission(b.modelId)
+      if (aPermission === "allowed" && bPermission !== "allowed") return -1
+      if (aPermission !== "allowed" && bPermission === "allowed") return 1
       return a.modelName.localeCompare(b.modelName)
-    })
-
-    frozenOrder.current = snapshot.map((m) => m.modelId)
-  }
+    }
+  )
 
   // Build the display list: use frozen order, apply live search filter
   const sortedModels = useMemo(() => {
-    const order = frozenOrder.current!
+    const order = frozenOrder
     const pendingModelIds = new Set(dismissedRequests.map((r) => r.modelId))
 
     const modelsById = new Map(
@@ -71,10 +67,14 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
       .map((id) => modelsById.get(id))
       .filter((m): m is NonNullable<typeof m> => m != null)
 
-    if (!search) return ordered
+    // Pending requests are shown in their own section and should not be duplicated
+    // in the All models list while the panel is open.
+    const withoutPending = ordered.filter((m) => !m.isPending)
+
+    if (!search) return withoutPending
 
     const q = search.toLowerCase()
-    return ordered.filter(
+    return withoutPending.filter(
       (m) =>
         m.modelName.toLowerCase().includes(q) ||
         m.provider.toLowerCase().includes(q)
@@ -82,15 +82,6 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
   }, [allModels, getModelPermission, dismissedRequests, search])
 
   const hasConnectedProviders = allModels.length > 0
-
-  // Focus search on mount
-  useEffect(() => {
-    // Small delay to let the panel animate in
-    const timer = setTimeout(() => {
-      searchRef.current?.focus()
-    }, 100)
-    return () => clearTimeout(timer)
-  }, [])
 
   if (!hasConnectedProviders) {
     return (
@@ -116,21 +107,12 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Search */}
-      <div className="border-b border-border px-3 py-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            ref={searchRef}
-            type="text"
-            placeholder="Search models..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-full rounded-md border border-border bg-secondary/50 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground outline-none transition-colors focus:border-ring focus:bg-secondary"
-            aria-label="Search models"
-          />
-        </div>
-      </div>
+      <SearchInput
+        ariaLabel="Search models"
+        placeholder="Search models..."
+        value={search}
+        onChange={setSearch}
+      />
 
       {/* Models list */}
       <ScrollArea className="flex-1">

@@ -3,8 +3,17 @@
 import { useState } from "react"
 import { useExtension } from "@/lib/extension-store"
 import { PendingRequestCard } from "@/components/extension/pending-request-card"
+import { cn } from "@/lib/utils"
 
-export function FloatingPermissionPrompt() {
+interface FloatingPermissionPromptProps {
+  className?: string
+  containerMode?: "fixed" | "embedded"
+}
+
+export function FloatingPermissionPrompt({
+  className,
+  containerMode = "fixed",
+}: FloatingPermissionPromptProps = {}) {
   const { pendingRequests } = useExtension()
   const [closedIds, setClosedIds] = useState<Set<string>>(new Set())
 
@@ -16,7 +25,14 @@ export function FloatingPermissionPrompt() {
   if (visibleRequests.length === 0) return null
 
   return (
-    <div className="fixed right-6 top-6 z-50 flex flex-col gap-2">
+    <div
+      className={cn(
+        "flex flex-col gap-2 font-sans",
+        containerMode === "fixed" && "fixed right-6 top-6 z-50",
+        containerMode === "embedded" && "relative",
+        className
+      )}
+    >
       {visibleRequests.map((request) => (
         <div
           key={request.id}

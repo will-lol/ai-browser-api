@@ -1,53 +1,50 @@
 "use client"
 
-import { useMemo, useState, useRef, useEffect } from "react"
+import { useMemo, useState } from "react"
 import { useExtension } from "@/lib/extension-store"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Search, Check, Unplug, Plug } from "lucide-react"
+import { Check, Unplug, Plug } from "lucide-react"
+import { SearchInput } from "@/components/extension/search-input"
+import { useFrozenOrder } from "@/hooks/use-frozen-order"
 
 export function ProvidersView() {
   const { providers, toggleProvider } = useExtension()
   const [search, setSearch] = useState("")
-  const searchRef = useRef<HTMLInputElement>(null)
-
-  const sorted = useMemo(() => {
-    const filtered = search
-      ? providers.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
-      : providers
-
-    return filtered.sort((a, b) => {
+  const frozenOrder = useFrozenOrder(
+    providers,
+    (provider) => provider.id,
+    (a, b) => {
       if (a.connected && !b.connected) return -1
       if (!a.connected && b.connected) return 1
       return a.name.localeCompare(b.name)
-    })
+    }
+  )
+
+  const sorted = useMemo(() => {
+    const order = frozenOrder
+    const providersById = new Map(providers.map((provider) => [provider.id, provider]))
+    const ordered = order
+      .map((id) => providersById.get(id))
+      .filter((provider): provider is NonNullable<typeof provider> => provider != null)
+
+    if (!search) return ordered
+
+    const query = search.toLowerCase()
+    return ordered.filter((provider) =>
+      provider.name.toLowerCase().includes(query)
+    )
   }, [providers, search])
 
   const connectedCount = providers.filter((p) => p.connected).length
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      searchRef.current?.focus()
-    }, 100)
-    return () => clearTimeout(timer)
-  }, [])
-
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Search */}
-      <div className="border-b border-border px-3 py-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            ref={searchRef}
-            type="text"
-            placeholder="Search providers..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-full rounded-md border border-border bg-secondary/50 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground outline-none transition-colors focus:border-ring focus:bg-secondary"
-            aria-label="Search providers"
-          />
-        </div>
-      </div>
+      <SearchInput
+        ariaLabel="Search providers"
+        placeholder="Search providers..."
+        value={search}
+        onChange={setSearch}
+      />
 
       {/* Summary */}
       <div className="border-b border-border px-4 py-2">

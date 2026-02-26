@@ -4,23 +4,12 @@ import { useExtension } from "@/lib/extension-store"
 import { Badge } from "@/components/ui/badge"
 import { Check, X as XIcon } from "lucide-react"
 import type { PermissionRequest } from "@/lib/mock-data"
+import { getProviderLabel } from "@/lib/provider-labels"
 
 interface PendingRequestCardProps {
   request: PermissionRequest
   variant: "floating" | "inline"
   onClose?: () => void
-}
-
-const PROVIDER_LABELS: Record<string, string> = {
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  google: "Google AI",
-  mistral: "Mistral",
-  meta: "Meta",
-  cohere: "Cohere",
-  xai: "xAI",
-  deepseek: "DeepSeek",
-  perplexity: "Perplexity",
 }
 
 function timeAgo(timestamp: number): string {
@@ -37,7 +26,7 @@ export function PendingRequestCard({ request, variant, onClose }: PendingRequest
 
   if (variant === "floating") {
     return (
-      <div className="w-[340px] overflow-hidden rounded-lg border border-border bg-card shadow-2xl shadow-background/80">
+      <div className="w-[340px] overflow-hidden rounded-lg border border-border bg-card shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
         <div className="flex flex-col gap-3 p-3">
           {/* Origin + dismiss */}
           <div className="flex flex-col gap-1">
@@ -61,7 +50,7 @@ export function PendingRequestCard({ request, variant, onClose }: PendingRequest
                 {request.modelName}
               </span>
               <Badge variant="outline" className="h-4 text-[10px] font-normal text-muted-foreground border-border">
-                {PROVIDER_LABELS[request.provider] ?? request.provider}
+                {getProviderLabel(request.provider)}
               </Badge>
             </div>
           </div>
@@ -116,7 +105,7 @@ export function PendingRequestCard({ request, variant, onClose }: PendingRequest
           {request.modelName}
         </span>
         <span className="text-[10px] text-muted-foreground">
-          {PROVIDER_LABELS[request.provider] ?? request.provider} &middot; {timeAgo(request.requestedAt)}
+          {getProviderLabel(request.provider)} &middot; {timeAgo(request.requestedAt)}
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-1">

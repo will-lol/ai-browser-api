@@ -4,6 +4,7 @@ import { useExtension } from "@/lib/extension-store"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import type { PermissionStatus } from "@/lib/mock-data"
+import { getProviderLabel } from "@/lib/provider-labels"
 
 interface ModelRowProps {
   modelId: string
@@ -11,18 +12,6 @@ interface ModelRowProps {
   provider: string
   capabilities: string[]
   permission: PermissionStatus
-}
-
-const PROVIDER_LABELS: Record<string, string> = {
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  google: "Google AI",
-  mistral: "Mistral",
-  meta: "Meta",
-  cohere: "Cohere",
-  xai: "xAI",
-  deepseek: "DeepSeek",
-  perplexity: "Perplexity",
 }
 
 export function ModelRow({ modelId, modelName, provider, capabilities, permission }: ModelRowProps) {
@@ -44,7 +33,7 @@ export function ModelRow({ modelId, modelName, provider, capabilities, permissio
         </span>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-muted-foreground">
-            {PROVIDER_LABELS[provider] ?? provider}
+            {getProviderLabel(provider)}
           </span>
           {capabilities.map((cap) => (
             <Badge
