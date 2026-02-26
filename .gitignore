@@ -3,6 +3,7 @@ node_modules/
 .next/
 .env*.local
 .DS_Store
+.direnv
 
 # WXT / extension build artifacts
 .wxt/
