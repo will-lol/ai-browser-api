@@ -187,27 +187,6 @@ export const INITIAL_PERMISSIONS: ModelPermission[] = [
   },
 ]
 
-export const INITIAL_PENDING_REQUESTS: PermissionRequest[] = [
-  {
-    id: "req-1",
-    origin: "chat.example.com",
-    modelId: "anthropic/claude-opus-4",
-    modelName: "claude-opus-4",
-    provider: "anthropic",
-    capabilities: ["text", "vision", "code"],
-    requestedAt: Date.now() - 30000,
-    dismissed: false,
-  },
-  {
-    id: "req-2",
-    origin: "chat.example.com",
-    modelId: "google/gemini-2.5-pro",
-    modelName: "gemini-2.5-pro",
-    provider: "google",
-    capabilities: ["text", "vision"],
-    requestedAt: Date.now() - 120000,
-    dismissed: true,
-  },
-]
+export const INITIAL_PENDING_REQUESTS: PermissionRequest[] = []
 
 export const CURRENT_ORIGIN = "chat.example.com"

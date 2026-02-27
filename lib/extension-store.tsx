@@ -30,12 +30,19 @@ interface ExtensionStoreState {
   permissions: ModelPermission[]
   pendingRequests: PermissionRequest[]
   currentOrigin: string
+  originEnabled: boolean
 }
 
 interface ExtensionStoreActions {
   toggleProvider: (providerId: string) => void
-  respondToRequest: (requestId: string, decision: "allowed" | "denied") => void
+  setOriginEnabled: (enabled: boolean) => void
+  addPendingRequest: (
+    request?: Partial<
+      Omit<PermissionRequest, "id" | "requestedAt" | "dismissed">
+    >
+  ) => string
   dismissRequest: (requestId: string) => void
+  respondToRequest: (requestId: string, decision: "allowed" | "denied") => void
   updatePermission: (modelId: string, status: PermissionStatus) => void
   getAllAvailableModels: () => AvailableModel[]
   getModelPermission: (modelId: string) => PermissionStatus
@@ -48,12 +55,15 @@ const initialState: ExtensionStoreState = {
   permissions: INITIAL_PERMISSIONS,
   pendingRequests: INITIAL_PENDING_REQUESTS,
   currentOrigin: CURRENT_ORIGIN,
+  originEnabled: true,
 }
 
 const storage = createJSONStorage<ExtensionStoreState>(() => ({
   getItem: async (name) => {
     const value = await browser.storage.local.get(name)
-    return value[name] ?? null
+    const stored = value[name]
+    if (stored == null) return null
+    return typeof stored === "string" ? stored : JSON.stringify(stored)
   },
   setItem: async (name, value) => {
     await browser.storage.local.set({ [name]: value })
@@ -62,6 +72,10 @@ const storage = createJSONStorage<ExtensionStoreState>(() => ({
     await browser.storage.local.remove(name)
   },
 }))
+
+function getPendingRequestKey(request: Pick<PermissionRequest, "origin" | "modelId">) {
+  return `${request.origin}::${request.modelId}`
+}
 
 export const useExtensionStore = create<ExtensionState>()(
   persist(
@@ -73,6 +87,69 @@ export const useExtensionStore = create<ExtensionState>()(
             provider.id === providerId
               ? { ...provider, connected: !provider.connected }
               : provider
+          ),
+        }))
+      },
+      setOriginEnabled: (enabled) => {
+        set(() => ({ originEnabled: enabled }))
+      },
+      addPendingRequest: (request = {}) => {
+        const state = get()
+        if (!state.originEnabled) return ""
+
+        const availableModels = state.getAllAvailableModels()
+        const fallbackModel = availableModels[0] ?? {
+          modelId: "openai/gpt-4o-mini",
+          modelName: "gpt-4o-mini",
+          provider: "openai",
+          capabilities: getCapabilitiesForModel("gpt-4o-mini"),
+        }
+
+        const modelId = request.modelId ?? fallbackModel.modelId
+        const modelName = request.modelName ?? modelId.split("/")[1] ?? fallbackModel.modelName
+        const provider = request.provider ?? modelId.split("/")[0] ?? fallbackModel.provider
+        const origin = request.origin ?? state.currentOrigin
+        const capabilities = request.capabilities ?? getCapabilitiesForModel(modelName)
+
+        const requestId =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `req-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+
+        const resolvedModelId = `${provider}/${modelName}`
+        const existingRequest = state.pendingRequests.find(
+          (pendingRequest) =>
+            getPendingRequestKey(pendingRequest) ===
+            getPendingRequestKey({ origin, modelId: resolvedModelId })
+        )
+
+        if (existingRequest) {
+          return existingRequest.id
+        }
+
+        const nextRequest: PermissionRequest = {
+          id: requestId,
+          origin,
+          modelId: resolvedModelId,
+          modelName,
+          provider,
+          capabilities,
+          requestedAt: Date.now(),
+          dismissed: false,
+        }
+
+        set((prev) => ({
+          pendingRequests: [nextRequest, ...prev.pendingRequests],
+        }))
+
+        return requestId
+      },
+      dismissRequest: (requestId) => {
+        set((state) => ({
+          pendingRequests: state.pendingRequests.map((request) =>
+            request.id === requestId
+              ? { ...request, dismissed: true }
+              : request
           ),
         }))
       },
@@ -106,15 +183,6 @@ export const useExtensionStore = create<ExtensionState>()(
 
           return { pendingRequests, permissions }
         })
-      },
-      dismissRequest: (requestId) => {
-        set((state) => ({
-          pendingRequests: state.pendingRequests.map((request) =>
-            request.id === requestId
-              ? { ...request, dismissed: true }
-              : request
-          ),
-        }))
       },
       updatePermission: (modelId, status) => {
         set((state) => {
@@ -176,6 +244,7 @@ export const useExtensionStore = create<ExtensionState>()(
         permissions: state.permissions,
         pendingRequests: state.pendingRequests,
         currentOrigin: state.currentOrigin,
+        originEnabled: state.originEnabled,
       }),
     }
   )

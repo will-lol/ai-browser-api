@@ -31,7 +31,7 @@ function DemoContent() {
         {/* Extension icon */}
         <div className="relative">
           <button
-            onClick={() => setPopupOpen(!popupOpen)}
+            onClick={() => setPopupOpen((isOpen) => !isOpen)}
             className={`flex items-center justify-center rounded-md p-1.5 transition-colors ${
               popupOpen
                 ? "bg-primary/10 text-primary"
@@ -48,7 +48,9 @@ function DemoContent() {
           {/* Popup dropdown */}
           {popupOpen && (
             <div className="absolute right-0 top-[calc(100%+8px)] z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-              <ExtensionPopup />
+              <div className="h-[500px] w-[340px] overflow-hidden">
+                <ExtensionPopup />
+              </div>
             </div>
           )}
         </div>

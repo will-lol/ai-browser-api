@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { useExtension } from "@/lib/extension-store"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Check, Unplug, Plug } from "lucide-react"
+import { Unplug, Plug } from "lucide-react"
 import { SearchInput } from "@/components/extension/search-input"
 import { useFrozenOrder } from "@/hooks/use-frozen-order"
 
@@ -35,10 +35,8 @@ export function ProvidersView() {
     )
   }, [providers, search])
 
-  const connectedCount = providers.filter((p) => p.connected).length
-
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <SearchInput
         ariaLabel="Search providers"
         placeholder="Search providers..."
@@ -46,44 +44,21 @@ export function ProvidersView() {
         onChange={setSearch}
       />
 
-      {/* Summary */}
-      <div className="border-b border-border px-4 py-2">
-        <span className="text-[10px] text-muted-foreground">
-          {connectedCount} of {providers.length} providers connected
-        </span>
-      </div>
-
       {/* Providers list */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col">
           {sorted.map((provider) => (
             <div
               key={provider.id}
-              className={`group flex items-center gap-3 border-b border-border px-4 py-3 transition-colors hover:bg-secondary/50 ${
+              className={`group flex items-center gap-2 border-b border-border px-3 py-2 transition-colors hover:bg-secondary/50 ${
                 !provider.connected ? "opacity-50 hover:opacity-80" : ""
               }`}
             >
-              {/* Provider icon */}
-              <div
-                className={`flex size-8 shrink-0 items-center justify-center rounded-md text-[10px] font-bold ${
-                  provider.connected
-                    ? "bg-primary/10 text-primary"
-                    : "bg-secondary text-muted-foreground"
-                }`}
-              >
-                {provider.icon}
-              </div>
-
               {/* Provider info */}
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-xs font-medium text-foreground">
-                    {provider.name}
-                  </span>
-                  {provider.connected && (
-                    <Check className="size-3 shrink-0 text-success" />
-                  )}
-                </div>
+                <span className="truncate text-xs font-medium text-foreground">
+                  {provider.name}
+                </span>
                 <span className="text-[10px] text-muted-foreground">
                   {provider.models.length} models available
                 </span>
@@ -92,7 +67,7 @@ export function ProvidersView() {
               {/* Connect / Disconnect */}
               <button
                 onClick={() => toggleProvider(provider.id)}
-                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
                   provider.connected
                     ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     : "bg-primary text-primary-foreground hover:bg-primary/90"

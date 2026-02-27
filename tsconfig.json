@@ -13,7 +13,6 @@
     "allowJs": false,
     "noEmit": true,
     "baseUrl": ".",
-    "types": ["wxt/client"],
     "paths": {
       "@/*": ["./*"]
     }

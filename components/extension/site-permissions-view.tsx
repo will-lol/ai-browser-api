@@ -5,6 +5,7 @@ import { useExtension } from "@/lib/extension-store"
 import { ModelRow } from "@/components/extension/model-row"
 import { PendingRequestCard } from "@/components/extension/pending-request-card"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Switch } from "@/components/ui/switch"
 import { Blocks } from "lucide-react"
 import { SearchInput } from "@/components/extension/search-input"
 import { useFrozenOrder } from "@/hooks/use-frozen-order"
@@ -14,17 +15,20 @@ interface SitePermissionsViewProps {
 }
 
 export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsViewProps) {
-  const { getAllAvailableModels, getModelPermission, pendingRequests } = useExtension()
+  const {
+    getAllAvailableModels,
+    getModelPermission,
+    pendingRequests,
+    originEnabled,
+    setOriginEnabled,
+  } = useExtension()
   const [search, setSearch] = useState("")
 
   const allModels = getAllAvailableModels()
-  const dismissedPendingModelIds = useMemo(
-    () => new Set(pendingRequests.filter((r) => r.dismissed).map((r) => r.modelId)),
+  const pendingModelIds = useMemo(
+    () => new Set(pendingRequests.map((r) => r.modelId)),
     [pendingRequests]
   )
-
-  // Dismissed pending requests for this origin
-  const dismissedRequests = pendingRequests.filter((r) => r.dismissed)
 
   // Compute a frozen sort order ONCE on mount. The order stays stable while
   // the panel is open -- it naturally resets on reopen because the popup is
@@ -33,8 +37,8 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
     allModels,
     (model) => model.modelId,
     (a, b) => {
-      const aPending = dismissedPendingModelIds.has(a.modelId)
-      const bPending = dismissedPendingModelIds.has(b.modelId)
+      const aPending = pendingModelIds.has(a.modelId)
+      const bPending = pendingModelIds.has(b.modelId)
       if (aPending && !bPending) return -1
       if (!aPending && bPending) return 1
 
@@ -49,7 +53,6 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
   // Build the display list: use frozen order, apply live search filter
   const sortedModels = useMemo(() => {
     const order = frozenOrder
-    const pendingModelIds = new Set(dismissedRequests.map((r) => r.modelId))
 
     const modelsById = new Map(
       allModels.map((m) => [
@@ -79,7 +82,7 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
         m.modelName.toLowerCase().includes(q) ||
         m.provider.toLowerCase().includes(q)
     )
-  }, [allModels, getModelPermission, dismissedRequests, search])
+  }, [allModels, getModelPermission, pendingModelIds, frozenOrder, search])
 
   const hasConnectedProviders = allModels.length > 0
 
@@ -106,7 +109,22 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <label
+        htmlFor="origin-enabled-switch"
+        className="flex cursor-pointer items-center justify-between border-b border-border px-3 py-1.5 font-sans transition-colors hover:bg-secondary/50"
+      >
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Site enabled
+        </span>
+        <Switch
+          id="origin-enabled-switch"
+          checked={originEnabled}
+          onCheckedChange={setOriginEnabled}
+          aria-label="Enable extension on this site"
+        />
+      </label>
+
       <SearchInput
         ariaLabel="Search models"
         placeholder="Search models..."
@@ -115,18 +133,23 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
       />
 
       {/* Models list */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col">
-          {/* Dismissed pending requests */}
-          {dismissedRequests.length > 0 && !search && (
+          {/* Pending requests */}
+          {pendingRequests.length > 0 && !search && (
             <div className="flex flex-col">
-              <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-4 py-1.5 backdrop-blur-sm">
+              <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-1 backdrop-blur-sm">
                 <span className="text-[10px] font-medium uppercase tracking-wider text-warning">
                   Pending requests
                 </span>
               </div>
-              {dismissedRequests.map((req) => (
-                <PendingRequestCard key={req.id} request={req} variant="inline" />
+              {pendingRequests.map((req) => (
+                <PendingRequestCard
+                  key={req.id}
+                  request={req}
+                  variant="inline"
+                  actionsDisabled={!originEnabled}
+                />
               ))}
             </div>
           )}
@@ -134,8 +157,8 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
           {/* Models */}
           {sortedModels.length > 0 ? (
             <div className="flex flex-col">
-              {!search && dismissedRequests.length > 0 && (
-                <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-4 py-1.5 backdrop-blur-sm">
+              {!search && pendingRequests.length > 0 && (
+                <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-1 backdrop-blur-sm">
                   <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                     All models
                   </span>
@@ -149,6 +172,7 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
                   provider={m.provider}
                   capabilities={m.capabilities}
                   permission={m.permission}
+                  disabled={!originEnabled}
                 />
               ))}
             </div>

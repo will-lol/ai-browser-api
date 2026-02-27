@@ -12,9 +12,17 @@ interface ModelRowProps {
   provider: string
   capabilities: string[]
   permission: PermissionStatus
+  disabled?: boolean
 }
 
-export function ModelRow({ modelId, modelName, provider, capabilities, permission }: ModelRowProps) {
+export function ModelRow({
+  modelId,
+  modelName,
+  provider,
+  capabilities,
+  permission,
+  disabled = false,
+}: ModelRowProps) {
   const { updatePermission } = useExtension()
 
   const isAllowed = permission === "allowed"
@@ -22,8 +30,10 @@ export function ModelRow({ modelId, modelName, provider, capabilities, permissio
   return (
     <label
       htmlFor={`model-switch-${modelId}`}
-      className={`flex cursor-pointer items-center gap-3 border-b border-border px-4 py-2.5 transition-colors hover:bg-secondary/50 ${
-        !isAllowed ? "opacity-50 hover:opacity-75" : ""
+      className={`flex items-center gap-2.5 border-b border-border px-3 py-2 transition-colors ${
+        disabled
+          ? "cursor-not-allowed opacity-60"
+          : "cursor-pointer hover:bg-secondary/50"
       }`}
     >
       {/* Model info */}
@@ -54,7 +64,7 @@ export function ModelRow({ modelId, modelName, provider, capabilities, permissio
         onCheckedChange={(checked) =>
           updatePermission(modelId, checked ? "allowed" : "denied")
         }
-        className="shrink-0 scale-75 data-[state=checked]:bg-success"
+        disabled={disabled}
         aria-label={`${isAllowed ? "Revoke" : "Grant"} access to ${modelName}`}
       />
     </label>

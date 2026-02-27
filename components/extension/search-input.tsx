@@ -26,7 +26,7 @@ export function SearchInput({
   }, [])
 
   return (
-    <div className="border-b border-border px-3 py-2">
+    <div className="w-full border-b border-border">
       <div className="relative">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <input
@@ -35,7 +35,7 @@ export function SearchInput({
           placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="h-8 w-full rounded-md border border-border bg-secondary/50 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground outline-none transition-colors focus:border-ring focus:bg-secondary"
+          className="h-8 w-full rounded-none border-0 bg-secondary/40 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground outline-none transition-colors focus:bg-secondary/60"
           aria-label={ariaLabel}
         />
       </div>
