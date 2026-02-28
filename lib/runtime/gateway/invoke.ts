@@ -4,10 +4,20 @@ import { toAnthropicRequest, fromAnthropicResponse } from "@/lib/runtime/gateway
 import { toGoogleRequest, fromGoogleResponse } from "@/lib/runtime/gateway/normalize/google"
 import { toOpenAIResponsesRequest, fromOpenAIResponsesResponse } from "@/lib/runtime/gateway/normalize/openai"
 import { toOpenAICompatibleRequest, fromOpenAICompatibleResponse } from "@/lib/runtime/gateway/normalize/openai-compatible"
+import type { ChatTransformContext } from "@/lib/runtime/plugin-manager"
 import { getPluginManager } from "@/lib/runtime/plugins"
 import { getModel, getProvider } from "@/lib/runtime/provider-registry"
-import type { ChatTransformContext, GatewayInvokeInput } from "@/lib/runtime/types"
 import { isObject, parseProviderModel } from "@/lib/runtime/util"
+
+export interface GatewayInvokeInput {
+  origin: string
+  sessionID: string
+  requestID: string
+  model: string
+  stream?: boolean
+  headers?: Record<string, string>
+  body: Record<string, unknown>
+}
 
 export type GatewayInvokeResult =
   | {

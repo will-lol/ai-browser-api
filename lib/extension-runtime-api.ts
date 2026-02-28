@@ -1,57 +1,19 @@
 import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
 import type {
-  RuntimeConnectProviderResponse,
+  RuntimeModelSummary,
+  RuntimeOriginState,
+  RuntimePermissionDecision,
+  RuntimePermissionEntry,
+  RuntimeProviderSummary,
 } from "@/lib/runtime/rpc/runtime-rpc-types"
-import type {
-  AuthAuthorization,
-  AuthMethod,
-  PermissionRequest,
-  PermissionStatus,
-} from "@/lib/runtime/types"
+import type { AuthMethod } from "@/lib/runtime/plugin-manager"
+import type { PermissionStatus } from "@/lib/runtime/permissions"
 
-export interface ExtensionProvider {
-  id: string
-  name: string
-  connected: boolean
-  env: string[]
-  modelCount: number
-}
-
-export interface ModelPermission {
-  modelId: string
-  modelName: string
-  provider: string
-  status: PermissionStatus
-  capabilities: string[]
-  requestedAt?: number
-}
-
-export interface AvailableModel {
-  modelId: string
-  modelName: string
-  provider: string
-  capabilities: string[]
-  connected: boolean
-}
-
-export interface OriginState {
-  origin: string
-  enabled: boolean
-}
-
-export type PermissionDecision = "allowed" | "denied"
-
-type ConnectProviderResult = {
-  method: AuthMethod
-  connected: boolean
-  pending?: boolean
-  authorization?: AuthAuthorization
-}
-
-type ConnectProviderResponse = {
-  providerID: string
-  result: ConnectProviderResult
-}
+export type ExtensionProvider = RuntimeProviderSummary
+export type ModelPermission = RuntimePermissionEntry
+export type AvailableModel = RuntimeModelSummary
+export type OriginState = RuntimeOriginState
+export type PermissionDecision = RuntimePermissionDecision
 
 export function currentOrigin() {
   if (typeof window === "undefined") return "https://chat.example.com"
@@ -60,7 +22,7 @@ export function currentOrigin() {
 
 export async function fetchProviders(origin = currentOrigin()) {
   const runtime = getRuntimeRPC()
-  return (await runtime.listProviders({ origin })) as ExtensionProvider[]
+  return runtime.listProviders({ origin })
 }
 
 export async function fetchModels(input?: {
@@ -70,34 +32,34 @@ export async function fetchModels(input?: {
 }) {
   const origin = input?.origin ?? currentOrigin()
   const runtime = getRuntimeRPC()
-  return (await runtime.listModels({
+  return runtime.listModels({
     origin,
     connectedOnly: input?.connectedOnly === true,
     providerID: input?.providerID,
-  })) as AvailableModel[]
+  })
 }
 
 export async function fetchOriginState(origin = currentOrigin()) {
   const runtime = getRuntimeRPC()
-  return (await runtime.getOriginState({ origin })) as OriginState
+  return runtime.getOriginState({ origin })
 }
 
 export async function fetchPermissions(origin = currentOrigin()) {
   const runtime = getRuntimeRPC()
-  return (await runtime.listPermissions({ origin })) as ModelPermission[]
+  return runtime.listPermissions({ origin })
 }
 
 export async function fetchPendingRequests(origin = currentOrigin()) {
   const runtime = getRuntimeRPC()
-  return (await runtime.listPending({ origin })) as PermissionRequest[]
+  return runtime.listPending({ origin })
 }
 
 export async function fetchProviderAuthMethods(providerID: string, origin = currentOrigin()) {
   const runtime = getRuntimeRPC()
-  return (await runtime.getAuthMethods({
+  return runtime.getAuthMethods({
     origin,
     providerID,
-  })) as AuthMethod[]
+  })
 }
 
 async function promptAuthValues(method: AuthMethod) {
@@ -123,13 +85,13 @@ async function connectProviderWithMethod(input: {
   origin: string
 }) {
   const runtime = getRuntimeRPC()
-  return (await runtime.connectProvider({
+  return runtime.connectProvider({
     providerID: input.providerId,
     methodID: input.method.id,
     values: input.values,
     code: input.code,
     origin: input.origin,
-  })) as RuntimeConnectProviderResponse
+  })
 }
 
 export async function toggleProviderConnection(input: {
@@ -157,12 +119,12 @@ export async function toggleProviderConnection(input: {
   }
 
   const values = await promptAuthValues(method)
-  const connected = (await connectProviderWithMethod({
+  const connected = await connectProviderWithMethod({
     providerId: input.provider.id,
     method,
     values,
     origin,
-  })) as ConnectProviderResponse
+  })
 
   if (
     connected.result.pending &&

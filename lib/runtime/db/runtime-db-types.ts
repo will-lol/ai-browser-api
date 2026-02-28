@@ -1,11 +1,9 @@
 import type {
   AuthRecord,
-  PermissionRequest,
-  PermissionStatus,
-  ProviderInfo,
-  ProviderModelInfo,
-  RuntimeConfig,
-} from "@/lib/runtime/types"
+} from "@/lib/runtime/auth-store"
+import type { RuntimeConfig } from "@/lib/runtime/config-store"
+import type { PermissionRequest, PermissionStatus } from "@/lib/runtime/permissions"
+import type { ProviderInfo, ProviderModelInfo } from "@/lib/runtime/provider-registry"
 
 export interface RuntimeDbProvider {
   id: string

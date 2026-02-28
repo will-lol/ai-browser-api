@@ -1,5 +1,7 @@
 import { getRuntimeConfig } from "@/lib/runtime/config-store"
+import type { RuntimeProviderConfig } from "@/lib/runtime/config-store"
 import { getModelsDevData } from "@/lib/runtime/models-dev"
+import type { ModelsDevModel, ModelsDevProvider } from "@/lib/runtime/models-dev"
 import { getPluginManager } from "@/lib/runtime/plugins"
 import {
   runtimeDb,
@@ -8,14 +10,69 @@ import { runtimeModelKey } from "@/lib/runtime/db/runtime-db-types"
 import { afterCommit, runTx } from "@/lib/runtime/db/runtime-db-tx"
 import { listAuth, getAuth } from "@/lib/runtime/auth-store"
 import { publishRuntimeEvent } from "@/lib/runtime/events/runtime-events"
-import type {
-  ModelsDevModel,
-  ModelsDevProvider,
-  ProviderInfo,
-  ProviderModelInfo,
-  RuntimeProviderConfig,
-} from "@/lib/runtime/types"
 import { getModelCapabilities, mergeRecord } from "@/lib/runtime/util"
+
+export interface ModelCapabilities {
+  temperature: boolean
+  reasoning: boolean
+  attachment: boolean
+  toolcall: boolean
+  input: {
+    text: boolean
+    audio: boolean
+    image: boolean
+    video: boolean
+    pdf: boolean
+  }
+  output: {
+    text: boolean
+    audio: boolean
+    image: boolean
+    video: boolean
+    pdf: boolean
+  }
+}
+
+export interface ProviderModelInfo {
+  id: string
+  providerID: string
+  name: string
+  family?: string
+  status: "alpha" | "beta" | "deprecated" | "active"
+  release_date?: string
+  api: {
+    id: string
+    url: string
+    npm: string
+  }
+  cost: {
+    input: number
+    output: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  limit: {
+    context: number
+    input?: number
+    output: number
+  }
+  options: Record<string, unknown>
+  headers: Record<string, string>
+  capabilities: ModelCapabilities
+  variants?: Record<string, Record<string, unknown>>
+}
+
+export interface ProviderInfo {
+  id: string
+  name: string
+  source: "models.dev" | "config" | "plugin"
+  env: string[]
+  connected: boolean
+  options: Record<string, unknown>
+  models: Record<string, ProviderModelInfo>
+}
 
 type RuntimeModelOverrides = NonNullable<RuntimeProviderConfig["models"]>
 type RuntimeModelOverride = RuntimeModelOverrides[string]

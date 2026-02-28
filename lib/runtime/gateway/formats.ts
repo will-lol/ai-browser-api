@@ -1,4 +1,4 @@
-import type { ProviderModelInfo } from "@/lib/runtime/types"
+import type { ProviderModelInfo } from "@/lib/runtime/provider-registry"
 
 export type ProviderFormat = "openai" | "oa-compat" | "anthropic" | "google"
 

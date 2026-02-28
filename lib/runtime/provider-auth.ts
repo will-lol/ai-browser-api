@@ -1,8 +1,10 @@
 import { browser } from "@wxt-dev/browser"
 import { getAuth, removeAuth, setAuth } from "@/lib/runtime/auth-store"
+import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store"
+import type { AuthMethod } from "@/lib/runtime/plugin-manager"
 import { getPluginManager } from "@/lib/runtime/plugins"
 import { getProvider } from "@/lib/runtime/provider-registry"
-import type { AuthMethod, AuthRecord, AuthResult, ProviderInfo } from "@/lib/runtime/types"
+import type { ProviderInfo } from "@/lib/runtime/provider-registry"
 
 async function resolveMethod(providerID: string, methodID?: string) {
   const provider = await getProvider(providerID)

@@ -18,7 +18,7 @@ import {
   type ExtensionProvider,
 } from "@/lib/extension-runtime-api"
 import { extensionQueryKeys } from "@/lib/extension-query-keys"
-import type { PermissionStatus } from "@/lib/runtime/types"
+import type { PermissionStatus } from "@/lib/runtime/permissions"
 
 export function useProvidersQuery(origin = currentOrigin()) {
   return useQuery({

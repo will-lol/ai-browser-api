@@ -1,10 +1,53 @@
 import snapshotData from "@/lib/runtime/models-snapshot.json";
 import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 import { runTx } from "@/lib/runtime/db/runtime-db-tx";
-import type { ModelsDevModel, ModelsDevProvider } from "@/lib/runtime/types";
+import { MODELS_DEV_API_URL } from "@/lib/runtime/constants";
 import { isObject } from "@/lib/runtime/util";
 
-const DEFAULT_MODELS_URL = "https://models.dev/api.json";
+export interface ModelsDevModel {
+  id: string;
+  name: string;
+  family?: string;
+  release_date: string;
+  attachment: boolean;
+  reasoning: boolean;
+  temperature: boolean;
+  tool_call: boolean;
+  interleaved?: boolean | { field: "reasoning_content" | "reasoning_details" };
+  cost?: {
+    input: number;
+    output: number;
+    cache_read?: number;
+    cache_write?: number;
+  };
+  limit: {
+    context: number;
+    input?: number;
+    output: number;
+  };
+  modalities?: {
+    input: Array<"text" | "audio" | "image" | "video" | "pdf">;
+    output: Array<"text" | "audio" | "image" | "video" | "pdf">;
+  };
+  options?: Record<string, unknown>;
+  headers?: Record<string, string>;
+  provider?: {
+    npm?: string;
+    api?: string;
+  };
+  status?: "alpha" | "beta" | "deprecated";
+  variants?: Record<string, Record<string, unknown>>;
+}
+
+export interface ModelsDevProvider {
+  id: string;
+  name: string;
+  env: string[];
+  api?: string;
+  npm?: string;
+  models: Record<string, ModelsDevModel>;
+}
+
 const MODELS_CACHE_KEY = "modelsCacheData";
 const MODELS_CACHE_UPDATED_AT_KEY = "modelsCacheUpdatedAt";
 
@@ -107,7 +150,7 @@ async function setModelsDevCache(
 }
 
 export async function refreshModelsDevData(options?: { url?: string }) {
-  const url = options?.url ?? DEFAULT_MODELS_URL;
+  const url = options?.url ?? MODELS_DEV_API_URL;
 
   const response = await fetch(url, {
     headers: {

@@ -5,7 +5,7 @@ import {
   generateState,
   parseOAuthCallbackInput,
 } from "@/lib/runtime/plugins/oauth-util"
-import type { RuntimePlugin } from "@/lib/runtime/types"
+import type { RuntimePlugin } from "@/lib/runtime/plugin-manager"
 
 const GEMINI_CLIENT_ID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
 const GEMINI_CLIENT_SECRET = "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"
@@ -256,4 +256,3 @@ export const geminiOAuthPlugin: RuntimePlugin = {
     },
   },
 }
-

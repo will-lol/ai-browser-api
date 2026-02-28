@@ -1,7 +1,9 @@
 import { browser } from "@wxt-dev/browser"
 import { setAuth } from "@/lib/runtime/auth-store"
+import type { AuthRecord } from "@/lib/runtime/auth-store"
+import type { RuntimePlugin } from "@/lib/runtime/plugin-manager"
 import { generatePKCE, generateState, parseOAuthCallbackInput, sleep } from "@/lib/runtime/plugins/oauth-util"
-import type { AuthRecord, ProviderInfo, ProviderModelInfo, RuntimePlugin } from "@/lib/runtime/types"
+import type { ProviderInfo, ProviderModelInfo } from "@/lib/runtime/provider-registry"
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const ISSUER = "https://auth.openai.com"

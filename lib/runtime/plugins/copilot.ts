@@ -1,5 +1,5 @@
 import { normalizeDomain, sleep } from "@/lib/runtime/plugins/oauth-util"
-import type { RuntimePlugin } from "@/lib/runtime/types"
+import type { RuntimePlugin } from "@/lib/runtime/plugin-manager"
 import { isObject } from "@/lib/runtime/util"
 
 const CLIENT_ID = "Ov23li8tweQw6odWQebz"
@@ -251,4 +251,3 @@ export const copilotAuthPlugin: RuntimePlugin = {
     },
   },
 }
-

@@ -3,11 +3,20 @@ import { runtimeDb } from "@/lib/runtime/db/runtime-db"
 import { runtimePermissionKey } from "@/lib/runtime/db/runtime-db-types"
 import { afterCommit, runTx } from "@/lib/runtime/db/runtime-db-tx"
 import { publishRuntimeEvent } from "@/lib/runtime/events/runtime-events"
-import type { PermissionRequest, PermissionRule, PermissionStatus } from "@/lib/runtime/types"
 import { getModelCapabilities, now, randomId } from "@/lib/runtime/util"
 
-function toRuleMap(input: PermissionRule[]) {
-  return Object.fromEntries(input.map((rule) => [rule.modelId, rule] as const))
+export type PermissionStatus = "allowed" | "denied" | "pending"
+
+export interface PermissionRequest {
+  id: string
+  origin: string
+  modelId: string
+  modelName: string
+  provider: string
+  capabilities: string[]
+  requestedAt: number
+  dismissed: boolean
+  status: "pending" | "resolved"
 }
 
 export async function listPermissions(origin: string) {
@@ -18,6 +27,10 @@ export async function listPermissions(origin: string) {
     capabilities: row.capabilities,
     updatedAt: row.updatedAt,
   }))
+}
+
+function toRuleMap(input: Awaited<ReturnType<typeof listPermissions>>) {
+  return Object.fromEntries(input.map((rule) => [rule.modelId, rule] as const))
 }
 
 export async function getOriginPermissions(origin: string) {

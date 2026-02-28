@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import { Check, X as XIcon } from "lucide-react"
-import type { PermissionRequest } from "@/lib/runtime/types"
+import type { PermissionRequest } from "@/lib/runtime/permissions"
 import { getProviderLabel } from "@/lib/provider-labels"
 import {
   usePermissionDecisionMutation,

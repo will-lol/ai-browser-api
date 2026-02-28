@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
-import type { PermissionStatus } from "@/lib/runtime/types"
+import type { PermissionStatus } from "@/lib/runtime/permissions"
 import { getProviderLabel } from "@/lib/provider-labels"
 import { usePermissionUpdateMutation } from "@/lib/extension-query-hooks"
 

@@ -1,4 +1,4 @@
-import type { RuntimePlugin } from "@/lib/runtime/types"
+import type { RuntimePlugin } from "@/lib/runtime/plugin-manager"
 
 export const apiKeyAuthPlugin: RuntimePlugin = {
   id: "builtin-api-key-auth",

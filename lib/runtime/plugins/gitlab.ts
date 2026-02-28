@@ -6,7 +6,7 @@ import {
   normalizeInstanceUrl,
   parseOAuthCallbackInput,
 } from "@/lib/runtime/plugins/oauth-util"
-import type { RuntimePlugin } from "@/lib/runtime/types"
+import type { RuntimePlugin } from "@/lib/runtime/plugin-manager"
 
 const CLIENT_ID =
   "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e"

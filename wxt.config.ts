@@ -25,7 +25,7 @@ export default defineConfig({
     },
     web_accessible_resources: [
       {
-        resources: ["permission-debug-bridge.js", "llm-bridge-page-api.js"],
+        resources: ["llm-bridge-page-api.js"],
         matches: ["<all_urls>"],
       },
     ],

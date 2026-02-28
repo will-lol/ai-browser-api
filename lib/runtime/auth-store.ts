@@ -1,8 +1,37 @@
 import { runtimeDb } from "@/lib/runtime/db/runtime-db"
 import { afterCommit, runTx } from "@/lib/runtime/db/runtime-db-tx"
 import { publishRuntimeEvent } from "@/lib/runtime/events/runtime-events"
-import type { AuthRecord, AuthResult } from "@/lib/runtime/types"
 import { now } from "@/lib/runtime/util"
+
+export type AuthRecord =
+  | {
+      type: "api"
+      key: string
+      metadata?: Record<string, string>
+      createdAt: number
+      updatedAt: number
+    }
+  | {
+      type: "oauth"
+      access: string
+      refresh?: string
+      expiresAt?: number
+      accountId?: string
+      metadata?: Record<string, string>
+      createdAt: number
+      updatedAt: number
+    }
+
+export type AuthResult =
+  | { type: "api"; key: string; metadata?: Record<string, string> }
+  | {
+      type: "oauth"
+      access: string
+      refresh?: string
+      expiresAt?: number
+      accountId?: string
+      metadata?: Record<string, string>
+    }
 
 export async function getAuth(providerID: string) {
   return runtimeDb.auth.get(providerID).then((row) => row?.record)
@@ -35,8 +64,8 @@ export async function setAuth(providerID: string, value: AuthResult) {
           accountId: value.accountId,
           metadata: value.metadata,
           createdAt,
-        updatedAt,
-      }
+          updatedAt,
+        }
 
   await runTx([runtimeDb.auth, runtimeDb.providers], async () => {
     await runtimeDb.auth.put({

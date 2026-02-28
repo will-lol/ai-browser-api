@@ -1,6 +1,30 @@
 import { browser } from "@wxt-dev/browser"
 import { RUNTIME_STATE_KEY } from "@/lib/runtime/constants"
-import type { RuntimeState } from "@/lib/runtime/types"
+import type { AuthRecord } from "@/lib/runtime/auth-store"
+import type { RuntimeConfig } from "@/lib/runtime/config-store"
+import type { ModelsDevProvider } from "@/lib/runtime/models-dev"
+import type { PermissionRequest } from "@/lib/runtime/permissions"
+
+type PermissionRule = Awaited<ReturnType<typeof import("@/lib/runtime/permissions").listPermissions>>[number]
+
+type OriginPermissionState = {
+  enabled: boolean
+  rules: Record<string, PermissionRule>
+}
+
+type RuntimeModelsCache = {
+  updatedAt: number
+  data: Record<string, ModelsDevProvider>
+}
+
+export interface RuntimeState {
+  version: 2
+  modelsCache?: RuntimeModelsCache
+  config: RuntimeConfig
+  auth: Record<string, AuthRecord>
+  permissionsByOrigin: Record<string, OriginPermissionState>
+  pendingRequests: PermissionRequest[]
+}
 
 const EMPTY_STATE: RuntimeState = {
   version: 2,

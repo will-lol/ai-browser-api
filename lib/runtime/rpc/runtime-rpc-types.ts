@@ -1,99 +1,56 @@
-import type {
-  AuthAuthorization,
-  AuthMethod,
-  PermissionRequest,
-  PermissionStatus,
-} from "@/lib/runtime/types"
-
 export const RUNTIME_RPC_PORT_NAME = "llm-bridge-runtime-rpc"
 
-export type RuntimePermissionDecision = Extract<PermissionStatus, "allowed" | "denied">
+type QueryService = typeof import("@/lib/runtime/query-service")
+type MutationService = typeof import("@/lib/runtime/mutation-service")
+type RuntimeService = typeof import("@/lib/runtime/service")
 
-export interface RuntimeProviderSummary {
-  id: string
-  name: string
-  connected: boolean
-  env: string[]
-  modelCount: number
-}
+type RuntimeUpdatePermissionArgs = Parameters<MutationService["updateRuntimePermission"]>[0]
+type RuntimeSetOriginEnabledArgs = Parameters<MutationService["setRuntimeOriginEnabled"]>[0]
+type RuntimeResolvePermissionArgs = Parameters<MutationService["resolveRuntimePermissionRequest"]>[0]
+type RuntimeInvokeModelArgs = Parameters<RuntimeService["invokeRuntimeModel"]>[0]
 
-export interface RuntimeModelSummary {
-  id: string
-  modelId: string
-  name: string
-  modelName: string
-  provider: string
-  capabilities: string[]
-  connected: boolean
-}
+export type RuntimePermissionDecision = RuntimeUpdatePermissionArgs["status"]
 
-export interface RuntimeOriginState {
-  origin: string
-  enabled: boolean
-}
-
-export interface RuntimePermissionEntry {
-  modelId: string
-  modelName: string
-  provider: string
-  status: PermissionStatus
-  capabilities: string[]
-  requestedAt?: number
-}
-
-export interface RuntimeConnectProviderResult {
-  method: AuthMethod
-  connected: boolean
-  pending?: boolean
-  authorization?: AuthAuthorization
-}
-
-export interface RuntimeConnectProviderResponse {
-  providerID: string
-  result: RuntimeConnectProviderResult
-}
-
-export interface RuntimeDisconnectProviderResponse {
-  providerID: string
-  connected: boolean
-}
+export type RuntimeProviderSummary = Awaited<ReturnType<QueryService["listProviders"]>>[number]
+export type RuntimeModelSummary = Awaited<ReturnType<QueryService["listModels"]>>[number]
+export type RuntimeOriginState = Awaited<ReturnType<QueryService["getOriginState"]>>
+export type RuntimePermissionEntry = Awaited<ReturnType<QueryService["listPermissionsForOrigin"]>>[number]
+export type RuntimeConnectProviderResponse = Awaited<
+  ReturnType<MutationService["connectRuntimeProvider"]>
+>
+export type RuntimeDisconnectProviderResponse = Awaited<
+  ReturnType<MutationService["disconnectRuntimeProvider"]>
+>
 
 export type RuntimeUpdatePermissionInput =
   | {
       origin?: string
       mode: "origin"
-      enabled: boolean
+      enabled: RuntimeSetOriginEnabledArgs["enabled"]
     }
   | {
       origin?: string
       mode?: "model"
-      modelId: string
+      modelId: RuntimeUpdatePermissionArgs["modelId"]
       status: RuntimePermissionDecision
-      capabilities?: string[]
+      capabilities?: RuntimeUpdatePermissionArgs["capabilities"]
     }
 
 export type RuntimeUpdatePermissionResponse =
-  | {
-      origin: string
-      enabled: boolean
-    }
-  | {
-      origin: string
-      modelId: string
-      status: RuntimePermissionDecision
-    }
+  | Awaited<ReturnType<MutationService["setRuntimeOriginEnabled"]>>
+  | Awaited<ReturnType<MutationService["updateRuntimePermission"]>>
 
 export type RuntimeRequestPermissionInput =
   | {
       origin?: string
       action: "resolve"
-      requestId: string
-      decision: RuntimePermissionDecision
+      requestId: RuntimeResolvePermissionArgs["requestId"]
+      decision: RuntimeResolvePermissionArgs["decision"]
     }
   | {
       origin?: string
       action: "dismiss"
-      requestId: string
+      requestId: Parameters<MutationService["dismissRuntimePermissionRequest"]>[0]
     }
   | {
       origin?: string
@@ -105,53 +62,48 @@ export type RuntimeRequestPermissionInput =
     }
 
 export type RuntimeRequestPermissionResponse =
-  | {
-      request: PermissionRequest
-    }
-  | {
-      requestId: string
-    }
-  | {
-      requestId: string
-      decision: RuntimePermissionDecision
-    }
+  | Awaited<ReturnType<MutationService["createRuntimePermissionRequest"]>>
+  | Awaited<ReturnType<MutationService["dismissRuntimePermissionRequest"]>>
+  | Awaited<ReturnType<MutationService["resolveRuntimePermissionRequest"]>>
 
 export interface RuntimeInvokeInput {
-  origin?: string
-  requestId: string
-  sessionID?: string
-  model: string
-  body?: Record<string, unknown>
+  origin?: RuntimeInvokeModelArgs["origin"]
+  requestId: RuntimeInvokeModelArgs["requestID"]
+  sessionID?: RuntimeInvokeModelArgs["sessionID"]
+  model: RuntimeInvokeModelArgs["model"]
+  body?: RuntimeInvokeModelArgs["body"]
 }
 
-export interface RuntimeInvokeResult {
-  stream: false
-  response: Record<string, unknown>
-  status: number
-}
+export type RuntimeInvokeResult = Extract<
+  Awaited<ReturnType<RuntimeService["invokeRuntimeModel"]>>,
+  { stream: false }
+>
 
 export interface RuntimeRPCService {
-  listProviders(input: { origin?: string }): Promise<RuntimeProviderSummary[]>
+  listProviders(input: { origin?: string }): Promise<Awaited<ReturnType<QueryService["listProviders"]>>>
   listModels(input: {
     origin?: string
     connectedOnly?: boolean
     providerID?: string
-  }): Promise<RuntimeModelSummary[]>
-  getOriginState(input: { origin?: string }): Promise<RuntimeOriginState>
-  listPermissions(input: { origin?: string }): Promise<RuntimePermissionEntry[]>
-  listPending(input: { origin?: string }): Promise<PermissionRequest[]>
-  getAuthMethods(input: { origin?: string; providerID: string }): Promise<AuthMethod[]>
+  }): Promise<Awaited<ReturnType<QueryService["listModels"]>>>
+  getOriginState(input: { origin?: string }): Promise<Awaited<ReturnType<QueryService["getOriginState"]>>>
+  listPermissions(input: { origin?: string }): Promise<Awaited<ReturnType<QueryService["listPermissionsForOrigin"]>>>
+  listPending(input: { origin?: string }): Promise<Awaited<ReturnType<QueryService["listPendingRequestsForOrigin"]>>>
+  getAuthMethods(input: {
+    origin?: string
+    providerID: string
+  }): Promise<Awaited<ReturnType<QueryService["listProviderAuthMethods"]>>>
   connectProvider(input: {
     origin?: string
     providerID: string
     methodID?: string
     values?: Record<string, string>
     code?: string
-  }): Promise<RuntimeConnectProviderResponse>
+  }): Promise<Awaited<ReturnType<MutationService["connectRuntimeProvider"]>>>
   disconnectProvider(input: {
     origin?: string
     providerID: string
-  }): Promise<RuntimeDisconnectProviderResponse>
+  }): Promise<Awaited<ReturnType<MutationService["disconnectRuntimeProvider"]>>>
   updatePermission(input: RuntimeUpdatePermissionInput): Promise<RuntimeUpdatePermissionResponse>
   requestPermission(input: RuntimeRequestPermissionInput): Promise<RuntimeRequestPermissionResponse>
   invoke(input: RuntimeInvokeInput): Promise<RuntimeInvokeResult>

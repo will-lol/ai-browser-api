@@ -5,7 +5,7 @@ import {
   waitForPermissionDecision,
 } from "@/lib/runtime/permissions"
 import { invokeGateway } from "@/lib/runtime/gateway/invoke"
-import type { GatewayInvokeInput } from "@/lib/runtime/types"
+import type { GatewayInvokeInput } from "@/lib/runtime/gateway/invoke"
 import { parseProviderModel } from "@/lib/runtime/util"
 
 async function ensureRequestAllowed(origin: string, model: string) {

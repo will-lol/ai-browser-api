@@ -1,7 +1,7 @@
 import { browser } from "@wxt-dev/browser"
 import { ChromePortIO, RPCChannel } from "kkrpc/chrome-extension"
 import { defineBackground } from "wxt/utils/define-background"
-import { MODELS_REFRESH_INTERVAL_MS } from "@/lib/runtime/constants"
+import { MODELS_REFRESH_INTERVAL_MS, RUNTIME_STATE_KEY } from "@/lib/runtime/constants"
 import { getModelsDevUpdatedAt, refreshModelsDevData } from "@/lib/runtime/models-dev"
 import { invokeRuntimeModel } from "@/lib/runtime/service"
 import {
@@ -21,8 +21,7 @@ import {
   listProviderAuthMethods,
   listProviders,
 } from "@/lib/runtime/query-service"
-import { refreshCatalog } from "@/lib/runtime/catalog-service"
-import { ensureProviderCatalog } from "@/lib/runtime/provider-registry"
+import { ensureProviderCatalog, refreshProviderCatalog } from "@/lib/runtime/provider-registry"
 import { runtimeDb } from "@/lib/runtime/db/runtime-db"
 import { subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events"
 import {
@@ -66,7 +65,7 @@ async function refreshModelsSnapshot() {
     }
 
     await refreshModelsDevData()
-    await refreshCatalog()
+    await refreshProviderCatalog()
   } catch (error) {
     console.warn("models.dev refresh failed", error)
   }
@@ -399,14 +398,14 @@ export default defineBackground(() => {
 
   browser.runtime.onInstalled.addListener(() => {
     void refreshModelsSnapshotOnce()
-    void refreshCatalog()
+    void refreshProviderCatalog()
     void scheduleModelsRefreshAlarm()
     void updateActionState()
   })
 
   browser.runtime.onStartup.addListener(() => {
     void refreshModelsSnapshotOnce()
-    void refreshCatalog()
+    void refreshProviderCatalog()
     void scheduleModelsRefreshAlarm()
     void updateActionState()
   })
@@ -424,7 +423,7 @@ export default defineBackground(() => {
 
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return
-    if (!changes["llm-bridge-runtime-state-v2"]) return
+    if (!changes[RUNTIME_STATE_KEY]) return
     void updateActionState()
   })
 })

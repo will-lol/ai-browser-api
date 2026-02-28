@@ -9,7 +9,7 @@ import {
   setModelPermission,
   setOriginEnabled,
 } from "@/lib/runtime/permissions"
-import { refreshCatalogForProvider } from "@/lib/runtime/catalog-service"
+import { refreshProviderCatalogForProvider } from "@/lib/runtime/provider-registry"
 
 export async function connectRuntimeProvider(input: {
   providerID: string
@@ -20,7 +20,7 @@ export async function connectRuntimeProvider(input: {
   const result = await connectProvider(input)
 
   if (result.connected) {
-    await refreshCatalogForProvider(input.providerID)
+    await refreshProviderCatalogForProvider(input.providerID)
   }
 
   return {
@@ -31,7 +31,7 @@ export async function connectRuntimeProvider(input: {
 
 export async function disconnectRuntimeProvider(providerID: string) {
   await disconnectProvider(providerID)
-  await refreshCatalogForProvider(providerID)
+  await refreshProviderCatalogForProvider(providerID)
 
   return {
     providerID,

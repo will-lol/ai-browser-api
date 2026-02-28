@@ -1,18 +1,128 @@
 import { browser } from "@wxt-dev/browser"
-import type {
-  AuthAuthorization,
-  AuthContext,
-  AuthMethod,
-  AuthResult,
-  ChatTransformContext,
-  HookResultMerge,
-  ProviderInfo,
-  ProviderModelInfo,
-  ProviderPatchContext,
-  RuntimeConfig,
-  RuntimePlugin,
-} from "@/lib/runtime/types"
+import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store"
+import type { RuntimeConfig } from "@/lib/runtime/config-store"
+import type { ProviderInfo, ProviderModelInfo } from "@/lib/runtime/provider-registry"
 import { isObject } from "@/lib/runtime/util"
+
+type PromptField = {
+  key: string
+  label: string
+  placeholder?: string
+  required?: boolean
+  secret?: boolean
+  description?: string
+}
+
+export type AuthMethod =
+  | {
+      id: string
+      type: "api"
+      label: string
+      prompt: PromptField[]
+    }
+  | {
+      id: string
+      type: "oauth"
+      label: string
+      mode: "browser" | "device"
+      prompt?: PromptField[]
+    }
+
+export type AuthAuthorization = {
+  methodID: string
+  mode: "auto" | "code"
+  url: string
+  instructions?: string
+}
+
+export interface AuthContext {
+  providerID: string
+  provider: ProviderInfo
+  auth?: AuthRecord
+}
+
+export interface ProviderPatchContext {
+  providerID: string
+  provider?: ProviderInfo
+  auth?: AuthRecord
+}
+
+export interface ChatTransformContext {
+  providerID: string
+  modelID: string
+  origin: string
+  sessionID: string
+  requestID: string
+  auth?: AuthRecord
+}
+
+export interface HookResultMerge {
+  strategy: "merge"
+  value: Record<string, unknown>
+}
+
+export interface PluginHooks {
+  auth?: {
+    methods?: (ctx: AuthContext) => Promise<AuthMethod[]>
+    authorize?: (
+      ctx: AuthContext,
+      method: AuthMethod,
+      input: Record<string, string>,
+    ) => Promise<AuthAuthorization | AuthResult | void>
+    callback?: (
+      ctx: AuthContext,
+      method: AuthMethod,
+      input: { code?: string; callbackUrl?: string },
+    ) => Promise<AuthResult | void>
+    loader?: (ctx: AuthContext) => Promise<Record<string, unknown>>
+  }
+  provider?: {
+    patchProvider?: (ctx: ProviderPatchContext, provider: ProviderInfo) => Promise<ProviderInfo | void>
+    patchModel?: (ctx: ProviderPatchContext, model: ProviderModelInfo) => Promise<ProviderModelInfo | void>
+    requestOptions?: (
+      ctx: ChatTransformContext,
+      options: Record<string, unknown>,
+    ) => Promise<Record<string, unknown> | HookResultMerge | void>
+  }
+  chat?: {
+    params?: (
+      ctx: ChatTransformContext,
+      params: Record<string, unknown>,
+    ) => Promise<Record<string, unknown> | HookResultMerge | void>
+    headers?: (
+      ctx: ChatTransformContext,
+      headers: Record<string, string>,
+    ) => Promise<Record<string, string> | HookResultMerge | void>
+    transformRequest?: (
+      ctx: ChatTransformContext,
+      body: Record<string, unknown>,
+    ) => Promise<Record<string, unknown> | void>
+    transformResponse?: (
+      ctx: ChatTransformContext,
+      body: Record<string, unknown>,
+    ) => Promise<Record<string, unknown> | void>
+  }
+  tool?: {
+    list?: (
+      ctx: ChatTransformContext,
+    ) => Promise<Array<{ id: string; description: string; parameters: Record<string, unknown> }>>
+  }
+  event?: {
+    onEvent?: (name: string, payload: Record<string, unknown>) => Promise<void>
+  }
+  config?: {
+    extend?: (config: RuntimeConfig) => Promise<RuntimeConfig | void>
+    validate?: (config: RuntimeConfig) => Promise<void>
+  }
+}
+
+export interface RuntimePlugin {
+  id: string
+  name: string
+  supportedProviders?: string[]
+  requiredBrowserApis?: string[]
+  hooks: PluginHooks
+}
 
 function supportsProvider(plugin: RuntimePlugin, providerID: string) {
   if (!plugin.supportedProviders || plugin.supportedProviders.length === 0) return true
