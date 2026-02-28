@@ -1,16 +1,20 @@
-"use client"
-
-import { useExtension } from "@/lib/extension-store"
 import { Badge } from "@/components/ui/badge"
 import { Check, X as XIcon } from "lucide-react"
-import type { PermissionRequest } from "@/lib/mock-data"
+import type { PermissionRequest } from "@/lib/runtime/types"
 import { getProviderLabel } from "@/lib/provider-labels"
+import {
+  usePermissionDecisionMutation,
+  usePermissionDismissMutation,
+} from "@/lib/extension-query-hooks"
 
 interface PendingRequestCardProps {
   request: PermissionRequest
+  origin: string
   variant: "floating" | "inline"
   onClose?: () => void
   actionsDisabled?: boolean
+  onDismissRequest?: (requestId: string) => void
+  isDismissPending?: boolean
 }
 
 function timeAgo(timestamp: number): string {
@@ -24,17 +28,24 @@ function timeAgo(timestamp: number): string {
 
 export function PendingRequestCard({
   request,
+  origin,
   variant,
   onClose,
   actionsDisabled = false,
+  onDismissRequest,
+  isDismissPending = false,
 }: PendingRequestCardProps) {
-  const { respondToRequest, dismissRequest } = useExtension()
+  const decisionMutation = usePermissionDecisionMutation(origin)
+  const dismissMutation = usePermissionDismissMutation(origin)
+
+  const dismissPending = isDismissPending || dismissMutation.isPending
+  const controlsDisabled =
+    actionsDisabled || dismissPending || decisionMutation.isPending
 
   if (variant === "floating") {
     return (
       <div className="w-[304px] max-w-[calc(100vw-32px)] overflow-hidden rounded-none border border-border bg-card font-sans shadow-[0_10px_24px_rgba(0,0,0,0.24)] [&_*]:rounded-none">
         <div className="flex flex-col gap-2 p-2.5">
-          {/* Origin + dismiss */}
           <div className="flex flex-col gap-0.5">
             <div className="flex items-start justify-between">
               <span className="text-[9px] text-muted-foreground">
@@ -42,20 +53,35 @@ export function PendingRequestCard({
               </span>
               <button
                 onClick={() => {
-                  dismissRequest(request.id)
-                  onClose?.()
+                  if (onDismissRequest) {
+                    onDismissRequest(request.id)
+                    return
+                  }
+
+                  dismissMutation.mutate(
+                    { requestId: request.id },
+                    {
+                      onSuccess: () => {
+                        onClose?.()
+                      },
+                    },
+                  )
                 }}
-                className="-mr-0.5 -mt-0.5 flex items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                disabled={controlsDisabled}
+                className="-mr-0.5 -mt-0.5 flex items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label="Dismiss"
               >
                 <XIcon className="size-3" />
               </button>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="text-[13px] font-semibold leading-none text-foreground font-mono">
+              <span className="font-mono text-[13px] font-semibold leading-none text-foreground">
                 {request.modelName}
               </span>
-              <Badge variant="outline" className="h-4 px-1.5 text-[9px] font-normal text-muted-foreground border-border">
+              <Badge
+                variant="outline"
+                className="h-4 border-border px-1.5 text-[9px] font-normal text-muted-foreground"
+              >
                 {getProviderLabel(request.provider)}
               </Badge>
             </div>
@@ -69,12 +95,11 @@ export function PendingRequestCard({
     )
   }
 
-  // Inline variant for the extension popup
   return (
     <div className="flex items-center gap-2.5 border-b border-border bg-warning/5 px-3 py-2 font-sans">
-      <div className="size-1.5 shrink-0 rounded-full bg-warning animate-pulse" />
+      <div className="size-1.5 shrink-0 animate-pulse rounded-full bg-warning" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-xs font-medium text-foreground font-mono">
+        <span className="truncate font-mono text-xs font-medium text-foreground">
           {request.modelName}
         </span>
         <span className="text-[10px] text-muted-foreground">
@@ -83,16 +108,26 @@ export function PendingRequestCard({
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <button
-          onClick={() => respondToRequest(request.id, "allowed")}
-          disabled={actionsDisabled}
+          onClick={() => {
+            decisionMutation.mutate({
+              requestId: request.id,
+              decision: "allowed",
+            })
+          }}
+          disabled={controlsDisabled}
           className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-success/10 hover:text-success disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
           aria-label={`Allow ${request.modelName}`}
         >
           <Check className="size-3.5" />
         </button>
         <button
-          onClick={() => respondToRequest(request.id, "denied")}
-          disabled={actionsDisabled}
+          onClick={() => {
+            decisionMutation.mutate({
+              requestId: request.id,
+              decision: "denied",
+            })
+          }}
+          disabled={controlsDisabled}
           className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
           aria-label={`Deny ${request.modelName}`}
         >

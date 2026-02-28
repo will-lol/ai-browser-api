@@ -1,111 +1,182 @@
-"use client"
-
-import { useMemo, useState } from "react"
-import { useExtension } from "@/lib/extension-store"
-import { ModelRow } from "@/components/extension/model-row"
-import { PendingRequestCard } from "@/components/extension/pending-request-card"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Switch } from "@/components/ui/switch"
-import { Blocks } from "lucide-react"
-import { SearchInput } from "@/components/extension/search-input"
-import { useFrozenOrder } from "@/hooks/use-frozen-order"
+import { useMemo, useState } from "react";
+import { ModelRow } from "@/components/extension/model-row";
+import { PendingRequestCard } from "@/components/extension/pending-request-card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
+import { Blocks } from "lucide-react";
+import { SearchInput } from "@/components/extension/search-input";
+import { useFrozenOrder } from "@/hooks/use-frozen-order";
+import { useNavigate } from "@tanstack/react-router";
+import {
+  useModelsQuery,
+  useOriginEnabledMutation,
+  useOriginStateQuery,
+  usePendingRequestsQuery,
+  usePermissionsQuery,
+} from "@/lib/extension-query-hooks";
 
 interface SitePermissionsViewProps {
-  onNavigateToProviders: () => void
+  origin: string | null;
+  originPending?: boolean;
 }
 
-export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsViewProps) {
-  const {
-    getAllAvailableModels,
-    getModelPermission,
-    pendingRequests,
-    originEnabled,
-    setOriginEnabled,
-  } = useExtension()
-  const [search, setSearch] = useState("")
+export function SitePermissionsView({
+  origin,
+  originPending = false,
+}: SitePermissionsViewProps) {
+  const targetOrigin = origin ?? "";
+  const hasActiveOrigin = origin != null;
+  const originStateQuery = useOriginStateQuery(targetOrigin);
+  const modelsQuery = useModelsQuery({
+    origin: targetOrigin,
+    connectedOnly: true,
+  });
+  const permissionsQuery = usePermissionsQuery(targetOrigin);
+  const pendingRequestsQuery = usePendingRequestsQuery(targetOrigin);
+  const setOriginEnabledMutation = useOriginEnabledMutation(targetOrigin);
 
-  const allModels = getAllAvailableModels()
+  const navigate = useNavigate();
+  const [search, setSearch] = useState("");
+
+  const originEnabled =
+    hasActiveOrigin && (originStateQuery.data?.enabled ?? true);
+  const pendingRequests = pendingRequestsQuery.data ?? [];
+  const allModels = modelsQuery.data ?? [];
+
+  const permissionByModelId = useMemo(() => {
+    const permissions = permissionsQuery.data ?? [];
+    return new Map(
+      permissions.map(
+        (permission) => [permission.modelId, permission.status] as const,
+      ),
+    );
+  }, [permissionsQuery.data]);
+
   const pendingModelIds = useMemo(
-    () => new Set(pendingRequests.map((r) => r.modelId)),
-    [pendingRequests]
-  )
+    () => new Set(pendingRequests.map((request) => request.modelId)),
+    [pendingRequests],
+  );
 
-  // Compute a frozen sort order ONCE on mount. The order stays stable while
-  // the panel is open -- it naturally resets on reopen because the popup is
-  // conditionally rendered and this component remounts.
   const frozenOrder = useFrozenOrder(
     allModels,
     (model) => model.modelId,
     (a, b) => {
-      const aPending = pendingModelIds.has(a.modelId)
-      const bPending = pendingModelIds.has(b.modelId)
-      if (aPending && !bPending) return -1
-      if (!aPending && bPending) return 1
+      const aPending = pendingModelIds.has(a.modelId);
+      const bPending = pendingModelIds.has(b.modelId);
+      if (aPending && !bPending) return -1;
+      if (!aPending && bPending) return 1;
 
-      const aPermission = getModelPermission(a.modelId)
-      const bPermission = getModelPermission(b.modelId)
-      if (aPermission === "allowed" && bPermission !== "allowed") return -1
-      if (aPermission !== "allowed" && bPermission === "allowed") return 1
-      return a.modelName.localeCompare(b.modelName)
-    }
-  )
+      const aPermission = permissionByModelId.get(a.modelId) ?? "denied";
+      const bPermission = permissionByModelId.get(b.modelId) ?? "denied";
+      if (aPermission === "allowed" && bPermission !== "allowed") return -1;
+      if (aPermission !== "allowed" && bPermission === "allowed") return 1;
+      return a.modelName.localeCompare(b.modelName);
+    },
+  );
 
-  // Build the display list: use frozen order, apply live search filter
   const sortedModels = useMemo(() => {
-    const order = frozenOrder
-
     const modelsById = new Map(
-      allModels.map((m) => [
-        m.modelId,
+      allModels.map((model) => [
+        model.modelId,
         {
-          ...m,
-          permission: getModelPermission(m.modelId),
-          isPending: pendingModelIds.has(m.modelId),
+          ...model,
+          permission: permissionByModelId.get(model.modelId) ?? "denied",
+          isPending: pendingModelIds.has(model.modelId),
         },
-      ])
-    )
+      ]),
+    );
 
-    // Preserve frozen order, just filter
-    const ordered = order
+    const ordered = frozenOrder
       .map((id) => modelsById.get(id))
-      .filter((m): m is NonNullable<typeof m> => m != null)
+      .filter((model): model is NonNullable<typeof model> => model != null);
 
-    // Pending requests are shown in their own section and should not be duplicated
-    // in the All models list while the panel is open.
-    const withoutPending = ordered.filter((m) => !m.isPending)
+    const withoutPending = ordered.filter((model) => !model.isPending);
 
-    if (!search) return withoutPending
+    if (!search) return withoutPending;
 
-    const q = search.toLowerCase()
+    const query = search.toLowerCase();
     return withoutPending.filter(
-      (m) =>
-        m.modelName.toLowerCase().includes(q) ||
-        m.provider.toLowerCase().includes(q)
-    )
-  }, [allModels, getModelPermission, pendingModelIds, frozenOrder, search])
+      (model) =>
+        model.modelName.toLowerCase().includes(query) ||
+        model.provider.toLowerCase().includes(query),
+    );
+  }, [allModels, frozenOrder, pendingModelIds, permissionByModelId, search]);
 
-  const hasConnectedProviders = allModels.length > 0
+  const hasConnectedProviders = allModels.length > 0;
+  const controlsDisabled =
+    originPending || !hasActiveOrigin || setOriginEnabledMutation.isPending;
+
+  if (originPending) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
+        <p className="text-xs text-muted-foreground">Loading active tab...</p>
+      </div>
+    );
+  }
+
+  if (!hasActiveOrigin) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
+        <p className="text-xs text-muted-foreground">
+          Unable to detect the active tab origin.
+        </p>
+      </div>
+    );
+  }
+
+  if (
+    originStateQuery.isError ||
+    modelsQuery.isError ||
+    permissionsQuery.isError ||
+    pendingRequestsQuery.isError
+  ) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
+        <p className="text-xs text-destructive">
+          Failed to load permissions data.
+        </p>
+      </div>
+    );
+  }
+
+  if (
+    originStateQuery.isPending ||
+    modelsQuery.isPending ||
+    permissionsQuery.isPending ||
+    pendingRequestsQuery.isPending
+  ) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
+        <p className="text-xs text-muted-foreground">Loading models...</p>
+      </div>
+    );
+  }
 
   if (!hasConnectedProviders) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-10">
-        <div className="flex size-12 items-center justify-center rounded-xl bg-secondary text-muted-foreground">
+        <div className="flex size-12 items-center justify-center bg-secondary text-muted-foreground">
           <Blocks className="size-6" />
         </div>
         <div className="flex flex-col items-center gap-1.5 text-center">
-          <p className="text-sm font-medium text-foreground">No providers connected</p>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Connect a model provider to start granting websites access to AI models.
+          <p className="text-sm font-medium text-foreground">
+            No providers connected
+          </p>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Connect a model provider to start granting websites access to AI
+            models.
           </p>
         </div>
         <button
-          onClick={onNavigateToProviders}
-          className="rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          onClick={() => {
+            void navigate({ to: "/providers" });
+          }}
+          className="bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
           Connect a provider
         </button>
       </div>
-    )
+    );
   }
 
   return (
@@ -120,7 +191,10 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
         <Switch
           id="origin-enabled-switch"
           checked={originEnabled}
-          onCheckedChange={setOriginEnabled}
+          disabled={controlsDisabled}
+          onCheckedChange={(checked) => {
+            setOriginEnabledMutation.mutate({ enabled: checked });
+          }}
           aria-label="Enable extension on this site"
         />
       </label>
@@ -132,10 +206,8 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
         onChange={setSearch}
       />
 
-      {/* Models list */}
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col">
-          {/* Pending requests */}
           {pendingRequests.length > 0 && !search && (
             <div className="flex flex-col">
               <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-1 backdrop-blur-sm">
@@ -143,18 +215,18 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
                   Pending requests
                 </span>
               </div>
-              {pendingRequests.map((req) => (
+              {pendingRequests.map((request) => (
                 <PendingRequestCard
-                  key={req.id}
-                  request={req}
+                  key={request.id}
+                  request={request}
+                  origin={targetOrigin}
                   variant="inline"
-                  actionsDisabled={!originEnabled}
+                  actionsDisabled={!originEnabled || controlsDisabled}
                 />
               ))}
             </div>
           )}
 
-          {/* Models */}
           {sortedModels.length > 0 ? (
             <div className="flex flex-col">
               {!search && pendingRequests.length > 0 && (
@@ -164,15 +236,16 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
                   </span>
                 </div>
               )}
-              {sortedModels.map((m) => (
+              {sortedModels.map((model) => (
                 <ModelRow
-                  key={m.modelId}
-                  modelId={m.modelId}
-                  modelName={m.modelName}
-                  provider={m.provider}
-                  capabilities={m.capabilities}
-                  permission={m.permission}
-                  disabled={!originEnabled}
+                  key={model.modelId}
+                  modelId={model.modelId}
+                  modelName={model.modelName}
+                  provider={model.provider}
+                  capabilities={model.capabilities}
+                  permission={model.permission}
+                  origin={targetOrigin}
+                  disabled={!originEnabled || controlsDisabled}
                 />
               ))}
             </div>
@@ -186,5 +259,5 @@ export function SitePermissionsView({ onNavigateToProviders }: SitePermissionsVi
         </div>
       </ScrollArea>
     </div>
-  )
+  );
 }

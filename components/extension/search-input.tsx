@@ -1,13 +1,11 @@
-"use client"
-
-import { useEffect, useRef } from "react"
-import { Search } from "lucide-react"
+import { useEffect, useRef } from "react";
+import { Search } from "lucide-react";
 
 interface SearchInputProps {
-  ariaLabel: string
-  onChange: (value: string) => void
-  placeholder: string
-  value: string
+  ariaLabel: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  value: string;
 }
 
 export function SearchInput({
@@ -16,14 +14,14 @@ export function SearchInput({
   placeholder,
   value,
 }: SearchInputProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      inputRef.current?.focus()
-    }, 100)
-    return () => window.clearTimeout(timer)
-  }, [])
+      inputRef.current?.focus();
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   return (
     <div className="w-full border-b border-border">
@@ -40,5 +38,5 @@ export function SearchInput({
         />
       </div>
     </div>
-  )
+  );
 }

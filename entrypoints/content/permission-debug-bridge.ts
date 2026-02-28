@@ -1,4 +1,3 @@
-import { useExtensionStore } from "@/lib/extension-store"
 import { browser } from "@wxt-dev/browser"
 
 const DEBUG_SOURCE = "llm-bridge-debug"
@@ -35,35 +34,29 @@ function normalizeCount(value: unknown): number {
   return next
 }
 
-function addDebugRequests(payload: DebugPayload) {
-  const state = useExtensionStore.getState()
-  const availableModels = state.getAllAvailableModels()
+async function addDebugRequests(payload: DebugPayload) {
   const count = normalizeCount(payload.count)
-  const origin = payload.origin ?? window.location.hostname
+  const origin = payload.origin ?? window.location.origin
+  const baseModelId = payload.modelId ?? "openai/gpt-4o-mini"
+  const fallbackProvider = payload.provider ?? baseModelId.split("/")[0]
+  const fallbackModel = payload.modelName ?? baseModelId.split("/")[1]
 
   for (let index = 0; index < count; index += 1) {
-    const modelFromList = availableModels[index % Math.max(availableModels.length, 1)]
-    const modelId =
-      payload.modelId ??
-      (payload.provider && payload.modelName
-        ? `${payload.provider}/${payload.modelName}`
-        : modelFromList?.modelId)
-
-    const provider = payload.provider ?? modelId?.split("/")[0] ?? modelFromList?.provider
-    const modelName = payload.modelName ?? modelId?.split("/")[1] ?? modelFromList?.modelName
-
-    state.addPendingRequest({
-      origin,
-      provider,
-      modelName,
-      modelId,
-      capabilities: payload.capabilities ?? modelFromList?.capabilities,
+    await browser.runtime.sendMessage({
+      type: "runtime.request-permission",
+      payload: {
+        origin,
+        provider: fallbackProvider,
+        modelName: fallbackModel,
+        modelId: baseModelId,
+        capabilities: payload.capabilities,
+      },
     })
   }
 }
 
 function isDebugMessage(
-  data: unknown
+  data: unknown,
 ): data is {
   source?: string
   type?: string
@@ -77,7 +70,7 @@ function onDebugMessage(event: MessageEvent<unknown>) {
   if (!isDebugMessage(event.data)) return
   if (event.data.source !== DEBUG_SOURCE || event.data.type !== DEBUG_MESSAGE_TYPE) return
 
-  addDebugRequests(event.data.payload ?? {})
+  void addDebugRequests(event.data.payload ?? {})
 }
 
 export function setupPermissionDebugBridge() {

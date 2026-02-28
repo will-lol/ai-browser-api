@@ -1,9 +1,14 @@
-import { resolve } from "node:path"
-import { defineConfig } from "wxt"
+import { resolve } from "node:path";
+import { defineConfig } from "wxt";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-  modules: ["@wxt-dev/module-react"],
   imports: {
+    presets: ["react"],
+    dirsScanOptions: {
+      filePatterns: ["*.{ts,js,mjs,cjs,mts,cts,jsx,tsx}"],
+    },
     eslintrc: {
       enabled: 9,
     },
@@ -11,28 +16,34 @@ export default defineConfig({
   manifest: {
     name: "LLM Bridge",
     description:
-      "Prototype browser extension UI for model permission management.",
+      "Browser AI gateway with provider plugins, permissions, and website bridge APIs.",
     version: "0.1.0",
-    permissions: ["storage", "activeTab", "scripting"],
+    permissions: ["storage", "activeTab", "scripting", "identity", "alarms"],
+    host_permissions: ["<all_urls>"],
     action: {
       default_title: "LLM Bridge",
     },
-    options_ui: {
-      page: "options.html",
-      open_in_tab: true,
-    },
     web_accessible_resources: [
       {
-        resources: ["permission-debug-bridge.js"],
+        resources: ["permission-debug-bridge.js", "llm-bridge-page-api.js"],
         matches: ["<all_urls>"],
       },
     ],
   },
   vite: () => ({
+    plugins: [
+      tanstackRouter({
+        target: "react",
+        autoCodeSplitting: true,
+        routesDirectory: "./entrypoints/popup/routes",
+        generatedRouteTree: "./entrypoints/popup/routeTree.gen.ts",
+      }),
+      react(),
+    ],
     resolve: {
       alias: {
         "@": resolve(__dirname, "."),
       },
     },
   }),
-})
+});

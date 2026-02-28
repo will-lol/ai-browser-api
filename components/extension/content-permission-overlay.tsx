@@ -1,12 +1,10 @@
-"use client"
-
-import { ExtensionProvider } from "@/lib/extension-store"
+import { ExtensionQueryProvider } from "@/components/extension/extension-query-provider"
 import { FloatingPermissionPrompt } from "@/components/extension/floating-permission-prompt"
 
 export function ContentPermissionOverlay() {
   return (
-    <ExtensionProvider>
+    <ExtensionQueryProvider persist={false}>
       <FloatingPermissionPrompt className="pointer-events-auto" />
-    </ExtensionProvider>
+    </ExtensionQueryProvider>
   )
 }
