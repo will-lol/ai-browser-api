@@ -1,5 +1,4 @@
 import snapshotData from "@/lib/runtime/models-snapshot.json";
-import { MODELS_REFRESH_TIMEOUT_MS } from "@/lib/runtime/constants";
 import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 import { runTx } from "@/lib/runtime/db/runtime-db-tx";
 import type { ModelsDevModel, ModelsDevProvider } from "@/lib/runtime/types";

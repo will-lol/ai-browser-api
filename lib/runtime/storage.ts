@@ -82,14 +82,3 @@ export async function saveRuntimeState(state: RuntimeState) {
   })
   await writeQueue
 }
-
-export async function patchRuntimeState(mutator: (state: RuntimeState) => RuntimeState | Promise<RuntimeState>) {
-  const current = await loadRuntimeState()
-  const next = await mutator(current)
-  await saveRuntimeState(next)
-  return next
-}
-
-export function emptyRuntimeState() {
-  return structuredClone(EMPTY_STATE)
-}

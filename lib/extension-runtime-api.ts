@@ -1,4 +1,7 @@
-import { browser } from "wxt/browser"
+import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
+import type {
+  RuntimeConnectProviderResponse,
+} from "@/lib/runtime/rpc/runtime-rpc-types"
 import type {
   AuthAuthorization,
   AuthMethod,
@@ -55,38 +58,9 @@ export function currentOrigin() {
   return window.location.origin
 }
 
-async function sendRuntimeMessage(
-  type:
-    | "runtime.providers.list"
-    | "runtime.models.list"
-    | "runtime.origin.get"
-    | "runtime.permissions.list"
-    | "runtime.pending.list"
-    | "runtime.get-auth-methods"
-    | "runtime.connect-provider"
-    | "runtime.disconnect-provider"
-    | "runtime.update-permission"
-    | "runtime.request-permission",
-  payload: Record<string, unknown>,
-) {
-  const response = await browser.runtime.sendMessage({
-    type,
-    payload,
-  })
-
-  if (!response?.ok) {
-    throw new Error(response?.error ?? `Runtime message failed: ${type}`)
-  }
-
-  return response.data
-}
-
 export async function fetchProviders(origin = currentOrigin()) {
-  const data = (await sendRuntimeMessage("runtime.providers.list", {
-    origin,
-  })) as ExtensionProvider[]
-
-  return data
+  const runtime = getRuntimeRPC()
+  return (await runtime.listProviders({ origin })) as ExtensionProvider[]
 }
 
 export async function fetchModels(input?: {
@@ -95,46 +69,35 @@ export async function fetchModels(input?: {
   origin?: string
 }) {
   const origin = input?.origin ?? currentOrigin()
-  const data = (await sendRuntimeMessage("runtime.models.list", {
+  const runtime = getRuntimeRPC()
+  return (await runtime.listModels({
     origin,
     connectedOnly: input?.connectedOnly === true,
     providerID: input?.providerID,
   })) as AvailableModel[]
-
-  return data
 }
 
 export async function fetchOriginState(origin = currentOrigin()) {
-  const data = (await sendRuntimeMessage("runtime.origin.get", {
-    origin,
-  })) as OriginState
-
-  return data
+  const runtime = getRuntimeRPC()
+  return (await runtime.getOriginState({ origin })) as OriginState
 }
 
 export async function fetchPermissions(origin = currentOrigin()) {
-  const data = (await sendRuntimeMessage("runtime.permissions.list", {
-    origin,
-  })) as ModelPermission[]
-
-  return data
+  const runtime = getRuntimeRPC()
+  return (await runtime.listPermissions({ origin })) as ModelPermission[]
 }
 
 export async function fetchPendingRequests(origin = currentOrigin()) {
-  const data = (await sendRuntimeMessage("runtime.pending.list", {
-    origin,
-  })) as PermissionRequest[]
-
-  return data
+  const runtime = getRuntimeRPC()
+  return (await runtime.listPending({ origin })) as PermissionRequest[]
 }
 
 export async function fetchProviderAuthMethods(providerID: string, origin = currentOrigin()) {
-  const data = (await sendRuntimeMessage("runtime.get-auth-methods", {
+  const runtime = getRuntimeRPC()
+  return (await runtime.getAuthMethods({
     origin,
     providerID,
   })) as AuthMethod[]
-
-  return data
 }
 
 async function promptAuthValues(method: AuthMethod) {
@@ -159,15 +122,14 @@ async function connectProviderWithMethod(input: {
   code?: string
   origin: string
 }) {
-  const data = (await sendRuntimeMessage("runtime.connect-provider", {
+  const runtime = getRuntimeRPC()
+  return (await runtime.connectProvider({
     providerID: input.providerId,
     methodID: input.method.id,
     values: input.values,
     code: input.code,
     origin: input.origin,
-  })) as ConnectProviderResponse
-
-  return data
+  })) as RuntimeConnectProviderResponse
 }
 
 export async function toggleProviderConnection(input: {
@@ -175,9 +137,10 @@ export async function toggleProviderConnection(input: {
   origin?: string
 }) {
   const origin = input.origin ?? currentOrigin()
+  const runtime = getRuntimeRPC()
 
   if (input.provider.connected) {
-    return sendRuntimeMessage("runtime.disconnect-provider", {
+    return runtime.disconnectProvider({
       providerID: input.provider.id,
       origin,
     })
@@ -194,12 +157,12 @@ export async function toggleProviderConnection(input: {
   }
 
   const values = await promptAuthValues(method)
-  const connected = await connectProviderWithMethod({
+  const connected = (await connectProviderWithMethod({
     providerId: input.provider.id,
     method,
     values,
     origin,
-  })
+  })) as ConnectProviderResponse
 
   if (
     connected.result.pending &&
@@ -231,32 +194,12 @@ export async function setRuntimeOriginEnabled(input: {
   origin?: string
 }) {
   const origin = input.origin ?? currentOrigin()
+  const runtime = getRuntimeRPC()
 
-  return sendRuntimeMessage("runtime.update-permission", {
+  return runtime.updatePermission({
     mode: "origin",
     enabled: input.enabled,
     origin,
-  })
-}
-
-export async function createRuntimePermissionRequest(input: {
-  request?: Partial<
-    Omit<PermissionRequest, "id" | "requestedAt" | "dismissed" | "status">
-  >
-  origin?: string
-}) {
-  const request = input.request ?? {}
-  const origin = input.origin ?? request.origin ?? currentOrigin()
-  const modelId =
-    request.modelId ??
-    `${request.provider ?? "openai"}/${request.modelName ?? "gpt-4o-mini"}`
-
-  return sendRuntimeMessage("runtime.request-permission", {
-    origin,
-    modelId,
-    modelName: request.modelName,
-    provider: request.provider,
-    capabilities: request.capabilities,
   })
 }
 
@@ -265,8 +208,9 @@ export async function dismissRuntimePermissionRequest(input: {
   origin?: string
 }) {
   const origin = input.origin ?? currentOrigin()
+  const runtime = getRuntimeRPC()
 
-  return sendRuntimeMessage("runtime.request-permission", {
+  return runtime.requestPermission({
     action: "dismiss",
     requestId: input.requestId,
     origin,
@@ -279,8 +223,9 @@ export async function resolveRuntimePermissionRequest(input: {
   origin?: string
 }) {
   const origin = input.origin ?? currentOrigin()
+  const runtime = getRuntimeRPC()
 
-  return sendRuntimeMessage("runtime.request-permission", {
+  return runtime.requestPermission({
     action: "resolve",
     requestId: input.requestId,
     decision: input.decision,
@@ -293,9 +238,14 @@ export async function updateRuntimeModelPermission(input: {
   status: PermissionStatus
   origin?: string
 }) {
-  const origin = input.origin ?? currentOrigin()
+  if (input.status !== "allowed" && input.status !== "denied") {
+    throw new Error(`Invalid permission status: ${input.status}`)
+  }
 
-  return sendRuntimeMessage("runtime.update-permission", {
+  const origin = input.origin ?? currentOrigin()
+  const runtime = getRuntimeRPC()
+
+  return runtime.updatePermission({
     origin,
     modelId: input.modelId,
     status: input.status,

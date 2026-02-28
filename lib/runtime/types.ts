@@ -143,14 +143,7 @@ export interface ProviderRegistrySnapshot {
   generatedAt: number
 }
 
-export interface ConnectedProviderState {
-  providerID: string
-  connected: boolean
-  authType?: AuthRecord["type"]
-  modelCount: number
-}
-
-export type PromptField = {
+type PromptField = {
   key: string
   label: string
   placeholder?: string
@@ -213,11 +206,6 @@ export interface ChatTransformContext {
   auth?: AuthRecord
 }
 
-export interface GatewayMessage {
-  role: "system" | "user" | "assistant" | "tool"
-  content: string
-}
-
 export interface GatewayInvokeInput {
   origin: string
   sessionID: string
@@ -226,13 +214,6 @@ export interface GatewayInvokeInput {
   stream?: boolean
   headers?: Record<string, string>
   body: Record<string, unknown>
-}
-
-export interface GatewayInvokeChunk {
-  id: string
-  done?: boolean
-  error?: string
-  data?: string
 }
 
 export interface HookResultMerge {
@@ -351,21 +332,4 @@ export interface BridgeResponseEnvelope {
   ok: boolean
   payload?: Record<string, unknown>
   error?: string
-}
-
-export interface BackgroundRpcMessage {
-  type:
-    | "runtime.providers.list"
-    | "runtime.models.list"
-    | "runtime.origin.get"
-    | "runtime.permissions.list"
-    | "runtime.pending.list"
-    | "runtime.connect-provider"
-    | "runtime.disconnect-provider"
-    | "runtime.update-permission"
-    | "runtime.request-permission"
-    | "runtime.invoke"
-    | "runtime.abort"
-    | "runtime.get-auth-methods"
-  payload?: Record<string, unknown>
 }

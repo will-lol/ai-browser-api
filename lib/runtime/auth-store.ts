@@ -94,11 +94,3 @@ export async function removeAuth(providerID: string) {
     })
   })
 }
-
-export async function hasAuth(providerID: string) {
-  const auth = await getAuth(providerID)
-  if (!auth) return false
-  if (auth.type !== "oauth") return true
-  if (!auth.expiresAt) return true
-  return auth.expiresAt > now()
-}

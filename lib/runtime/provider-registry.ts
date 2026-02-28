@@ -13,7 +13,6 @@ import type {
   ModelsDevProvider,
   ProviderInfo,
   ProviderModelInfo,
-  ProviderRegistrySnapshot,
   RuntimeProviderConfig,
 } from "@/lib/runtime/types"
 import { getModelCapabilities, mergeRecord } from "@/lib/runtime/util"
@@ -181,12 +180,6 @@ function applyModelFilters(providerID: string, models: Record<string, ProviderMo
   return out
 }
 
-function defaultModelForProvider(provider: ProviderInfo) {
-  const ids = Object.keys(provider.models)
-  const preferred = ids.find((id) => id.includes("gpt-5") || id.includes("claude-sonnet") || id.includes("gemini"))
-  return preferred ?? ids[0] ?? ""
-}
-
 function providerToRows(provider: ProviderInfo, updatedAt: number) {
   const models = Object.values(provider.models).map((model) => ({
     id: runtimeModelKey(provider.id, model.id),
@@ -276,11 +269,6 @@ async function setCatalogInitialized(updatedAt: number) {
 export async function isCatalogInitialized() {
   const value = await runtimeDb.meta.get(CATALOG_INITIALIZED_KEY)
   return value?.value === true
-}
-
-export async function getCatalogUpdatedAt() {
-  const value = await runtimeDb.meta.get(CATALOG_UPDATED_AT_KEY)
-  return typeof value?.value === "number" ? value.value : 0
 }
 
 export async function refreshProviderCatalog() {
@@ -437,34 +425,6 @@ async function providerFromRows(providerID: string) {
     options: providerRow.options,
     models,
   } as ProviderInfo
-}
-
-export async function buildProviderRegistry() {
-  await ensureProviderCatalog()
-
-  const providerRows = await runtimeDb.providers.toArray()
-  const providers: Record<string, ProviderInfo> = {}
-
-  await Promise.all(
-    providerRows.map(async (row) => {
-      const provider = await providerFromRows(row.id)
-      if (!provider) return
-      providers[row.id] = provider
-    }),
-  )
-
-  const defaultModels = Object.fromEntries(
-    Object.values(providers).map((provider) => [provider.id, defaultModelForProvider(provider)]),
-  )
-
-  return {
-    providers,
-    connected: Object.values(providers)
-      .filter((provider) => provider.connected)
-      .map((provider) => provider.id),
-    defaultModels,
-    generatedAt: Date.now(),
-  } as ProviderRegistrySnapshot
 }
 
 export async function listProviderRows() {

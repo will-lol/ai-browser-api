@@ -1,4 +1,5 @@
 import { browser } from "@wxt-dev/browser"
+import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
 
 const DEBUG_SOURCE = "llm-bridge-debug"
 const DEBUG_MESSAGE_TYPE = "trigger-permission-popup"
@@ -40,17 +41,15 @@ async function addDebugRequests(payload: DebugPayload) {
   const baseModelId = payload.modelId ?? "openai/gpt-4o-mini"
   const fallbackProvider = payload.provider ?? baseModelId.split("/")[0]
   const fallbackModel = payload.modelName ?? baseModelId.split("/")[1]
+  const runtime = getRuntimeRPC()
 
   for (let index = 0; index < count; index += 1) {
-    await browser.runtime.sendMessage({
-      type: "runtime.request-permission",
-      payload: {
-        origin,
-        provider: fallbackProvider,
-        modelName: fallbackModel,
-        modelId: baseModelId,
-        capabilities: payload.capabilities,
-      },
+    await runtime.requestPermission({
+      origin,
+      provider: fallbackProvider,
+      modelName: fallbackModel,
+      modelId: baseModelId,
+      capabilities: payload.capabilities,
     })
   }
 }

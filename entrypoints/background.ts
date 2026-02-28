@@ -1,5 +1,5 @@
 import { browser } from "@wxt-dev/browser"
-import type { Browser } from "@wxt-dev/browser"
+import { ChromePortIO, RPCChannel } from "kkrpc/chrome-extension"
 import { defineBackground } from "wxt/utils/define-background"
 import { MODELS_REFRESH_INTERVAL_MS } from "@/lib/runtime/constants"
 import { getModelsDevUpdatedAt, refreshModelsDevData } from "@/lib/runtime/models-dev"
@@ -25,13 +25,17 @@ import { refreshCatalog } from "@/lib/runtime/catalog-service"
 import { ensureProviderCatalog } from "@/lib/runtime/provider-registry"
 import { runtimeDb } from "@/lib/runtime/db/runtime-db"
 import { subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events"
+import {
+  RUNTIME_RPC_PORT_NAME,
+  type RuntimeInvokeInput,
+  type RuntimeInvokeResult,
+  type RuntimeRPCService,
+} from "@/lib/runtime/rpc/runtime-rpc-types"
 import { parseProviderModel } from "@/lib/runtime/util"
-import type { BackgroundRpcMessage } from "@/lib/runtime/types"
 
 const BADGE_BG = "#d97706"
 const SOURCE_ICON_PATH = "/icon-dark-32x32.png"
 const ICON_SIZES = [16, 32] as const
-const STREAM_PORT = "llm-bridge-stream"
 const MODELS_REFRESH_ALARM = "models-dev-refresh"
 
 const ACTIVE_ICON_COLORS = {
@@ -46,11 +50,12 @@ const INACTIVE_ICON_COLORS = {
 
 type Rgb = { r: number; g: number; b: number }
 type IconState = "active" | "inactive"
+type ChromeRuntimePort = ConstructorParameters<typeof ChromePortIO>[0]
 
 let sourceIconPromise: Promise<ImageData> | null = null
 const iconImageCache: Partial<Record<IconState, Record<number, ImageData>>> = {}
 
-const streamControllers = new Map<string, AbortController>()
+const activeRequestControllers = new Map<string, AbortController>()
 let modelsRefreshInFlight: Promise<void> | null = null
 
 async function refreshModelsSnapshot() {
@@ -188,264 +193,200 @@ async function updateActionState() {
   await updateToolbarIcon(active)
 }
 
-function senderOrigin(url?: string) {
-  if (!url) return "https://unknown.invalid"
+function getRequestOrigin(origin?: string) {
+  return origin ?? "https://unknown.invalid"
+}
+
+function cancelRequest(requestId: string) {
+  activeRequestControllers.get(requestId)?.abort()
+  activeRequestControllers.delete(requestId)
+}
+
+async function invokeRuntime(input: RuntimeInvokeInput): Promise<RuntimeInvokeResult> {
+  const requestId = input.requestId
+  const controller = new AbortController()
+  activeRequestControllers.set(requestId, controller)
+
   try {
-    return new URL(url).origin
-  } catch {
-    return "https://unknown.invalid"
+    const result = await invokeRuntimeModel(
+      {
+        origin: getRequestOrigin(input.origin),
+        sessionID: input.sessionID ?? requestId,
+        requestID: requestId,
+        model: input.model,
+        stream: false,
+        body: input.body ?? {},
+      },
+      controller.signal,
+    )
+
+    if (result.stream) {
+      throw new Error("Unexpected stream response for non-stream invoke")
+    }
+
+    return result
+  } finally {
+    activeRequestControllers.delete(requestId)
   }
 }
 
-async function handleMessage(message: BackgroundRpcMessage, sender: Browser.runtime.MessageSender) {
-  const origin = (message.payload?.origin as string | undefined) ?? senderOrigin(sender.url)
+async function* invokeRuntimeStream(input: RuntimeInvokeInput) {
+  const requestId = input.requestId
+  const controller = new AbortController()
+  activeRequestControllers.set(requestId, controller)
 
-  if (message.type === "runtime.providers.list") {
-    return {
-      ok: true,
-      data: await listProviders(),
+  try {
+    const result = await invokeRuntimeModel(
+      {
+        origin: getRequestOrigin(input.origin),
+        sessionID: input.sessionID ?? requestId,
+        requestID: requestId,
+        model: input.model,
+        stream: true,
+        body: input.body ?? {},
+      },
+      controller.signal,
+    )
+
+    if (!result.stream || !result.response.body) {
+      return
     }
-  }
 
-  if (message.type === "runtime.models.list") {
-    return {
-      ok: true,
-      data: await listModels({
-        providerID: message.payload?.providerID as string | undefined,
-        connectedOnly: Boolean(message.payload?.connectedOnly),
-      }),
+    const reader = result.response.body.getReader()
+    const decoder = new TextDecoder()
+
+    try {
+      while (true) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        if (!chunk.value || chunk.value.length === 0) continue
+
+        const data = decoder.decode(chunk.value, { stream: true })
+        if (data.length > 0) {
+          yield data
+        }
+      }
+
+      const finalChunk = decoder.decode()
+      if (finalChunk.length > 0) {
+        yield finalChunk
+      }
+    } finally {
+      try {
+        await reader.cancel()
+      } catch {
+        // Ignore reader cancellation errors during stream teardown.
+      }
     }
+  } finally {
+    controller.abort()
+    activeRequestControllers.delete(requestId)
   }
+}
 
-  if (message.type === "runtime.origin.get") {
-    return {
-      ok: true,
-      data: await getOriginState(origin),
-    }
-  }
-
-  if (message.type === "runtime.permissions.list") {
-    return {
-      ok: true,
-      data: await listPermissionsForOrigin(origin),
-    }
-  }
-
-  if (message.type === "runtime.pending.list") {
-    return {
-      ok: true,
-      data: await listPendingRequestsForOrigin(origin),
-    }
-  }
-
-  if (message.type === "runtime.get-auth-methods") {
-    const providerID = message.payload?.providerID as string
-    return {
-      ok: true,
-      data: await listProviderAuthMethods(providerID),
-    }
-  }
-
-  if (message.type === "runtime.connect-provider") {
-    const providerID = message.payload?.providerID as string
-    const connected = await connectRuntimeProvider({
-      providerID,
-      methodID: message.payload?.methodID as string | undefined,
-      values: (message.payload?.values as Record<string, string> | undefined) ?? {},
-      code: message.payload?.code as string | undefined,
+const runtimeService: RuntimeRPCService = {
+  async listProviders() {
+    return listProviders()
+  },
+  async listModels(input) {
+    return listModels({
+      providerID: input.providerID,
+      connectedOnly: Boolean(input.connectedOnly),
+    })
+  },
+  async getOriginState(input) {
+    return getOriginState(getRequestOrigin(input.origin))
+  },
+  async listPermissions(input) {
+    return listPermissionsForOrigin(getRequestOrigin(input.origin))
+  },
+  async listPending(input) {
+    return listPendingRequestsForOrigin(getRequestOrigin(input.origin))
+  },
+  async getAuthMethods(input) {
+    return listProviderAuthMethods(input.providerID)
+  },
+  async connectProvider(input) {
+    const response = await connectRuntimeProvider({
+      providerID: input.providerID,
+      methodID: input.methodID,
+      values: input.values ?? {},
+      code: input.code,
     })
     await updateActionState()
-    return {
-      ok: true,
-      data: connected,
-    }
-  }
-
-  if (message.type === "runtime.disconnect-provider") {
-    const providerID = message.payload?.providerID as string
-    const disconnected = await disconnectRuntimeProvider(providerID)
+    return response
+  },
+  async disconnectProvider(input) {
+    const response = await disconnectRuntimeProvider(input.providerID)
     await updateActionState()
-    return {
-      ok: true,
-      data: disconnected,
-    }
-  }
-
-  if (message.type === "runtime.update-permission") {
-    const mode = message.payload?.mode as string | undefined
-    let result: unknown
-    if (mode === "origin") {
-      result = await setRuntimeOriginEnabled({
-        origin,
-        enabled: Boolean(message.payload?.enabled),
-      })
-    } else {
-      result = await updateRuntimePermission({
-        origin,
-        modelId: message.payload?.modelId as string,
-        status: message.payload?.status as "allowed" | "denied",
-        capabilities: message.payload?.capabilities as string[] | undefined,
-      })
-    }
+    return response
+  },
+  async updatePermission(input) {
+    const origin = getRequestOrigin(input.origin)
+    const result = input.mode === "origin"
+      ? await setRuntimeOriginEnabled({
+          origin,
+          enabled: input.enabled,
+        })
+      : await updateRuntimePermission({
+          origin,
+          modelId: input.modelId,
+          status: input.status,
+          capabilities: input.capabilities,
+        })
 
     await updateActionState()
-    return {
-      ok: true,
-      data: result,
-    }
-  }
-
-  if (message.type === "runtime.request-permission") {
-    const action = message.payload?.action as string | undefined
-    let result: unknown
-    if (action === "resolve") {
+    return result
+  },
+  async requestPermission(input) {
+    const origin = getRequestOrigin(input.origin)
+    let result
+    if (input.action === "resolve") {
       result = await resolveRuntimePermissionRequest({
-        requestId: message.payload?.requestId as string,
-        decision: message.payload?.decision as "allowed" | "denied",
+        requestId: input.requestId,
+        decision: input.decision,
       })
-    } else if (action === "dismiss") {
-      result = await dismissRuntimePermissionRequest(message.payload?.requestId as string)
+    } else if (input.action === "dismiss") {
+      result = await dismissRuntimePermissionRequest(input.requestId)
     } else {
-      const modelId =
-        (message.payload?.modelId as string | undefined) ??
-        "openai/gpt-4o-mini"
+      const modelId = input.modelId ?? "openai/gpt-4o-mini"
       const parsed = parseProviderModel(modelId)
       result = await createRuntimePermissionRequest({
         origin,
         modelId,
-        modelName:
-          (message.payload?.modelName as string | undefined) ??
-          parsed.modelID,
-        provider:
-          (message.payload?.provider as string | undefined) ??
-          parsed.providerID,
-        capabilities: message.payload?.capabilities as string[] | undefined,
+        modelName: input.modelName ?? parsed.modelID,
+        provider: input.provider ?? parsed.providerID,
+        capabilities: input.capabilities,
       })
     }
 
     await updateActionState()
-    return {
-      ok: true,
-      data: result,
-    }
-  }
-
-  if (message.type === "runtime.invoke") {
-    const requestId = message.payload?.requestId as string
-    if (message.payload?.action === "abort") {
-      streamControllers.get(requestId)?.abort()
-      streamControllers.delete(requestId)
-      return { ok: true }
-    }
-
-    const controller = new AbortController()
-    streamControllers.set(requestId, controller)
-
-    try {
-      const result = await invokeRuntimeModel(
-        {
-          origin,
-          sessionID: (message.payload?.sessionID as string | undefined) ?? requestId,
-          requestID: requestId,
-          model: message.payload?.model as string,
-          stream: false,
-          body: (message.payload?.body as Record<string, unknown> | undefined) ?? {},
-        },
-        controller.signal,
-      )
-      return {
-        ok: true,
-        data: result,
-      }
-    } finally {
-      streamControllers.delete(requestId)
-    }
-  }
-
-  if (message.type === "runtime.abort") {
-    const requestId = message.payload?.requestId as string
-    streamControllers.get(requestId)?.abort()
-    streamControllers.delete(requestId)
-    return { ok: true }
-  }
-
-  return {
-    ok: false,
-    error: `Unknown runtime message type: ${message.type}`,
-  }
+    return result
+  },
+  async invoke(input) {
+    return invokeRuntime(input)
+  },
+  invokeStream(input) {
+    return invokeRuntimeStream(input)
+  },
+  async abort(input) {
+    cancelRequest(input.requestId)
+  },
 }
 
-function handleStreamPort(port: Browser.runtime.Port) {
-  if (port.name !== STREAM_PORT) return
+function registerRuntimeRPCHandlers() {
+  browser.runtime.onConnect.addListener((port) => {
+    if (port.name !== RUNTIME_RPC_PORT_NAME) return
 
-  let requestId = ""
-  let controller: AbortController | undefined
+    const io = new ChromePortIO(port as unknown as ChromeRuntimePort)
+    const rpc = new RPCChannel<RuntimeRPCService, Record<string, never>>(io, {
+      expose: runtimeService,
+    })
 
-  port.onMessage.addListener(async (message: Record<string, unknown>) => {
-    if (message?.type === "abort") {
-      if (requestId) {
-        streamControllers.get(requestId)?.abort()
-        streamControllers.delete(requestId)
-      }
-      controller?.abort()
-      return
-    }
-
-    if (message?.type !== "invoke") return
-
-    requestId = message.requestId as string
-    controller = new AbortController()
-    streamControllers.set(requestId, controller)
-
-    try {
-      const origin = (message.origin as string | undefined) ?? senderOrigin(port.sender?.url)
-      const sessionID = (message.sessionID as string | undefined) ?? requestId
-      const result = await invokeRuntimeModel(
-        {
-          origin,
-          sessionID,
-          requestID: requestId,
-          model: message.model as string,
-          stream: true,
-          body: (message.body as Record<string, unknown> | undefined) ?? {},
-        },
-        controller.signal,
-      )
-
-      if (!result.stream || !result.response.body) {
-        port.postMessage({ type: "done", requestId })
-        return
-      }
-
-      const reader = result.response.body.getReader()
-      const decoder = new TextDecoder()
-
-      while (true) {
-        const chunk = await reader.read()
-        if (chunk.done) break
-        const data = decoder.decode(chunk.value, { stream: true })
-        port.postMessage({ type: "chunk", requestId, data })
-      }
-
-      port.postMessage({ type: "done", requestId })
-    } catch (error) {
-      const messageText = error instanceof Error ? error.message : String(error)
-      port.postMessage({ type: "error", requestId, error: messageText })
-    } finally {
-      streamControllers.delete(requestId)
-    }
+    port.onDisconnect.addListener(() => {
+      rpc.destroy()
+    })
   })
-
-  port.onDisconnect.addListener(() => {
-    if (!requestId) return
-    streamControllers.get(requestId)?.abort()
-    streamControllers.delete(requestId)
-  })
-}
-
-function toErrorMessage(error: unknown) {
-  if (error instanceof Error) return error.message
-  return String(error)
 }
 
 export default defineBackground(() => {
@@ -475,34 +416,7 @@ export default defineBackground(() => {
     void refreshModelsSnapshotOnce()
   })
 
-  browser.runtime.onMessage.addListener((message: BackgroundRpcMessage, sender, sendResponse) => {
-    if (!message || typeof message !== "object" || typeof message.type !== "string") {
-      sendResponse({
-        ok: false,
-        error: "Invalid runtime message payload",
-      })
-      return false
-    }
-
-    void handleMessage(message, sender)
-      .then((result) => {
-        sendResponse(result)
-      })
-      .catch((error: unknown) => {
-        const messageText = toErrorMessage(error)
-        console.error("Background message handler failed", error)
-        sendResponse({
-          ok: false,
-          error: messageText,
-        })
-      })
-
-    return true
-  })
-
-  browser.runtime.onConnect.addListener((port: Browser.runtime.Port) => {
-    handleStreamPort(port)
-  })
+  registerRuntimeRPCHandlers()
 
   subscribeRuntimeEvents(() => {
     void updateActionState()

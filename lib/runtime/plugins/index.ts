@@ -29,7 +29,3 @@ export function getPluginManager() {
   }
   return manager
 }
-
-export function listBuiltinPlugins() {
-  return BUILTIN_PLUGINS
-}

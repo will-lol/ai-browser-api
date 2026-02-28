@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { browser } from "wxt/browser"
 
-type ActiveTab = Awaited<ReturnType<typeof browser.tabs.query>>[number]
+type ActiveTab = Parameters<Parameters<typeof browser.tabs.onUpdated.addListener>[0]>[2]
 
 function tabUrlOrigin(url: string | undefined) {
   if (!url) return null
