@@ -12,9 +12,7 @@ import {
   cancelRuntimeProviderAuthFlow,
   getRuntimeProviderAuthFlow,
   openRuntimeProviderAuthWindow,
-  retryRuntimeProviderAuthFlow,
   startRuntimeProviderAuthFlow,
-  submitRuntimeProviderAuthCode,
   createRuntimePermissionRequest,
   disconnectRuntimeProvider,
   dismissRuntimePermissionRequest,
@@ -315,22 +313,9 @@ const runtimeService: RuntimeRPCService = {
   async startProviderAuthFlow(input) {
     const response = await startRuntimeProviderAuthFlow({
       providerID: input.providerID,
-      methodIndex: input.methodIndex,
+      methodID: input.methodID,
       values: input.values ?? {},
     })
-    await updateActionState()
-    return response
-  },
-  async submitProviderAuthCode(input) {
-    const response = await submitRuntimeProviderAuthCode({
-      providerID: input.providerID,
-      code: input.code,
-    })
-    await updateActionState()
-    return response
-  },
-  async retryProviderAuthFlow(input) {
-    const response = await retryRuntimeProviderAuthFlow(input.providerID)
     await updateActionState()
     return response
   },

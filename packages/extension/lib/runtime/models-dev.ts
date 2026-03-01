@@ -61,30 +61,7 @@ function normalizeModels(input: unknown): Record<string, ModelsDevModel> {
       ...rawModel,
       id: typeof rawModel.id === "string" ? rawModel.id : modelID,
       name: typeof rawModel.name === "string" ? rawModel.name : modelID,
-      limit: isObject(rawModel.limit)
-        ? {
-            context:
-              typeof rawModel.limit.context === "number"
-                ? rawModel.limit.context
-                : 0,
-            input:
-              typeof rawModel.limit.input === "number"
-                ? rawModel.limit.input
-                : undefined,
-            output:
-              typeof rawModel.limit.output === "number"
-                ? rawModel.limit.output
-                : 0,
-          }
-        : { context: 0, output: 0 },
-      release_date:
-        typeof rawModel.release_date === "string" ? rawModel.release_date : "",
-      attachment: Boolean(rawModel.attachment),
-      reasoning: Boolean(rawModel.reasoning),
-      temperature: Boolean(rawModel.temperature),
-      tool_call:
-        rawModel.tool_call === undefined ? true : Boolean(rawModel.tool_call),
-    };
+    } as ModelsDevModel;
   }
   return out;
 }

@@ -1,7 +1,6 @@
 import { browser } from "@wxt-dev/browser"
-import type { AuthAuthorization, AuthContinuationContext, AuthMethod, ResolvedAuthReference } from "@/lib/runtime/plugin-manager"
+import type { RuntimeAuthMethod } from "@/lib/runtime/plugin-manager"
 import {
-  finishProviderAuth,
   listProviderAuthMethods,
   startProviderAuth,
 } from "@/lib/runtime/provider-auth"
@@ -15,10 +14,7 @@ const AUTH_FLOW_SWEEP_INTERVAL_MS = 60_000
 
 export type RuntimeAuthFlowStatus =
   | "idle"
-  | "awaiting_input"
-  | "awaiting_external"
-  | "awaiting_code"
-  | "running"
+  | "authorizing"
   | "success"
   | "error"
   | "canceled"
@@ -26,12 +22,10 @@ export type RuntimeAuthFlowStatus =
 export interface RuntimeAuthFlowSnapshot {
   providerID: string
   status: RuntimeAuthFlowStatus
-  methods: AuthMethod[]
-  selectedMethodIndex?: number
-  authorization?: AuthAuthorization
+  methods: RuntimeAuthMethod[]
+  runningMethodID?: string
   error?: string
   updatedAt: number
-  canRetry: boolean
   canCancel: boolean
 }
 
@@ -44,43 +38,27 @@ export interface OpenProviderAuthWindowResult {
 type AuthFlowState = {
   providerID: string
   status: RuntimeAuthFlowStatus
-  methods: AuthMethod[]
-  selectedMethodIndex?: number
-  authorization?: AuthAuthorization
+  methods: RuntimeAuthMethod[]
+  runningMethodID?: string
   error?: string
   updatedAt: number
   expiresAt: number
   windowId?: number
-  resolved?: ResolvedAuthReference
-  context?: AuthContinuationContext
   controller?: AbortController
-  task?: Promise<void>
+  task?: Promise<unknown>
 }
 
 function isTerminalStatus(status: RuntimeAuthFlowStatus) {
   return status === "success" || status === "error" || status === "canceled"
 }
 
-function canRetry(status: RuntimeAuthFlowStatus) {
-  return status === "error" || status === "canceled"
-}
-
 function canCancel(status: RuntimeAuthFlowStatus) {
-  return status === "awaiting_input"
-    || status === "awaiting_external"
-    || status === "awaiting_code"
-    || status === "running"
+  return status === "authorizing"
 }
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message
   return String(error)
-}
-
-function throwIfAborted(signal?: AbortSignal) {
-  if (signal?.aborted) {
-    throw new Error("Authentication canceled")
-  }
 }
 
 export class AuthFlowManager {
@@ -125,11 +103,9 @@ export class AuthFlowManager {
       providerID: flow.providerID,
       status: flow.status,
       methods: flow.methods,
-      selectedMethodIndex: flow.selectedMethodIndex,
-      authorization: flow.authorization,
+      runningMethodID: flow.runningMethodID,
       error: flow.error,
       updatedAt: flow.updatedAt,
-      canRetry: canRetry(flow.status),
       canCancel: canCancel(flow.status),
     }
   }
@@ -142,23 +118,17 @@ export class AuthFlowManager {
       status: "idle",
       methods,
       updatedAt: now,
-      canRetry: false,
       canCancel: false,
     }
   }
 
-  private async buildInputFlow(providerID: string, selectedMethodIndex?: number): Promise<AuthFlowState> {
+  private async buildIdleFlow(providerID: string): Promise<AuthFlowState> {
     const methods = await listProviderAuthMethods(providerID)
     const now = this.currentTimestamp()
     return {
       providerID,
-      status: "awaiting_input",
+      status: "idle",
       methods,
-      selectedMethodIndex: typeof selectedMethodIndex === "number"
-        && selectedMethodIndex >= 0
-        && selectedMethodIndex < methods.length
-        ? selectedMethodIndex
-        : undefined,
       updatedAt: now,
       expiresAt: now + AUTH_FLOW_TTL_MS,
     }
@@ -173,89 +143,7 @@ export class AuthFlowManager {
   private clearExecution(flow: AuthFlowState) {
     flow.controller = undefined
     flow.task = undefined
-    flow.resolved = undefined
-    flow.context = undefined
-  }
-
-  private async runAutoFlow(providerID: string, flow: AuthFlowState) {
-    const resolved = flow.resolved
-    const methodIndex = flow.selectedMethodIndex
-    const method = typeof methodIndex === "number" ? flow.methods[methodIndex] : undefined
-    const authorization = flow.authorization
-
-    if (!resolved || typeof methodIndex !== "number" || !method || !authorization) {
-      flow.status = "error"
-      flow.error = "Auth flow is missing pending session context."
-      this.clearExecution(flow)
-      this.setFlow(flow)
-      return
-    }
-
-    const signal = flow.controller?.signal
-
-    try {
-      let callbackUrl: string | undefined
-      if (method.type === "oauth" && method.mode === "browser") {
-        if (!browser.identity?.launchWebAuthFlow) {
-          throw new Error("Browser OAuth flow is unavailable")
-        }
-
-        throwIfAborted(signal)
-
-        callbackUrl = await browser.identity.launchWebAuthFlow({
-          url: authorization.url,
-          interactive: true,
-        }) ?? undefined
-
-        if (!callbackUrl) {
-          throw new Error("OAuth flow did not return a callback URL")
-        }
-      }
-
-      throwIfAborted(signal)
-
-      const result = await finishProviderAuth({
-        providerID,
-        methodIndex,
-        resolved,
-        context: flow.context,
-        callbackUrl,
-        signal,
-      })
-
-      throwIfAborted(signal)
-
-      if (result.connected) {
-        await refreshProviderCatalogForProvider(providerID)
-      }
-
-      const latest = this.flows.get(providerID)
-      if (!latest) return
-      if (latest !== flow) return
-      if (latest.status === "canceled") return
-
-      latest.status = "success"
-      latest.error = undefined
-      latest.authorization = undefined
-      this.clearExecution(latest)
-      this.setFlow(latest)
-    } catch (error) {
-      const latest = this.flows.get(providerID)
-      if (!latest) return
-      if (latest !== flow) return
-      if (latest.status === "canceled") return
-
-      if (signal?.aborted) {
-        latest.status = "canceled"
-        latest.error = "Authentication canceled."
-      } else {
-        latest.status = "error"
-        latest.error = toErrorMessage(error)
-      }
-      latest.authorization = undefined
-      this.clearExecution(latest)
-      this.setFlow(latest)
-    }
+    flow.runningMethodID = undefined
   }
 
   async getProviderAuthFlow(providerID: string): Promise<RuntimeAuthFlowSnapshot> {
@@ -276,8 +164,8 @@ export class AuthFlowManager {
 
   async openProviderAuthWindow(providerID: string): Promise<OpenProviderAuthWindowResult> {
     let flow = this.flows.get(providerID)
-    if (!flow || flow.status === "idle" || isTerminalStatus(flow.status)) {
-      flow = await this.buildInputFlow(providerID)
+    if (!flow || isTerminalStatus(flow.status)) {
+      flow = await this.buildIdleFlow(providerID)
       this.setFlow(flow)
     }
 
@@ -326,131 +214,42 @@ export class AuthFlowManager {
 
   async startProviderAuthFlow(input: {
     providerID: string
-    methodIndex: number
+    methodID: string
     values?: Record<string, string>
   }): Promise<RuntimeAuthFlowSnapshot> {
     let flow = this.flows.get(input.providerID)
-    if (!flow) {
-      flow = await this.buildInputFlow(input.providerID)
+    if (!flow || isTerminalStatus(flow.status)) {
+      flow = await this.buildIdleFlow(input.providerID)
       this.setFlow(flow)
     }
 
-    if (flow.status === "running" || flow.status === "awaiting_external" || flow.status === "awaiting_code") {
+    if (flow.status === "authorizing") {
       throw new Error("Auth flow is already in progress")
     }
 
-    if (input.methodIndex < 0 || input.methodIndex >= flow.methods.length) {
-      throw new Error(`Auth method index ${input.methodIndex} is out of bounds for provider ${input.providerID}`)
+    flow.methods = await listProviderAuthMethods(input.providerID)
+    const selected = flow.methods.find((method) => method.id === input.methodID)
+    if (!selected) {
+      throw new Error(`Auth method ${input.methodID} is not available for provider ${input.providerID}`)
     }
 
     this.clearExecution(flow)
-    flow.status = "running"
+    flow.status = "authorizing"
     flow.error = undefined
-    flow.selectedMethodIndex = input.methodIndex
-    flow.authorization = undefined
-    this.setFlow(flow)
-
-    try {
-      const result = await startProviderAuth({
-        providerID: input.providerID,
-        methodIndex: input.methodIndex,
-        values: input.values ?? {},
-      })
-
-      if (result.connected) {
-        await refreshProviderCatalogForProvider(input.providerID)
-        const latest = this.flows.get(input.providerID)
-        if (!latest) {
-          return this.idleSnapshot(input.providerID)
-        }
-
-        latest.status = "success"
-        latest.error = undefined
-        latest.authorization = undefined
-        this.clearExecution(latest)
-        this.setFlow(latest)
-        return this.snapshot(latest)
-      }
-
-      const latest = this.flows.get(input.providerID)
-      if (!latest) {
-        return this.idleSnapshot(input.providerID)
-      }
-
-      latest.selectedMethodIndex = result.methodIndex
-      latest.authorization = result.authorization
-      latest.resolved = result.resolved
-      latest.context = result.context
-
-      if (result.authorization.mode === "code") {
-        latest.status = "awaiting_code"
-        latest.error = undefined
-        this.setFlow(latest)
-        return this.snapshot(latest)
-      }
-
-      latest.status = "awaiting_external"
-      latest.error = undefined
-      latest.controller = new AbortController()
-      const task = this.runAutoFlow(input.providerID, latest)
-      latest.task = task
-      this.setFlow(latest)
-
-      return this.snapshot(latest)
-    } catch (error) {
-      const latest = this.flows.get(input.providerID)
-      if (!latest) {
-        throw error
-      }
-
-      latest.status = "error"
-      latest.error = toErrorMessage(error)
-      latest.authorization = undefined
-      this.clearExecution(latest)
-      this.setFlow(latest)
-      return this.snapshot(latest)
-    }
-  }
-
-  async submitProviderAuthCode(input: {
-    providerID: string
-    code: string
-  }): Promise<RuntimeAuthFlowSnapshot> {
-    const flow = this.flows.get(input.providerID)
-    if (!flow) {
-      return this.idleSnapshot(input.providerID)
-    }
-
-    if (flow.status !== "awaiting_code") {
-      throw new Error("Auth flow is not awaiting an authorization code")
-    }
-
-    if (!flow.resolved || typeof flow.selectedMethodIndex !== "number") {
-      throw new Error("Auth flow is missing pending session context")
-    }
-
-    const code = input.code.trim()
-    if (!code) {
-      throw new Error("Authorization code is required")
-    }
-
-    flow.status = "running"
-    flow.error = undefined
+    flow.runningMethodID = selected.id
     flow.controller = new AbortController()
     this.setFlow(flow)
 
     try {
-      const result = await finishProviderAuth({
+      const task = startProviderAuth({
         providerID: input.providerID,
-        methodIndex: flow.selectedMethodIndex,
-        resolved: flow.resolved,
-        context: flow.context,
-        code,
+        methodID: selected.id,
+        values: input.values ?? {},
         signal: flow.controller.signal,
       })
+      flow.task = task
 
-      throwIfAborted(flow.controller.signal)
-
+      const result = await task
       if (result.connected) {
         await refreshProviderCatalogForProvider(input.providerID)
       }
@@ -459,17 +258,23 @@ export class AuthFlowManager {
       if (!latest) {
         return this.idleSnapshot(input.providerID)
       }
+      if (latest !== flow) {
+        return this.snapshot(latest)
+      }
 
       latest.status = "success"
       latest.error = undefined
-      latest.authorization = undefined
       this.clearExecution(latest)
+      latest.methods = await listProviderAuthMethods(input.providerID)
       this.setFlow(latest)
       return this.snapshot(latest)
     } catch (error) {
       const latest = this.flows.get(input.providerID)
       if (!latest) {
         throw error
+      }
+      if (latest !== flow) {
+        return this.snapshot(latest)
       }
 
       if (latest.controller?.signal.aborted) {
@@ -479,30 +284,11 @@ export class AuthFlowManager {
         latest.status = "error"
         latest.error = toErrorMessage(error)
       }
-      latest.authorization = undefined
       this.clearExecution(latest)
+      latest.methods = await listProviderAuthMethods(input.providerID)
       this.setFlow(latest)
       return this.snapshot(latest)
     }
-  }
-
-  async retryProviderAuthFlow(providerID: string): Promise<RuntimeAuthFlowSnapshot> {
-    const flow = this.flows.get(providerID)
-    if (!flow) {
-      const next = await this.buildInputFlow(providerID)
-      this.setFlow(next)
-      return this.snapshot(next)
-    }
-
-    if (!canRetry(flow.status)) {
-      throw new Error("Auth flow cannot be retried from the current state")
-    }
-
-    const selectedMethodIndex = flow.selectedMethodIndex
-    const next = await this.buildInputFlow(providerID, selectedMethodIndex)
-    next.windowId = flow.windowId
-    this.setFlow(next)
-    return this.snapshot(next)
   }
 
   async cancelProviderAuthFlow(input: {
@@ -523,7 +309,6 @@ export class AuthFlowManager {
     flow.error = input.reason === "expired"
       ? "Authentication expired."
       : "Authentication canceled."
-    flow.authorization = undefined
     this.clearExecution(flow)
     this.setFlow(flow)
     return this.snapshot(flow)

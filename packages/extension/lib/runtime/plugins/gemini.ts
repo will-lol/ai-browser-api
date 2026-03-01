@@ -1,9 +1,8 @@
-import { browser } from "@wxt-dev/browser"
 import { setAuth } from "@/lib/runtime/auth-store"
 import {
+  buildExtensionRedirectPath,
   generatePKCE,
   generateState,
-  parseOAuthCallbackInput,
 } from "@/lib/runtime/plugins/oauth-util"
 import type { RuntimePlugin } from "@/lib/runtime/plugin-manager"
 
@@ -14,13 +13,6 @@ const GEMINI_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
 ]
-
-type PendingGeminiOAuth = {
-  verifier: string
-  state: string
-  redirectUri: string
-  projectId?: string
-}
 
 type GoogleTokenResponse = {
   access_token: string
@@ -89,43 +81,18 @@ function isGeminiOAuth(metadata?: Record<string, string>) {
   return metadata?.authMode === "gemini_oauth"
 }
 
-function resolvePendingGeminiOAuth(value: unknown): PendingGeminiOAuth {
-  if (!value || typeof value !== "object") {
-    throw new Error("Gemini OAuth session context is missing")
-  }
-
-  const input = value as Record<string, unknown>
-  const verifier = typeof input.verifier === "string" ? input.verifier : ""
-  const state = typeof input.state === "string" ? input.state : ""
-  const redirectUri = typeof input.redirectUri === "string" ? input.redirectUri : ""
-
-  if (!verifier || !state || !redirectUri) {
-    throw new Error("Gemini OAuth session context is invalid")
-  }
-
-  const projectId = typeof input.projectId === "string" && input.projectId
-    ? input.projectId
-    : undefined
-
-  return {
-    verifier,
-    state,
-    redirectUri,
-    projectId,
-  }
-}
-
 export const geminiOAuthPlugin: RuntimePlugin = {
   id: "builtin-gemini-auth",
   name: "Builtin Gemini OAuth",
   supportedProviders: ["google"],
   hooks: {
     auth: {
+      provider: "google",
       async methods() {
         return [
           {
+            id: "oauth",
             type: "oauth",
-            mode: "browser",
             label: "OAuth with Google (Gemini CLI)",
             fields: [
               {
@@ -136,76 +103,64 @@ export const geminiOAuthPlugin: RuntimePlugin = {
                 required: false,
               },
             ],
+            async authorize(input) {
+              const redirectUri = input.oauth.getRedirectURL(
+                buildExtensionRedirectPath(input.providerID, "oauth"),
+              )
+              const pkce = await generatePKCE()
+              const state = generateState()
+
+              const url = new URL("https://accounts.google.com/o/oauth2/v2/auth")
+              url.searchParams.set("client_id", GEMINI_CLIENT_ID)
+              url.searchParams.set("response_type", "code")
+              url.searchParams.set("redirect_uri", redirectUri)
+              url.searchParams.set("scope", GEMINI_SCOPES.join(" "))
+              url.searchParams.set("code_challenge", pkce.challenge)
+              url.searchParams.set("code_challenge_method", "S256")
+              url.searchParams.set("state", state)
+              url.searchParams.set("access_type", "offline")
+              url.searchParams.set("prompt", "consent")
+              url.hash = "llm-bridge"
+
+              const callbackUrl = await input.oauth.launchWebAuthFlow(url.toString())
+              const parsed = input.oauth.parseCallback(callbackUrl)
+
+              if (parsed.error) {
+                throw new Error(`Google OAuth failed: ${parsed.errorDescription ?? parsed.error}`)
+              }
+              if (!parsed.code) throw new Error("Missing Google authorization code")
+              if (parsed.state && parsed.state !== state) {
+                throw new Error("OAuth state mismatch")
+              }
+
+              const tokens = await exchangeAuthorizationCode(parsed.code, pkce.verifier, redirectUri)
+              if (!tokens.refresh_token) {
+                throw new Error("Missing refresh token in Google OAuth response")
+              }
+
+              const projectId = input.values.projectId?.trim() || undefined
+              const email = await resolveUserEmail(tokens.access_token)
+              return {
+                type: "oauth",
+                access: tokens.access_token,
+                refresh: tokens.refresh_token,
+                expiresAt: Date.now() + tokens.expires_in * 1000,
+                metadata: {
+                  authMode: "gemini_oauth",
+                  ...(email ? { email } : {}),
+                  ...(projectId ? { projectId } : {}),
+                },
+              }
+            },
           },
         ]
       },
-      async authorize(_ctx, method, input, info) {
-        if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
+      async loader(auth, _provider, ctx) {
+        if (auth?.type !== "oauth" || !isGeminiOAuth(auth.metadata)) return {}
 
-        const redirectUri = browser.identity?.getRedirectURL("google-gemini") ?? "https://localhost.invalid/google-gemini"
-        const pkce = await generatePKCE()
-        const state = generateState()
-
-        const url = new URL("https://accounts.google.com/o/oauth2/v2/auth")
-        url.searchParams.set("client_id", GEMINI_CLIENT_ID)
-        url.searchParams.set("response_type", "code")
-        url.searchParams.set("redirect_uri", redirectUri)
-        url.searchParams.set("scope", GEMINI_SCOPES.join(" "))
-        url.searchParams.set("code_challenge", pkce.challenge)
-        url.searchParams.set("code_challenge_method", "S256")
-        url.searchParams.set("state", state)
-        url.searchParams.set("access_type", "offline")
-        url.searchParams.set("prompt", "consent")
-        url.hash = "llm-bridge"
-
-        return {
-          authorization: {
-            mode: "auto",
-            url: url.toString(),
-            instructions: "Complete Google OAuth in your browser.",
-          },
-          context: {
-            verifier: pkce.verifier,
-            state,
-            redirectUri,
-            projectId: input.projectId?.trim() || undefined,
-          },
-        }
-      },
-      async callback(_ctx, method, input, info) {
-        if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
-        const pending = resolvePendingGeminiOAuth(input.context)
-
-        const parsed = parseOAuthCallbackInput(input)
-        if (!parsed.code) throw new Error("Missing Google authorization code")
-        if (parsed.state && parsed.state !== pending.state) {
-          throw new Error("OAuth state mismatch")
-        }
-
-        const tokens = await exchangeAuthorizationCode(parsed.code, pending.verifier, pending.redirectUri)
-        if (!tokens.refresh_token) {
-          throw new Error("Missing refresh token in Google OAuth response")
-        }
-
-        const email = await resolveUserEmail(tokens.access_token)
-        return {
-          type: "oauth",
-          access: tokens.access_token,
-          refresh: tokens.refresh_token,
-          expiresAt: Date.now() + tokens.expires_in * 1000,
-          metadata: {
-            authMode: "gemini_oauth",
-            ...(email ? { email } : {}),
-            ...(pending.projectId ? { projectId: pending.projectId } : {}),
-          },
-        }
-      },
-      async loader(ctx) {
-        if (ctx.auth?.type !== "oauth" || !isGeminiOAuth(ctx.auth.metadata)) return {}
-
-        let access = ctx.auth.access
-        let refresh = ctx.auth.refresh
-        let expiresAt = ctx.auth.expiresAt
+        let access = auth.access
+        let refresh = auth.refresh
+        let expiresAt = auth.expiresAt
 
         if (refresh && (!expiresAt || expiresAt <= Date.now() + 60_000)) {
           const refreshed = await refreshAccessToken(refresh)
@@ -219,7 +174,7 @@ export const geminiOAuthPlugin: RuntimePlugin = {
             refresh,
             expiresAt,
             metadata: {
-              ...(ctx.auth.metadata ?? {}),
+              ...(auth.metadata ?? {}),
               authMode: "gemini_oauth",
             },
           })

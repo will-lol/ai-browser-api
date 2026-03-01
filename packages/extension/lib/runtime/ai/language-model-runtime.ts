@@ -26,7 +26,10 @@ import type { AuthRecord } from "@/lib/runtime/auth-store"
 import type { ChatTransformContext } from "@/lib/runtime/plugin-manager"
 import { getPluginManager } from "@/lib/runtime/plugins"
 import { getModel, getProvider } from "@/lib/runtime/provider-registry"
-import type { ProviderInfo, ProviderModelInfo } from "@/lib/runtime/provider-registry"
+import type {
+  ProviderModelInfo,
+  ProviderRuntimeInfo,
+} from "@/lib/runtime/provider-registry"
 import { isObject, mergeRecord, parseProviderModel } from "@/lib/runtime/util"
 
 export type RuntimeLanguageModelCallOptions = Omit<LanguageModelV3CallOptions, "abortSignal">
@@ -34,7 +37,7 @@ export type RuntimeLanguageModelCallOptions = Omit<LanguageModelV3CallOptions, "
 interface ModelRuntimeContext {
   providerID: string
   modelID: string
-  provider: ProviderInfo
+  provider: ProviderRuntimeInfo
   model: ProviderModelInfo
   auth?: AuthRecord
 }

@@ -31,7 +31,7 @@ export type BridgeConnectedModel = {
   name: string
   provider: string
   capabilities?: unknown
-  connected?: boolean
+  connected: boolean
 }
 
 export type BridgeListModelsResponse = {

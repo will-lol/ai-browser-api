@@ -18,7 +18,7 @@ export type BridgeModelSummary = {
   name: string
   provider: string
   capabilities?: unknown
-  connected?: boolean
+  connected: boolean
 }
 
 export type BridgePermissionRequest = {
@@ -95,13 +95,8 @@ function toSupportedUrls(
 
     const compiled = patterns
       .map((pattern) => {
-        if (pattern instanceof RegExp) return pattern
-        if (typeof pattern === "string") return new RegExp(pattern)
-        if (!pattern || typeof pattern !== "object") return null
-        if (typeof pattern.source !== "string") return null
-
         try {
-          return new RegExp(pattern.source, typeof pattern.flags === "string" ? pattern.flags : "")
+          return new RegExp(pattern.source, pattern.flags ?? "")
         } catch {
           return null
         }
@@ -158,16 +153,8 @@ export function createLLMBridgeClient(options: BridgeClientOptions = {}): Bridge
   const api = channel.getAPI()
 
   function createLanguageModel(modelId: string, descriptor: BridgeModelDescriptorResponse): BridgeLanguageModel {
-    const resolvedModelId =
-      typeof descriptor?.modelId === "string" && descriptor.modelId.length > 0
-        ? descriptor.modelId
-        : modelId
-
-    const provider =
-      typeof descriptor?.provider === "string" && descriptor.provider.length > 0
-        ? descriptor.provider
-        : "unknown"
-
+    const resolvedModelId = descriptor.modelId || modelId
+    const provider = descriptor.provider
     const supportedUrls = toSupportedUrls(descriptor?.supportedUrls)
 
     return {

@@ -31,34 +31,13 @@ export async function getRuntimeProviderAuthFlow(providerID: string) {
 
 export async function startRuntimeProviderAuthFlow(input: {
   providerID: string
-  methodIndex: number
+  methodID: string
   values?: Record<string, string>
 }) {
   const manager = getAuthFlowManager()
   const result = await manager.startProviderAuthFlow(input)
   return {
     providerID: input.providerID,
-    result,
-  }
-}
-
-export async function submitRuntimeProviderAuthCode(input: {
-  providerID: string
-  code: string
-}) {
-  const manager = getAuthFlowManager()
-  const result = await manager.submitProviderAuthCode(input)
-  return {
-    providerID: input.providerID,
-    result,
-  }
-}
-
-export async function retryRuntimeProviderAuthFlow(providerID: string) {
-  const manager = getAuthFlowManager()
-  const result = await manager.retryProviderAuthFlow(providerID)
-  return {
-    providerID,
     result,
   }
 }

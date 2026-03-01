@@ -41,16 +41,60 @@ export function normalizeInstanceUrl(value: string) {
   return `${parsed.protocol}//${parsed.host}`
 }
 
+export function buildExtensionRedirectPath(providerID: string, methodID: string) {
+  const sanitize = (value: string) => value.toLowerCase().replace(/[^a-z0-9._-]/g, "-")
+  return `${sanitize(providerID)}-${sanitize(methodID)}`
+}
+
+export function parseOAuthCallbackUrl(url: string) {
+  const parsed = new URL(url)
+
+  const code = parsed.searchParams.get("code") ?? undefined
+  const state = parsed.searchParams.get("state") ?? undefined
+  const error = parsed.searchParams.get("error") ?? undefined
+  const errorDescription = parsed.searchParams.get("error_description") ?? undefined
+
+  if (code || state || error || errorDescription) {
+    return {
+      code,
+      state,
+      error,
+      errorDescription,
+    }
+  }
+
+  const hash = parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash
+  if (hash) {
+    const params = new URLSearchParams(hash)
+    return {
+      code: params.get("code") ?? undefined,
+      state: params.get("state") ?? undefined,
+      error: params.get("error") ?? undefined,
+      errorDescription: params.get("error_description") ?? undefined,
+    }
+  }
+
+  return {
+    code: undefined,
+    state: undefined,
+    error: undefined,
+    errorDescription: undefined,
+  }
+}
+
 export function parseOAuthCallbackInput(input: { code?: string; callbackUrl?: string }) {
   const raw = input.callbackUrl?.trim() || input.code?.trim() || ""
-  if (!raw) return { code: undefined, state: undefined }
+  if (!raw) {
+    return {
+      code: undefined,
+      state: undefined,
+      error: undefined,
+      errorDescription: undefined,
+    }
+  }
 
   if (/^https?:\/\//i.test(raw)) {
-    const parsed = new URL(raw)
-    return {
-      code: parsed.searchParams.get("code") ?? undefined,
-      state: parsed.searchParams.get("state") ?? undefined,
-    }
+    return parseOAuthCallbackUrl(raw)
   }
 
   const queryCandidate = raw.startsWith("?") ? raw.slice(1) : raw
@@ -58,11 +102,17 @@ export function parseOAuthCallbackInput(input: { code?: string; callbackUrl?: st
     const params = new URLSearchParams(queryCandidate)
     const code = params.get("code") ?? undefined
     const state = params.get("state") ?? undefined
-    if (code || state) {
-      return { code, state }
+    const error = params.get("error") ?? undefined
+    const errorDescription = params.get("error_description") ?? undefined
+    if (code || state || error || errorDescription) {
+      return { code, state, error, errorDescription }
     }
   }
 
-  return { code: raw, state: undefined }
+  return {
+    code: raw,
+    state: undefined,
+    error: undefined,
+    errorDescription: undefined,
+  }
 }
-

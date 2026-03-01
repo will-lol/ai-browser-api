@@ -64,13 +64,16 @@ export interface ProviderModelInfo {
   variants?: Record<string, Record<string, unknown>>
 }
 
-export interface ProviderInfo {
+export interface ProviderRuntimeInfo {
   id: string
   name: string
   source: "models.dev" | "config" | "plugin"
   env: string[]
   connected: boolean
   options: Record<string, unknown>
+}
+
+export interface ProviderInfo extends ProviderRuntimeInfo {
   models: Record<string, ProviderModelInfo>
 }
 
@@ -85,7 +88,7 @@ function toCapabilities(model: ModelsDevModel) {
     temperature: Boolean(model.temperature),
     reasoning: Boolean(model.reasoning),
     attachment: Boolean(model.attachment),
-    toolcall: Boolean(model.tool_call),
+    toolcall: model.tool_call ?? true,
     input: {
       text: model.modalities?.input?.includes("text") ?? true,
       audio: model.modalities?.input?.includes("audio") ?? false,
@@ -103,16 +106,19 @@ function toCapabilities(model: ModelsDevModel) {
   }
 }
 
-function toProviderModel(provider: ModelsDevProvider, model: ModelsDevModel): ProviderModelInfo {
+function toProviderModel(provider: ModelsDevProvider, modelID: string, model: ModelsDevModel): ProviderModelInfo {
+  const id = typeof model.id === "string" && model.id.length > 0 ? model.id : modelID
+  const name = typeof model.name === "string" && model.name.length > 0 ? model.name : id
+
   return {
-    id: model.id,
+    id,
     providerID: provider.id,
-    name: model.name,
+    name,
     family: model.family,
     status: model.status ?? "active",
     release_date: model.release_date,
     api: {
-      id: model.id,
+      id,
       url: model.provider?.api ?? provider.api ?? "",
       npm: model.provider?.npm ?? provider.npm ?? "@ai-sdk/openai-compatible",
     },
@@ -125,9 +131,9 @@ function toProviderModel(provider: ModelsDevProvider, model: ModelsDevModel): Pr
       },
     },
     limit: {
-      context: model.limit.context,
-      input: model.limit.input,
-      output: model.limit.output,
+      context: model.limit?.context ?? 0,
+      input: model.limit?.input,
+      output: model.limit?.output ?? 0,
     },
     headers: model.headers ?? {},
     options: model.options ?? {},
@@ -241,9 +247,6 @@ function providerToRows(provider: ProviderInfo, updatedAt: number) {
   const models = Object.values(provider.models).map((model) => ({
     id: runtimeModelKey(provider.id, model.id),
     providerID: provider.id,
-    modelID: model.id,
-    name: model.name,
-    status: model.status,
     capabilities: getModelCapabilities(runtimeModelKey(provider.id, model.id)),
     info: model,
     updatedAt,
@@ -277,7 +280,7 @@ async function buildProviderFromSource(input: {
     Object.fromEntries(
       Object.entries(input.source.models).map(([modelID, model]) => [
         modelID,
-        toProviderModel(input.source, model),
+        toProviderModel(input.source, modelID, model),
       ]),
     ),
     input.config,
@@ -355,8 +358,13 @@ export async function refreshProviderCatalog() {
   }
 
   const updatedAt = Date.now()
-  const providerRows = providers.map((provider) => providerToRows(provider, updatedAt).providerRow)
-  const modelRows = providers.flatMap((provider) => providerToRows(provider, updatedAt).modelRows)
+  const providerRows: Array<ReturnType<typeof providerToRows>["providerRow"]> = []
+  const modelRows: Array<ReturnType<typeof providerToRows>["modelRows"][number]> = []
+  for (const provider of providers) {
+    const rows = providerToRows(provider, updatedAt)
+    providerRows.push(rows.providerRow)
+    modelRows.push(...rows.modelRows)
+  }
 
   await runTx([runtimeDb.providers, runtimeDb.models, runtimeDb.meta], async () => {
     await runtimeDb.providers.clear()
@@ -463,27 +471,6 @@ export async function ensureProviderCatalog() {
   await refreshProviderCatalog()
 }
 
-async function providerFromRows(providerID: string) {
-  const [providerRow, modelRows] = await Promise.all([
-    runtimeDb.providers.get(providerID),
-    runtimeDb.models.where("providerID").equals(providerID).toArray(),
-  ])
-
-  if (!providerRow) return undefined
-
-  const models = Object.fromEntries(modelRows.map((row) => [row.modelID, row.info] as const))
-
-  return {
-    id: providerRow.id,
-    name: providerRow.name,
-    source: providerRow.source,
-    env: providerRow.env,
-    connected: providerRow.connected,
-    options: providerRow.options,
-    models,
-  } as ProviderInfo
-}
-
 export async function listProviderRows() {
   await ensureProviderCatalog()
   return runtimeDb.providers.toArray()
@@ -517,7 +504,16 @@ export async function listModelRows(options: {
 
 export async function getProvider(providerID: string) {
   await ensureProviderCatalog()
-  return providerFromRows(providerID)
+  const providerRow = await runtimeDb.providers.get(providerID)
+  if (!providerRow) return undefined
+  return {
+    id: providerRow.id,
+    name: providerRow.name,
+    source: providerRow.source,
+    env: providerRow.env,
+    connected: providerRow.connected,
+    options: providerRow.options,
+  } satisfies ProviderRuntimeInfo
 }
 
 export async function getModel(providerID: string, modelID: string) {

@@ -19,9 +19,6 @@ export interface RuntimeDbProvider {
 export interface RuntimeDbModel {
   id: string
   providerID: string
-  modelID: string
-  name: string
-  status: ProviderModelInfo["status"]
   capabilities: string[]
   info: ProviderModelInfo
   updatedAt: number

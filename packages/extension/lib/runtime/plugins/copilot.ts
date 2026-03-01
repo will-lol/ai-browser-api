@@ -1,41 +1,10 @@
+import { browser } from "@wxt-dev/browser"
 import { normalizeDomain, sleep } from "@/lib/runtime/plugins/oauth-util"
 import type { RuntimePlugin } from "@/lib/runtime/plugin-manager"
 import { isObject } from "@/lib/runtime/util"
 
 const CLIENT_ID = "Ov23li8tweQw6odWQebz"
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3_000
-
-type PendingCopilotAuth = {
-  domain: string
-  deviceCode: string
-  intervalSeconds: number
-  enterpriseUrl?: string
-}
-
-function resolvePendingCopilotAuth(value: unknown): PendingCopilotAuth {
-  if (!value || typeof value !== "object") {
-    throw new Error("Copilot device auth context is missing")
-  }
-
-  const input = value as Record<string, unknown>
-  const domain = typeof input.domain === "string" ? input.domain : ""
-  const deviceCode = typeof input.deviceCode === "string" ? input.deviceCode : ""
-  const intervalSeconds = typeof input.intervalSeconds === "number" ? input.intervalSeconds : 0
-  const enterpriseUrl = typeof input.enterpriseUrl === "string" && input.enterpriseUrl
-    ? input.enterpriseUrl
-    : undefined
-
-  if (!domain || !deviceCode || intervalSeconds <= 0) {
-    throw new Error("Copilot device auth context is invalid")
-  }
-
-  return {
-    domain,
-    deviceCode,
-    intervalSeconds,
-    enterpriseUrl,
-  }
-}
 
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
@@ -83,11 +52,12 @@ export const copilotAuthPlugin: RuntimePlugin = {
   supportedProviders: ["github-copilot"],
   hooks: {
     auth: {
+      provider: "github-copilot",
       async methods() {
         return [
           {
+            id: "oauth-device",
             type: "oauth",
-            mode: "device",
             label: "Login with GitHub Copilot",
             fields: [
               {
@@ -119,128 +89,115 @@ export const copilotAuthPlugin: RuntimePlugin = {
                 },
               },
             ],
+            async authorize(input) {
+              const deploymentType = input.values.deploymentType?.trim().toLowerCase()
+              const enterpriseInput = input.values.enterpriseUrl?.trim()
+              const enterprise = deploymentType === "enterprise" || Boolean(enterpriseInput)
+
+              const domain = enterprise && enterpriseInput ? normalizeDomain(enterpriseInput) : "github.com"
+              const urls = getUrls(domain)
+
+              const deviceResponse = await fetch(urls.deviceCodeURL, {
+                method: "POST",
+                headers: {
+                  Accept: "application/json",
+                  "Content-Type": "application/json",
+                  "User-Agent": "llm-bridge",
+                },
+                body: JSON.stringify({
+                  client_id: CLIENT_ID,
+                  scope: "read:user",
+                }),
+              })
+
+              if (!deviceResponse.ok) {
+                const detail = await deviceResponse.text().catch(() => "")
+                throw new Error(`Failed to initiate Copilot device authorization (${deviceResponse.status}): ${detail.slice(0, 300)}`)
+              }
+
+              const deviceData = (await deviceResponse.json()) as {
+                verification_uri: string
+                user_code: string
+                device_code: string
+                interval: number
+              }
+
+              await browser.tabs.create({
+                url: deviceData.verification_uri,
+              }).catch(() => {
+                // Ignore tab creation errors and continue polling for completion.
+              })
+
+              const signal = input.signal
+              const deadline = Date.now() + 10 * 60_000
+              const intervalSeconds = Math.max(deviceData.interval || 5, 1)
+
+              while (Date.now() < deadline) {
+                throwIfAborted(signal)
+                const response = await fetch(urls.accessTokenURL, {
+                  method: "POST",
+                  headers: {
+                    Accept: "application/json",
+                    "Content-Type": "application/json",
+                    "User-Agent": "llm-bridge",
+                  },
+                  body: JSON.stringify({
+                    client_id: CLIENT_ID,
+                    device_code: deviceData.device_code,
+                    grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+                  }),
+                })
+
+                if (!response.ok) {
+                  const detail = await response.text().catch(() => "")
+                  throw new Error(`Copilot token polling failed (${response.status}): ${detail.slice(0, 300)}`)
+                }
+
+                const data = (await response.json()) as {
+                  access_token?: string
+                  error?: string
+                  interval?: number
+                }
+
+                if (data.access_token) {
+                  return {
+                    type: "oauth",
+                    access: data.access_token,
+                    refresh: data.access_token,
+                    metadata: {
+                      authMode: "copilot_oauth",
+                      ...(enterprise ? { enterpriseUrl: domain } : {}),
+                    },
+                  }
+                }
+
+                if (data.error === "authorization_pending") {
+                  await sleep(intervalSeconds * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS)
+                  throwIfAborted(signal)
+                  continue
+                }
+
+                if (data.error === "slow_down") {
+                  const nextInterval = data.interval && data.interval > 0 ? data.interval : intervalSeconds + 5
+                  await sleep(nextInterval * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS)
+                  throwIfAborted(signal)
+                  continue
+                }
+
+                throw new Error(`Copilot authorization failed: ${data.error ?? "unknown_error"}`)
+              }
+
+              throw new Error(`Copilot device authorization timed out. Enter code: ${deviceData.user_code}`)
+            },
           },
         ]
       },
-      async authorize(_ctx, method, input, info) {
-        if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
+      async loader(auth) {
+        if (auth?.type !== "oauth") return {}
 
-        const deploymentType = input.deploymentType?.trim().toLowerCase()
-        const enterpriseInput = input.enterpriseUrl?.trim()
-        const enterprise = deploymentType === "enterprise" || Boolean(enterpriseInput)
-
-        const domain = enterprise && enterpriseInput ? normalizeDomain(enterpriseInput) : "github.com"
-        const urls = getUrls(domain)
-
-        const deviceResponse = await fetch(urls.deviceCodeURL, {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "llm-bridge",
-          },
-          body: JSON.stringify({
-            client_id: CLIENT_ID,
-            scope: "read:user",
-          }),
-        })
-
-        if (!deviceResponse.ok) {
-          const detail = await deviceResponse.text().catch(() => "")
-          throw new Error(`Failed to initiate Copilot device authorization (${deviceResponse.status}): ${detail.slice(0, 300)}`)
-        }
-
-        const deviceData = (await deviceResponse.json()) as {
-          verification_uri: string
-          user_code: string
-          device_code: string
-          interval: number
-        }
-
-        return {
-          authorization: {
-            mode: "auto",
-            url: deviceData.verification_uri,
-            instructions: `Enter code: ${deviceData.user_code}`,
-          },
-          context: {
-            domain,
-            deviceCode: deviceData.device_code,
-            intervalSeconds: Math.max(deviceData.interval || 5, 1),
-            enterpriseUrl: enterprise ? domain : undefined,
-          },
-        }
-      },
-      async callback(_ctx, method, input, info) {
-        if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
-        const pending = resolvePendingCopilotAuth(input.context)
-        const signal = input.signal
-
-        const urls = getUrls(pending.domain)
-        const deadline = Date.now() + 10 * 60_000
-        while (Date.now() < deadline) {
-          throwIfAborted(signal)
-          const response = await fetch(urls.accessTokenURL, {
-            method: "POST",
-            headers: {
-              Accept: "application/json",
-              "Content-Type": "application/json",
-              "User-Agent": "llm-bridge",
-            },
-            body: JSON.stringify({
-              client_id: CLIENT_ID,
-              device_code: pending.deviceCode,
-              grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-            }),
-          })
-
-          if (!response.ok) {
-            const detail = await response.text().catch(() => "")
-            throw new Error(`Copilot token polling failed (${response.status}): ${detail.slice(0, 300)}`)
-          }
-
-          const data = (await response.json()) as {
-            access_token?: string
-            error?: string
-            interval?: number
-          }
-
-          if (data.access_token) {
-            return {
-              type: "oauth",
-              access: data.access_token,
-              refresh: data.access_token,
-              metadata: {
-                authMode: "copilot_oauth",
-                ...(pending.enterpriseUrl ? { enterpriseUrl: pending.enterpriseUrl } : {}),
-              },
-            }
-          }
-
-          if (data.error === "authorization_pending") {
-            await sleep(pending.intervalSeconds * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS)
-            throwIfAborted(signal)
-            continue
-          }
-
-          if (data.error === "slow_down") {
-            const nextInterval = data.interval && data.interval > 0 ? data.interval : pending.intervalSeconds + 5
-            await sleep(nextInterval * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS)
-            throwIfAborted(signal)
-            continue
-          }
-
-          throw new Error(`Copilot authorization failed: ${data.error ?? "unknown_error"}`)
-        }
-
-        throw new Error("Copilot device authorization timed out")
-      },
-      async loader(ctx) {
-        if (ctx.auth?.type !== "oauth") return {}
-
-        const enterpriseUrl = ctx.auth.metadata?.enterpriseUrl
+        const enterpriseUrl = auth.metadata?.enterpriseUrl
         const baseURL = enterpriseUrl ? `https://copilot-api.${normalizeDomain(enterpriseUrl)}` : undefined
-        const token = ctx.auth.refresh || ctx.auth.access
+        const token = auth.refresh || auth.access
 
         return {
           ...(baseURL ? { $baseURL: baseURL } : {}),

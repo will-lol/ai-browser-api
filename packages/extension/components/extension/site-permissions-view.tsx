@@ -59,29 +59,29 @@ export function SitePermissionsView({
 
   const frozenOrder = useFrozenOrder(
     allModels,
-    (model) => model.modelId,
+    (model) => model.id,
     (a, b) => {
-      const aPending = pendingModelIds.has(a.modelId);
-      const bPending = pendingModelIds.has(b.modelId);
+      const aPending = pendingModelIds.has(a.id);
+      const bPending = pendingModelIds.has(b.id);
       if (aPending && !bPending) return -1;
       if (!aPending && bPending) return 1;
 
-      const aPermission = permissionByModelId.get(a.modelId) ?? "denied";
-      const bPermission = permissionByModelId.get(b.modelId) ?? "denied";
+      const aPermission = permissionByModelId.get(a.id) ?? "denied";
+      const bPermission = permissionByModelId.get(b.id) ?? "denied";
       if (aPermission === "allowed" && bPermission !== "allowed") return -1;
       if (aPermission !== "allowed" && bPermission === "allowed") return 1;
-      return a.modelName.localeCompare(b.modelName);
+      return a.name.localeCompare(b.name);
     },
   );
 
   const sortedModels = useMemo(() => {
     const modelsById = new Map(
       allModels.map((model) => [
-        model.modelId,
+        model.id,
         {
           ...model,
-          permission: permissionByModelId.get(model.modelId) ?? "denied",
-          isPending: pendingModelIds.has(model.modelId),
+          permission: permissionByModelId.get(model.id) ?? "denied",
+          isPending: pendingModelIds.has(model.id),
         },
       ]),
     );
@@ -97,7 +97,7 @@ export function SitePermissionsView({
     const query = search.toLowerCase();
     return withoutPending.filter(
       (model) =>
-        model.modelName.toLowerCase().includes(query) ||
+        model.name.toLowerCase().includes(query) ||
         model.provider.toLowerCase().includes(query),
     );
   }, [allModels, frozenOrder, pendingModelIds, permissionByModelId, search]);
@@ -238,9 +238,9 @@ export function SitePermissionsView({
               )}
               {sortedModels.map((model) => (
                 <ModelRow
-                  key={model.modelId}
-                  modelId={model.modelId}
-                  modelName={model.modelName}
+                  key={model.id}
+                  id={model.id}
+                  name={model.name}
                   provider={model.provider}
                   capabilities={model.capabilities}
                   permission={model.permission}

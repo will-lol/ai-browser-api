@@ -81,8 +81,8 @@ function createPageBridgeService(): PageBridgeService {
         if (!providerID) continue
 
         const row = {
-          id: model.modelId || model.id,
-          name: model.modelName || model.name,
+          id: model.id,
+          name: model.name,
           capabilities: model.capabilities,
         }
 
@@ -109,18 +109,13 @@ function createPageBridgeService(): PageBridgeService {
 
     async listModels() {
       const runtime = getRuntimeRPC()
-      const response = await runtime.listConnectedModels({
+      const models = await runtime.listModels({
         origin: window.location.origin,
+        connectedOnly: true,
       })
 
       return {
-        models: response.map((model) => ({
-          id: model.id,
-          name: model.name,
-          provider: model.provider,
-          capabilities: model.capabilities,
-          connected: model.connected,
-        })),
+        models,
       }
     },
 

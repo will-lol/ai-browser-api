@@ -9,8 +9,6 @@ import type {
   RuntimeAuthMethod,
   RuntimeOpenProviderAuthWindowResponse,
   RuntimeStartProviderAuthFlowResponse,
-  RuntimeSubmitProviderAuthCodeResponse,
-  RuntimeRetryProviderAuthFlowResponse,
   RuntimeCancelProviderAuthFlowResponse,
 } from "@/lib/runtime/rpc/runtime-rpc-types"
 import type { PermissionStatus } from "@/lib/runtime/permissions"
@@ -88,7 +86,7 @@ export async function fetchProviderAuthFlow(input: {
 
 export async function startRuntimeProviderAuthFlow(input: {
   providerID: string
-  methodIndex: number
+  methodID: string
   values?: Record<string, string>
   origin?: string
 }): Promise<RuntimeStartProviderAuthFlowResponse> {
@@ -97,34 +95,8 @@ export async function startRuntimeProviderAuthFlow(input: {
   return runtime.startProviderAuthFlow({
     origin,
     providerID: input.providerID,
-    methodIndex: input.methodIndex,
+    methodID: input.methodID,
     values: input.values,
-  })
-}
-
-export async function submitRuntimeProviderAuthCode(input: {
-  providerID: string
-  code: string
-  origin?: string
-}): Promise<RuntimeSubmitProviderAuthCodeResponse> {
-  const runtime = getRuntimeRPC()
-  const origin = input.origin ?? currentOrigin()
-  return runtime.submitProviderAuthCode({
-    origin,
-    providerID: input.providerID,
-    code: input.code,
-  })
-}
-
-export async function retryRuntimeProviderAuthFlow(input: {
-  providerID: string
-  origin?: string
-}): Promise<RuntimeRetryProviderAuthFlowResponse> {
-  const runtime = getRuntimeRPC()
-  const origin = input.origin ?? currentOrigin()
-  return runtime.retryProviderAuthFlow({
-    origin,
-    providerID: input.providerID,
   })
 }
 

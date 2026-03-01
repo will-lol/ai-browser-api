@@ -1,7 +1,12 @@
 import { browser } from "@wxt-dev/browser"
 import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store"
 import type { RuntimeConfig } from "@/lib/runtime/config-store"
-import type { ProviderInfo, ProviderModelInfo } from "@/lib/runtime/provider-registry"
+import { parseOAuthCallbackUrl } from "@/lib/runtime/plugins/oauth-util"
+import type {
+  ProviderInfo,
+  ProviderModelInfo,
+  ProviderRuntimeInfo,
+} from "@/lib/runtime/provider-registry"
 import { isObject } from "@/lib/runtime/util"
 
 type AuthFieldCondition = {
@@ -42,53 +47,61 @@ export type AuthField =
       options: AuthFieldOption[]
     } & AuthFieldBase)
 
-export type AuthMethod =
-  | {
-      type: "api"
-      label: string
-      fields?: AuthField[]
-    }
-  | {
-      type: "oauth"
-      label: string
-      mode?: "browser" | "device"
-      fields?: AuthField[]
-    }
+export type AuthMethodType = "oauth" | "pat" | "apikey"
 
-export type AuthAuthorization = {
-  mode: "auto" | "code"
-  url: string
-  instructions?: string
+export interface PluginAuthorizeContext {
+  providerID: string
+  provider: ProviderRuntimeInfo
+  auth?: AuthRecord
+  values: Record<string, string>
+  signal?: AbortSignal
+  oauth: {
+    getRedirectURL: (path?: string) => string
+    launchWebAuthFlow: (url: string) => Promise<string>
+    parseCallback: (url: string) => {
+      code?: string
+      state?: string
+      error?: string
+      errorDescription?: string
+    }
+  }
+  runtime: {
+    now: () => number
+  }
 }
 
-export type AuthContinuationContext = Record<string, unknown>
-
-export type PendingAuthResult = {
-  authorization: AuthAuthorization
-  context?: AuthContinuationContext
+export type AuthMethod = {
+  id: string
+  type: AuthMethodType
+  label: string
+  fields?: AuthField[]
+  authorize: (ctx: PluginAuthorizeContext) => Promise<AuthResult>
 }
 
-export type ResolvedAuthReference = {
-  pluginID: string
-  pluginMethodIndex: number
+export type RuntimeAuthMethod = {
+  id: string
+  type: AuthMethodType
+  label: string
+  fields?: AuthField[]
 }
 
 export interface ResolvedAuthMethod {
   pluginID: string
-  pluginMethodIndex: number
-  method: AuthMethod
+  pluginMethodID: string
+  method: RuntimeAuthMethod
+  pluginMethod: AuthMethod
   plugin: RuntimePlugin
 }
 
 export interface AuthContext {
   providerID: string
-  provider: ProviderInfo
+  provider: ProviderRuntimeInfo
   auth?: AuthRecord
 }
 
 export interface ProviderPatchContext {
   providerID: string
-  provider?: ProviderInfo
+  provider?: ProviderRuntimeInfo
   auth?: AuthRecord
 }
 
@@ -108,25 +121,13 @@ export interface HookResultMerge {
 
 export interface PluginHooks {
   auth?: {
+    provider?: string | "*"
     methods?: (ctx: AuthContext) => Promise<AuthMethod[]>
-    authorize?: (
+    loader?: (
+      auth: AuthRecord | undefined,
+      provider: ProviderRuntimeInfo,
       ctx: AuthContext,
-      method: AuthMethod,
-      input: Record<string, string>,
-      info: { methodIndex: number },
-    ) => Promise<PendingAuthResult | AuthResult | void>
-    callback?: (
-      ctx: AuthContext,
-      method: AuthMethod,
-      input: {
-        context?: AuthContinuationContext
-        code?: string
-        callbackUrl?: string
-        signal?: AbortSignal
-      },
-      info: { methodIndex: number },
-    ) => Promise<AuthResult | void>
-    loader?: (ctx: AuthContext) => Promise<Record<string, unknown>>
+    ) => Promise<Record<string, unknown>>
   }
   provider?: {
     patchProvider?: (ctx: ProviderPatchContext, provider: ProviderInfo) => Promise<ProviderInfo | void>
@@ -172,7 +173,6 @@ export interface RuntimePlugin {
   id: string
   name: string
   supportedProviders?: string[]
-  requiredBrowserApis?: string[]
   hooks: PluginHooks
 }
 
@@ -181,14 +181,11 @@ function supportsProvider(plugin: RuntimePlugin, providerID: string) {
   return plugin.supportedProviders.includes(providerID)
 }
 
-function hasBrowserApi(path: string) {
-  const parts = path.split(".")
-  let node: unknown = browser
-  for (const part of parts) {
-    if (!node || typeof node !== "object" || !(part in node)) return false
-    node = (node as Record<string, unknown>)[part]
-  }
-  return true
+function supportsAuthProvider(plugin: RuntimePlugin, providerID: string) {
+  const authProvider = plugin.hooks.auth?.provider
+  if (authProvider === "*") return true
+  if (typeof authProvider === "string") return authProvider === providerID
+  return supportsProvider(plugin, providerID)
 }
 
 function isMergeResult(value: unknown): value is HookResultMerge {
@@ -203,10 +200,24 @@ function mergeObjects<T extends Record<string, unknown>>(base: T, value: Record<
 }
 
 function normalizeAuthMethod(method: AuthMethod): AuthMethod {
-  if (method.type !== "oauth") return method
+  const id = method.id.trim()
+  if (!id) {
+    throw new Error("Auth method id is required")
+  }
+
   return {
     ...method,
-    mode: method.mode ?? "browser",
+    id,
+    label: method.label.trim() || id,
+  }
+}
+
+function toRuntimeAuthMethod(pluginID: string, method: AuthMethod): RuntimeAuthMethod {
+  return {
+    id: `${pluginID}:${method.id}`,
+    type: method.type,
+    label: method.label,
+    fields: method.fields,
   }
 }
 
@@ -214,47 +225,46 @@ export class PluginManager {
   readonly plugins: RuntimePlugin[]
 
   constructor(plugins: RuntimePlugin[]) {
-    this.plugins = plugins.filter((plugin) => {
-      const required = plugin.requiredBrowserApis ?? []
-      return required.every(hasBrowserApi)
-    })
+    this.plugins = plugins
   }
 
   private providerPlugins(providerID: string) {
     return this.plugins.filter((plugin) => supportsProvider(plugin, providerID))
   }
 
-  private isFallbackAuthPlugin(plugin: RuntimePlugin) {
-    return plugin.id === "builtin-api-key-auth"
-  }
-
   async listResolvedAuthMethods(ctx: AuthContext) {
-    const providerSpecific: ResolvedAuthMethod[] = []
-    const fallback: ResolvedAuthMethod[] = []
+    const resolvedMethods: ResolvedAuthMethod[] = []
+    const seen = new Set<string>()
 
-    for (const plugin of this.providerPlugins(ctx.providerID)) {
+    for (const plugin of this.plugins) {
+      if (!supportsAuthProvider(plugin, ctx.providerID)) continue
+
       try {
         const methods = await plugin.hooks.auth?.methods?.(ctx)
         if (!methods || methods.length === 0) continue
 
-        const target = this.isFallbackAuthPlugin(plugin) ? fallback : providerSpecific
-        methods.forEach((method, pluginMethodIndex) => {
-          target.push({
+        for (const rawMethod of methods) {
+          const pluginMethod = normalizeAuthMethod(rawMethod)
+          const method = toRuntimeAuthMethod(plugin.id, pluginMethod)
+          if (seen.has(method.id)) {
+            throw new Error(`Duplicate auth method id: ${method.id}`)
+          }
+          seen.add(method.id)
+
+          resolvedMethods.push({
             pluginID: plugin.id,
-            pluginMethodIndex,
-            method: normalizeAuthMethod(method),
+            pluginMethodID: pluginMethod.id,
+            method,
+            pluginMethod,
             plugin,
           })
-        })
+        }
       } catch (error) {
         console.error(`[plugin:${plugin.id}] auth.methods failed`, error)
       }
     }
 
-    if (providerSpecific.length > 0) {
-      return [...providerSpecific, ...fallback]
-    }
-    return fallback
+    return resolvedMethods
   }
 
   async listAuthMethods(ctx: AuthContext) {
@@ -262,40 +272,55 @@ export class PluginManager {
     return methods.map((item) => item.method)
   }
 
-  async resolveAuthMethod(ctx: AuthContext, methodIndex: number) {
+  async resolveAuthMethod(ctx: AuthContext, methodID: string) {
     const methods = await this.listResolvedAuthMethods(ctx)
-    return methods[methodIndex]
+    return methods.find((resolved) => resolved.method.id === methodID)
   }
 
-  async resolveAuthMethodByReference(ctx: AuthContext, reference: ResolvedAuthReference) {
-    const methods = await this.listResolvedAuthMethods(ctx)
-    return methods.find((resolved) =>
-      resolved.pluginID === reference.pluginID
-      && resolved.pluginMethodIndex === reference.pluginMethodIndex)
-  }
-
-  async authorize(ctx: AuthContext, resolved: ResolvedAuthMethod, input: Record<string, string>) {
-    const result = await resolved.plugin.hooks.auth?.authorize?.(ctx, resolved.method, input, {
-      methodIndex: resolved.pluginMethodIndex,
-    })
-    if (!result) return undefined
-    return result
-  }
-
-  async callback(
+  async authorize(
     ctx: AuthContext,
     resolved: ResolvedAuthMethod,
-    input: {
-      context?: AuthContinuationContext
-      code?: string
-      callbackUrl?: string
-      signal?: AbortSignal
-    },
+    values: Record<string, string>,
+    signal?: AbortSignal,
   ) {
-    const result = await resolved.plugin.hooks.auth?.callback?.(ctx, resolved.method, input, {
-      methodIndex: resolved.pluginMethodIndex,
+    const result = await resolved.pluginMethod.authorize({
+      providerID: ctx.providerID,
+      provider: ctx.provider,
+      auth: ctx.auth,
+      values,
+      signal,
+      oauth: {
+        getRedirectURL(path = "oauth") {
+          if (!browser.identity?.getRedirectURL) {
+            throw new Error("Browser OAuth flow is unavailable")
+          }
+          return browser.identity.getRedirectURL(path)
+        },
+        async launchWebAuthFlow(url: string) {
+          if (!browser.identity?.launchWebAuthFlow) {
+            throw new Error("Browser OAuth flow is unavailable")
+          }
+
+          const callbackUrl = await browser.identity.launchWebAuthFlow({
+            url,
+            interactive: true,
+          })
+
+          if (!callbackUrl) {
+            throw new Error("OAuth flow did not return a callback URL")
+          }
+
+          return callbackUrl
+        },
+        parseCallback(url: string) {
+          return parseOAuthCallbackUrl(url)
+        },
+      },
+      runtime: {
+        now: () => Date.now(),
+      },
     })
-    if (!result) return undefined
+
     return result
   }
 
@@ -303,7 +328,7 @@ export class PluginManager {
     let options: Record<string, unknown> = {}
     for (const plugin of this.providerPlugins(ctx.providerID)) {
       try {
-        const result = await plugin.hooks.auth?.loader?.(ctx)
+        const result = await plugin.hooks.auth?.loader?.(ctx.auth, ctx.provider, ctx)
         if (!result) continue
         options = mergeObjects(options, result)
       } catch (error) {
@@ -470,5 +495,3 @@ export class PluginManager {
     return next
   }
 }
-
-export type PluginAuthResolved = PendingAuthResult | AuthResult

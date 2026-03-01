@@ -31,12 +31,6 @@ export type RuntimeOpenProviderAuthWindowResponse = Awaited<
 export type RuntimeStartProviderAuthFlowResponse = Awaited<
   ReturnType<MutationService["startRuntimeProviderAuthFlow"]>
 >
-export type RuntimeSubmitProviderAuthCodeResponse = Awaited<
-  ReturnType<MutationService["submitRuntimeProviderAuthCode"]>
->
-export type RuntimeRetryProviderAuthFlowResponse = Awaited<
-  ReturnType<MutationService["retryRuntimeProviderAuthFlow"]>
->
 export type RuntimeCancelProviderAuthFlowResponse = Awaited<
   ReturnType<MutationService["cancelRuntimeProviderAuthFlow"]>
 >
@@ -124,18 +118,9 @@ export interface RuntimeRPCService {
   startProviderAuthFlow(input: {
     origin?: string
     providerID: string
-    methodIndex: number
+    methodID: string
     values?: Record<string, string>
   }): Promise<Awaited<ReturnType<MutationService["startRuntimeProviderAuthFlow"]>>>
-  submitProviderAuthCode(input: {
-    origin?: string
-    providerID: string
-    code: string
-  }): Promise<Awaited<ReturnType<MutationService["submitRuntimeProviderAuthCode"]>>>
-  retryProviderAuthFlow(input: {
-    origin?: string
-    providerID: string
-  }): Promise<Awaited<ReturnType<MutationService["retryRuntimeProviderAuthFlow"]>>>
   cancelProviderAuthFlow(input: {
     origin?: string
     providerID: string

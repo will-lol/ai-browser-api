@@ -5,10 +5,12 @@ export const apiKeyAuthPlugin: RuntimePlugin = {
   name: "Builtin API Key Auth",
   hooks: {
     auth: {
+      provider: "*",
       async methods(ctx) {
         return [
           {
-            type: "api",
+            id: "apikey",
+            type: "apikey",
             label: "API Key",
             fields: [
               {
@@ -20,17 +22,16 @@ export const apiKeyAuthPlugin: RuntimePlugin = {
                 description: "Stored encrypted in extension local storage.",
               },
             ],
+            async authorize(input) {
+              const apiKey = input.values.apiKey?.trim()
+              if (!apiKey) throw new Error("API key is required")
+              return {
+                type: "api",
+                key: apiKey,
+              }
+            },
           },
         ]
-      },
-      async authorize(_ctx, method, input) {
-        if (method.type !== "api") return undefined
-        const apiKey = input.apiKey?.trim()
-        if (!apiKey) throw new Error("API key is required")
-        return {
-          type: "api",
-          key: apiKey,
-        }
       },
     },
   },

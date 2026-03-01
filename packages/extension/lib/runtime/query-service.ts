@@ -38,15 +38,13 @@ export async function listModels(options: {
       const provider = providers.get(row.providerID)
       return {
         id: row.id,
-        modelId: row.id,
-        name: row.name,
-        modelName: row.name,
+        name: row.info.name,
         provider: row.providerID,
         capabilities: row.capabilities,
         connected: provider?.connected ?? false,
       }
     })
-    .sort((a, b) => a.modelName.localeCompare(b.modelName))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export async function getOriginState(origin: string) {
@@ -71,11 +69,11 @@ export async function listPermissionsForOrigin(origin: string) {
   return rows.map((row) => {
     const modelRow = modelById.get(row.modelId)
     const fallbackProvider = row.modelId.split("/")[0] ?? "unknown"
-    const fallbackModelName = row.modelId.split("/")[1] ?? row.modelId
+    const fallbackName = row.modelId.split("/")[1] ?? row.modelId
 
     return {
       modelId: row.modelId,
-      modelName: modelRow?.name ?? fallbackModelName,
+      modelName: modelRow?.info.name ?? fallbackName,
       provider: modelRow?.providerID ?? fallbackProvider,
       status: row.status,
       capabilities: modelRow?.capabilities ?? row.capabilities,

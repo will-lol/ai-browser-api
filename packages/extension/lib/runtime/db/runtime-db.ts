@@ -10,7 +10,7 @@ import type {
   RuntimeDbProvider,
 } from "@/lib/runtime/db/runtime-db-types"
 
-const RUNTIME_DB_NAME = "llm-bridge-runtime-db-v1"
+const RUNTIME_DB_NAME = "llm-bridge-runtime-db-v2"
 
 export class RuntimeDb extends Dexie {
   providers!: EntityTable<RuntimeDbProvider, "id">
@@ -27,7 +27,7 @@ export class RuntimeDb extends Dexie {
 
     this.version(1).stores({
       providers: "id, connected, updatedAt, name",
-      models: "id, [providerID+modelID], providerID, modelID, status, updatedAt, name",
+      models: "id, providerID, updatedAt",
       auth: "providerID, updatedAt",
       origins: "origin, enabled, updatedAt",
       permissions: "id, [origin+modelId], origin, modelId, status, updatedAt",

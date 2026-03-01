@@ -14,10 +14,8 @@ import {
   fetchPermissions,
   fetchProviders,
   openRuntimeProviderAuthWindow,
-  retryRuntimeProviderAuthFlow,
   startRuntimeProviderAuthFlow,
   setRuntimeOriginEnabled,
-  submitRuntimeProviderAuthCode,
   resolveRuntimePermissionRequest,
   dismissRuntimePermissionRequest,
   updateRuntimeModelPermission,
@@ -42,7 +40,7 @@ export function useProviderAuthFlowQuery(
     enabled: providerID.length > 0,
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      if (status === "running" || status === "awaiting_external") return 1_000
+      if (status === "authorizing") return 1_000
       return false
     },
   })
@@ -148,48 +146,13 @@ export function useProviderStartAuthFlowMutation(origin = currentOrigin()) {
   return useMutation({
     mutationFn: ({
       providerID,
-      methodIndex,
+      methodID,
       values,
     }: {
       providerID: string
-      methodIndex: number
+      methodID: string
       values?: Record<string, string>
-    }) => startRuntimeProviderAuthFlow({ providerID, methodIndex, values, origin }),
-    onSuccess: (response) => {
-      queryClient.setQueryData(
-        extensionQueryKeys.authFlow(response.providerID),
-        response.result,
-      )
-    },
-  })
-}
-
-export function useProviderSubmitAuthCodeMutation(origin = currentOrigin()) {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({
-      providerID,
-      code,
-    }: {
-      providerID: string
-      code: string
-    }) => submitRuntimeProviderAuthCode({ providerID, code, origin }),
-    onSuccess: (response) => {
-      queryClient.setQueryData(
-        extensionQueryKeys.authFlow(response.providerID),
-        response.result,
-      )
-    },
-  })
-}
-
-export function useProviderRetryAuthFlowMutation(origin = currentOrigin()) {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: ({ providerID }: { providerID: string }) =>
-      retryRuntimeProviderAuthFlow({ providerID, origin }),
+    }) => startRuntimeProviderAuthFlow({ providerID, methodID, values, origin }),
     onSuccess: (response) => {
       queryClient.setQueryData(
         extensionQueryKeys.authFlow(response.providerID),
