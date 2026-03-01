@@ -82,7 +82,14 @@ export function ExtensionQueryProvider({
           queryKey: extensionQueryKeys.providersRoot,
         })
         queryClient.invalidateQueries({
-          queryKey: extensionQueryKeys.authMethods(event.payload.providerID),
+          queryKey: extensionQueryKeys.authFlow(event.payload.providerID),
+        })
+        return
+      }
+
+      if (event.type === "runtime.authFlow.changed") {
+        queryClient.invalidateQueries({
+          queryKey: extensionQueryKeys.authFlow(event.payload.providerID),
         })
         return
       }

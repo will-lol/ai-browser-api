@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ProvidersIndexRouteImport } from './routes/providers.index'
-import { Route as ProvidersProviderIdConnectRouteImport } from './routes/providers.$providerId.connect'
 
 const ProvidersRoute = ProvidersRouteImport.update({
   id: '/providers',
@@ -29,30 +28,21 @@ const ProvidersIndexRoute = ProvidersIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ProvidersRoute,
 } as any)
-const ProvidersProviderIdConnectRoute =
-  ProvidersProviderIdConnectRouteImport.update({
-    id: '/$providerId/connect',
-    path: '/$providerId/connect',
-    getParentRoute: () => ProvidersRoute,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/providers': typeof ProvidersRouteWithChildren
   '/providers/': typeof ProvidersIndexRoute
-  '/providers/$providerId/connect': typeof ProvidersProviderIdConnectRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/providers': typeof ProvidersIndexRoute
-  '/providers/$providerId/connect': typeof ProvidersProviderIdConnectRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/providers': typeof ProvidersRouteWithChildren
   '/providers/': typeof ProvidersIndexRoute
-  '/providers/$providerId/connect': typeof ProvidersProviderIdConnectRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -60,15 +50,13 @@ export interface FileRouteTypes {
     | '/'
     | '/providers'
     | '/providers/'
-    | '/providers/$providerId/connect'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/providers' | '/providers/$providerId/connect'
+  to: '/' | '/providers'
   id:
     | '__root__'
     | '/'
     | '/providers'
     | '/providers/'
-    | '/providers/$providerId/connect'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -99,24 +87,15 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProvidersIndexRouteImport
       parentRoute: typeof ProvidersRoute
     }
-    '/providers/$providerId/connect': {
-      id: '/providers/$providerId/connect'
-      path: '/$providerId/connect'
-      fullPath: '/providers/$providerId/connect'
-      preLoaderRoute: typeof ProvidersProviderIdConnectRouteImport
-      parentRoute: typeof ProvidersRoute
-    }
   }
 }
 
 interface ProvidersRouteChildren {
   ProvidersIndexRoute: typeof ProvidersIndexRoute
-  ProvidersProviderIdConnectRoute: typeof ProvidersProviderIdConnectRoute
 }
 
 const ProvidersRouteChildren: ProvidersRouteChildren = {
   ProvidersIndexRoute: ProvidersIndexRoute,
-  ProvidersProviderIdConnectRoute: ProvidersProviderIdConnectRoute,
 }
 
 const ProvidersRouteWithChildren = ProvidersRoute._addFileChildren(

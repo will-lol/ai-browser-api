@@ -20,6 +20,14 @@ export const RuntimeEventPayloadSchema = z.discriminatedUnion("type", [
     }),
   }),
   z.object({
+    type: z.literal("runtime.authFlow.changed"),
+    payload: z.object({
+      providerID: z.string(),
+      status: z.string(),
+      updatedAt: z.number(),
+    }),
+  }),
+  z.object({
     type: z.literal("runtime.origin.changed"),
     payload: z.object({
       origin: z.string(),

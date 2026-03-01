@@ -1,13 +1,17 @@
 import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
 import type {
+  RuntimeAuthFlowSnapshot,
   RuntimeModelSummary,
   RuntimeOriginState,
   RuntimePermissionDecision,
   RuntimePermissionEntry,
   RuntimeProviderSummary,
   RuntimeAuthMethod,
-  RuntimeFinishProviderAuthResponse,
-  RuntimeStartProviderAuthResponse,
+  RuntimeOpenProviderAuthWindowResponse,
+  RuntimeStartProviderAuthFlowResponse,
+  RuntimeSubmitProviderAuthCodeResponse,
+  RuntimeRetryProviderAuthFlowResponse,
+  RuntimeCancelProviderAuthFlowResponse,
 } from "@/lib/runtime/rpc/runtime-rpc-types"
 import type { PermissionStatus } from "@/lib/runtime/permissions"
 
@@ -17,6 +21,7 @@ export type AvailableModel = RuntimeModelSummary
 export type OriginState = RuntimeOriginState
 export type PermissionDecision = RuntimePermissionDecision
 export type ExtensionAuthMethod = RuntimeAuthMethod
+export type ExtensionAuthFlowSnapshot = RuntimeAuthFlowSnapshot
 
 export function currentOrigin() {
   if (typeof window === "undefined") return "https://chat.example.com"
@@ -57,23 +62,39 @@ export async function fetchPendingRequests(origin = currentOrigin()) {
   return runtime.listPending({ origin })
 }
 
-export async function fetchProviderAuthMethods(providerID: string, origin = currentOrigin()) {
+export async function openRuntimeProviderAuthWindow(input: {
+  providerID: string
+  origin?: string
+}): Promise<RuntimeOpenProviderAuthWindowResponse> {
   const runtime = getRuntimeRPC()
-  return runtime.getAuthMethods({
+  const origin = input.origin ?? currentOrigin()
+  return runtime.openProviderAuthWindow({
     origin,
-    providerID,
+    providerID: input.providerID,
   })
 }
 
-export async function startRuntimeProviderAuth(input: {
+export async function fetchProviderAuthFlow(input: {
+  providerID: string
+  origin?: string
+}) {
+  const runtime = getRuntimeRPC()
+  const origin = input.origin ?? currentOrigin()
+  return runtime.getProviderAuthFlow({
+    origin,
+    providerID: input.providerID,
+  })
+}
+
+export async function startRuntimeProviderAuthFlow(input: {
   providerID: string
   methodIndex: number
   values?: Record<string, string>
   origin?: string
-}): Promise<RuntimeStartProviderAuthResponse> {
+}): Promise<RuntimeStartProviderAuthFlowResponse> {
   const runtime = getRuntimeRPC()
   const origin = input.origin ?? currentOrigin()
-  return runtime.startProviderAuth({
+  return runtime.startProviderAuthFlow({
     origin,
     providerID: input.providerID,
     methodIndex: input.methodIndex,
@@ -81,21 +102,43 @@ export async function startRuntimeProviderAuth(input: {
   })
 }
 
-export async function finishRuntimeProviderAuth(input: {
+export async function submitRuntimeProviderAuthCode(input: {
   providerID: string
-  methodIndex: number
-  code?: string
-  callbackUrl?: string
+  code: string
   origin?: string
-}): Promise<RuntimeFinishProviderAuthResponse> {
+}): Promise<RuntimeSubmitProviderAuthCodeResponse> {
   const runtime = getRuntimeRPC()
   const origin = input.origin ?? currentOrigin()
-  return runtime.finishProviderAuth({
+  return runtime.submitProviderAuthCode({
     origin,
     providerID: input.providerID,
-    methodIndex: input.methodIndex,
     code: input.code,
-    callbackUrl: input.callbackUrl,
+  })
+}
+
+export async function retryRuntimeProviderAuthFlow(input: {
+  providerID: string
+  origin?: string
+}): Promise<RuntimeRetryProviderAuthFlowResponse> {
+  const runtime = getRuntimeRPC()
+  const origin = input.origin ?? currentOrigin()
+  return runtime.retryProviderAuthFlow({
+    origin,
+    providerID: input.providerID,
+  })
+}
+
+export async function cancelRuntimeProviderAuthFlow(input: {
+  providerID: string
+  reason?: string
+  origin?: string
+}): Promise<RuntimeCancelProviderAuthFlowResponse> {
+  const runtime = getRuntimeRPC()
+  const origin = input.origin ?? currentOrigin()
+  return runtime.cancelProviderAuthFlow({
+    origin,
+    providerID: input.providerID,
+    reason: input.reason,
   })
 }
 

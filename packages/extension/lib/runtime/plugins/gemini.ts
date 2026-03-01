@@ -22,8 +22,6 @@ type PendingGeminiOAuth = {
   projectId?: string
 }
 
-const pendingGemini = new Map<string, PendingGeminiOAuth>()
-
 type GoogleTokenResponse = {
   access_token: string
   expires_in: number
@@ -91,6 +89,32 @@ function isGeminiOAuth(metadata?: Record<string, string>) {
   return metadata?.authMode === "gemini_oauth"
 }
 
+function resolvePendingGeminiOAuth(value: unknown): PendingGeminiOAuth {
+  if (!value || typeof value !== "object") {
+    throw new Error("Gemini OAuth session context is missing")
+  }
+
+  const input = value as Record<string, unknown>
+  const verifier = typeof input.verifier === "string" ? input.verifier : ""
+  const state = typeof input.state === "string" ? input.state : ""
+  const redirectUri = typeof input.redirectUri === "string" ? input.redirectUri : ""
+
+  if (!verifier || !state || !redirectUri) {
+    throw new Error("Gemini OAuth session context is invalid")
+  }
+
+  const projectId = typeof input.projectId === "string" && input.projectId
+    ? input.projectId
+    : undefined
+
+  return {
+    verifier,
+    state,
+    redirectUri,
+    projectId,
+  }
+}
+
 export const geminiOAuthPlugin: RuntimePlugin = {
   id: "builtin-gemini-auth",
   name: "Builtin Gemini OAuth",
@@ -115,7 +139,7 @@ export const geminiOAuthPlugin: RuntimePlugin = {
           },
         ]
       },
-      async authorize(ctx, method, input, info) {
+      async authorize(_ctx, method, input, info) {
         if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
 
         const redirectUri = browser.identity?.getRedirectURL("google-gemini") ?? "https://localhost.invalid/google-gemini"
@@ -134,50 +158,46 @@ export const geminiOAuthPlugin: RuntimePlugin = {
         url.searchParams.set("prompt", "consent")
         url.hash = "llm-bridge"
 
-        pendingGemini.set(ctx.providerID, {
-          verifier: pkce.verifier,
-          state,
-          redirectUri,
-          projectId: input.projectId?.trim() || undefined,
-        })
-
         return {
-          mode: "auto",
-          url: url.toString(),
-          instructions: "Complete Google OAuth in your browser.",
+          authorization: {
+            mode: "auto",
+            url: url.toString(),
+            instructions: "Complete Google OAuth in your browser.",
+          },
+          context: {
+            verifier: pkce.verifier,
+            state,
+            redirectUri,
+            projectId: input.projectId?.trim() || undefined,
+          },
         }
       },
-      async callback(ctx, method, input, info) {
+      async callback(_ctx, method, input, info) {
         if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
-        const pending = pendingGemini.get(ctx.providerID)
-        if (!pending) throw new Error("Gemini OAuth session not found")
+        const pending = resolvePendingGeminiOAuth(input.context)
 
-        try {
-          const parsed = parseOAuthCallbackInput(input)
-          if (!parsed.code) throw new Error("Missing Google authorization code")
-          if (parsed.state && parsed.state !== pending.state) {
-            throw new Error("OAuth state mismatch")
-          }
+        const parsed = parseOAuthCallbackInput(input)
+        if (!parsed.code) throw new Error("Missing Google authorization code")
+        if (parsed.state && parsed.state !== pending.state) {
+          throw new Error("OAuth state mismatch")
+        }
 
-          const tokens = await exchangeAuthorizationCode(parsed.code, pending.verifier, pending.redirectUri)
-          if (!tokens.refresh_token) {
-            throw new Error("Missing refresh token in Google OAuth response")
-          }
+        const tokens = await exchangeAuthorizationCode(parsed.code, pending.verifier, pending.redirectUri)
+        if (!tokens.refresh_token) {
+          throw new Error("Missing refresh token in Google OAuth response")
+        }
 
-          const email = await resolveUserEmail(tokens.access_token)
-          return {
-            type: "oauth",
-            access: tokens.access_token,
-            refresh: tokens.refresh_token,
-            expiresAt: Date.now() + tokens.expires_in * 1000,
-            metadata: {
-              authMode: "gemini_oauth",
-              ...(email ? { email } : {}),
-              ...(pending.projectId ? { projectId: pending.projectId } : {}),
-            },
-          }
-        } finally {
-          pendingGemini.delete(ctx.providerID)
+        const email = await resolveUserEmail(tokens.access_token)
+        return {
+          type: "oauth",
+          access: tokens.access_token,
+          refresh: tokens.refresh_token,
+          expiresAt: Date.now() + tokens.expires_in * 1000,
+          metadata: {
+            authMode: "gemini_oauth",
+            ...(email ? { email } : {}),
+            ...(pending.projectId ? { projectId: pending.projectId } : {}),
+          },
         }
       },
       async loader(ctx) {

@@ -1,44 +1,16 @@
-const DEFAULT_SOURCE = "llm-bridge-page"
-const DEFAULT_TARGET = "llm-bridge-content"
+import { IframeChildIO, RPCChannel, type IoInterface } from "kkrpc/browser"
+import type {
+  BridgeListModelsResponse,
+  BridgeModelDescriptorResponse,
+  BridgePermissionRequest as InternalBridgePermissionRequest,
+  PageBridgeService,
+  SerializedSupportedUrlPattern,
+} from "@llm-bridge/extension/lib/bridge/page-rpc-types"
 
-type BridgeMessage = {
-  source?: string
-  requestId?: string
-  type?: string
-  ok?: boolean
-  payload?: unknown
-  error?: string
-}
-
-type SerializedSupportedUrlPattern = {
-  source: string
-  flags?: string
-}
-
-type PendingRequest = {
-  resolve: (value: any) => void
-  reject: (error: Error) => void
-  timeoutId: number
-}
-
-type StreamHandler = {
-  push: (part: unknown) => void
-  finish: () => void
-  fail: (error: unknown) => void
-}
+const DEFAULT_TIMEOUT_MS = 30_000
 
 export type BridgeClientOptions = {
-  targetWindow?: Window
   timeoutMs?: number
-  source?: string
-  target?: string
-}
-
-export type BridgePermissionRequest = {
-  modelId?: string
-  modelName?: string
-  provider?: string
-  capabilities?: string[]
 }
 
 export type BridgeModelSummary = {
@@ -47,6 +19,13 @@ export type BridgeModelSummary = {
   provider: string
   capabilities?: unknown
   connected?: boolean
+}
+
+export type BridgePermissionRequest = {
+  modelId?: string
+  modelName?: string
+  provider?: string
+  capabilities?: string[]
 }
 
 export type BridgeModelDescriptor = {
@@ -106,7 +85,7 @@ function splitAbortSignal(options: BridgeModelCallOptions | undefined) {
 }
 
 function toSupportedUrls(
-  input: unknown,
+  input: Record<string, SerializedSupportedUrlPattern[]> | undefined,
 ): Record<string, RegExp[]> {
   const supportedUrls: Record<string, RegExp[]> = {}
   if (!input || typeof input !== "object") return supportedUrls
@@ -119,12 +98,10 @@ function toSupportedUrls(
         if (pattern instanceof RegExp) return pattern
         if (typeof pattern === "string") return new RegExp(pattern)
         if (!pattern || typeof pattern !== "object") return null
-
-        const serialized = pattern as SerializedSupportedUrlPattern
-        if (typeof serialized.source !== "string") return null
+        if (typeof pattern.source !== "string") return null
 
         try {
-          return new RegExp(serialized.source, typeof serialized.flags === "string" ? serialized.flags : "")
+          return new RegExp(pattern.source, typeof pattern.flags === "string" ? pattern.flags : "")
         } catch {
           return null
         }
@@ -137,131 +114,61 @@ function toSupportedUrls(
   return supportedUrls
 }
 
-export function createLLMBridgeClient(options: BridgeClientOptions = {}): BridgeClient {
-  const root = options.targetWindow ?? window
-  const source = options.source ?? DEFAULT_SOURCE
-  const target = options.target ?? DEFAULT_TARGET
-  const timeoutMs = options.timeoutMs ?? 30_000
+function createReadableStreamFromIterable(
+  iterable: AsyncIterable<unknown>,
+  onCancel: () => void,
+) {
+  const iterator = iterable[Symbol.asyncIterator]()
 
+  return new ReadableStream<unknown>({
+    async pull(controller) {
+      try {
+        const chunk = await iterator.next()
+        if (chunk.done) {
+          controller.close()
+          return
+        }
+
+        controller.enqueue(chunk.value)
+      } catch (error) {
+        controller.error(error instanceof Error ? error : new Error(String(error)))
+      }
+    },
+    cancel() {
+      onCancel()
+      void iterator.return?.()
+    },
+  })
+}
+
+export function createLLMBridgeClient(options: BridgeClientOptions = {}): BridgeClient {
   let seq = 0
-  const pending = new Map<string, PendingRequest>()
-  const streamHandlers = new Map<string, StreamHandler>()
 
   function nextId() {
     seq += 1
     return `req_${Date.now()}_${seq}`
   }
 
-  function post(type: string, payload: Record<string, unknown>, requestId?: string) {
-    const id = requestId ?? nextId()
-    root.postMessage(
-      {
-        source,
-        requestId: id,
-        type,
-        payload,
-      },
-      "*",
-    )
-    return id
-  }
+  const io = new IframeChildIO()
+  const channel = new RPCChannel<Record<string, never>, PageBridgeService, IoInterface>(io, {
+    expose: {},
+    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  })
 
-  function request<T = unknown>(type: string, payload: Record<string, unknown>, requestId?: string) {
-    const id = post(type, payload, requestId)
-    return new Promise<T>((resolve, reject) => {
-      const timeoutId = root.setTimeout(() => {
-        if (!pending.has(id)) return
-        pending.delete(id)
-        reject(new Error(`Request timed out: ${type}`))
-      }, timeoutMs)
+  const api = channel.getAPI()
 
-      pending.set(id, { resolve, reject, timeoutId })
-    })
-  }
-
-  function createModelStream(requestId: string, onClose: () => void) {
-    const queue: unknown[] = []
-    let controller: ReadableStreamDefaultController<unknown> | undefined
-    let done = false
-    let error: Error | undefined
-    let finalized = false
-
-    const finalize = () => {
-      if (finalized) return
-      finalized = true
-      streamHandlers.delete(requestId)
-      onClose()
-    }
-
-    const flush = () => {
-      if (!controller) return
-
-      while (queue.length > 0) {
-        controller.enqueue(queue.shift())
-      }
-
-      if (error) {
-        controller.error(error)
-        finalize()
-        return
-      }
-
-      if (done) {
-        controller.close()
-        finalize()
-      }
-    }
-
-    streamHandlers.set(requestId, {
-      push(part) {
-        if (finalized) return
-        if (controller) {
-          controller.enqueue(part)
-        } else {
-          queue.push(part)
-        }
-      },
-      finish() {
-        if (finalized) return
-        done = true
-        flush()
-      },
-      fail(message) {
-        if (finalized) return
-        error = message instanceof Error ? message : new Error(String(message || "Stream failed"))
-        done = true
-        flush()
-      },
-    })
-
-    return new ReadableStream<unknown>({
-      start(nextController) {
-        controller = nextController
-        flush()
-      },
-      cancel() {
-        finalize()
-        post("abort", { requestId }, requestId)
-      },
-    })
-  }
-
-  function createLanguageModel(modelId: string, descriptor: unknown): BridgeLanguageModel {
-    const safeDescriptor = descriptor && typeof descriptor === "object"
-      ? descriptor as { modelId?: string; provider?: string; supportedUrls?: unknown }
-      : undefined
-
+  function createLanguageModel(modelId: string, descriptor: BridgeModelDescriptorResponse): BridgeLanguageModel {
     const resolvedModelId =
-      typeof safeDescriptor?.modelId === "string" && safeDescriptor.modelId.length > 0
-        ? safeDescriptor.modelId
+      typeof descriptor?.modelId === "string" && descriptor.modelId.length > 0
+        ? descriptor.modelId
         : modelId
 
     const provider =
-      typeof safeDescriptor?.provider === "string" && safeDescriptor.provider.length > 0
-        ? safeDescriptor.provider
+      typeof descriptor?.provider === "string" && descriptor.provider.length > 0
+        ? descriptor.provider
         : "unknown"
 
-    const supportedUrls = toSupportedUrls(safeDescriptor?.supportedUrls)
+    const supportedUrls = toSupportedUrls(descriptor?.supportedUrls)
 
     return {
       specificationVersion: "v3",
@@ -277,16 +184,17 @@ export function createLLMBridgeClient(options: BridgeClientOptions = {}): Bridge
         }
 
         const onAbort = () => {
-          post("abort", { requestId }, requestId)
+          void api.abort({ requestId })
         }
 
         abortSignal?.addEventListener("abort", onAbort, { once: true })
 
         try {
-          return await request("model-do-generate", {
+          return await api.modelDoGenerate({
+            requestId,
             modelId: resolvedModelId,
             options: callOptions,
-          }, requestId)
+          })
         } finally {
           abortSignal?.removeEventListener("abort", onAbort)
         }
@@ -299,114 +207,87 @@ export function createLLMBridgeClient(options: BridgeClientOptions = {}): Bridge
           throw createAbortError()
         }
 
+        const streamIterable = await api.modelDoStream({
+          requestId,
+          modelId: resolvedModelId,
+          options: callOptions,
+        })
+
+        const onCancel = () => {
+          void api.abort({ requestId })
+        }
+
+        const stream = createReadableStreamFromIterable(streamIterable, onCancel)
+
         const onAbort = () => {
-          post("abort", { requestId }, requestId)
+          onCancel()
         }
 
         abortSignal?.addEventListener("abort", onAbort, { once: true })
 
-        const stream = createModelStream(requestId, () => {
-          abortSignal?.removeEventListener("abort", onAbort)
-        })
+        return {
+          stream: new ReadableStream<unknown>({
+            start(controller) {
+              const reader = stream.getReader()
 
-        try {
-          await request("model-do-stream", {
-            modelId: resolvedModelId,
-            options: callOptions,
-          }, requestId)
-        } catch (error) {
-          const handler = streamHandlers.get(requestId)
-          handler?.fail(error)
-          throw error
+              const pump = async () => {
+                try {
+                  while (true) {
+                    const result = await reader.read()
+                    if (result.done) {
+                      controller.close()
+                      return
+                    }
+                    controller.enqueue(result.value)
+                  }
+                } catch (error) {
+                  controller.error(error instanceof Error ? error : new Error(String(error)))
+                } finally {
+                  abortSignal?.removeEventListener("abort", onAbort)
+                  reader.releaseLock()
+                }
+              }
+
+              void pump()
+            },
+            cancel() {
+              onCancel()
+            },
+          }),
         }
-
-        return { stream }
       },
     }
   }
 
-  function onMessage(event: MessageEvent<unknown>) {
-    if (event.source !== root) return
-    const data = event.data
-    if (!data || typeof data !== "object") return
-
-    const message = data as BridgeMessage
-    if (message.source !== target || typeof message.requestId !== "string") return
-
-    if (message.type === "response") {
-      const match = pending.get(message.requestId)
-      if (!match) return
-
-      pending.delete(message.requestId)
-      root.clearTimeout(match.timeoutId)
-
-      if (message.ok) {
-        match.resolve(message.payload)
-      } else {
-        match.reject(new Error(message.error || "Bridge request failed"))
-      }
-
-      return
-    }
-
-    if (message.type === "stream") {
-      const stream = streamHandlers.get(message.requestId)
-      if (!stream) return
-
-      if (!message.ok) {
-        stream.fail(message.error || "Stream failed")
-        return
-      }
-
-      const payload = message.payload
-      if (!payload || typeof payload !== "object") return
-
-      const streamMessage = payload as { type?: string; data?: unknown }
-      if (streamMessage.type === "chunk") {
-        stream.push(streamMessage.data)
-        return
-      }
-
-      if (streamMessage.type === "done") {
-        stream.finish()
-      }
-    }
-  }
-
-  root.addEventListener("message", onMessage)
-
   return {
-    listModels() {
-      return request<{ models?: BridgeModelSummary[] }>("list-models", {}).then((response) =>
-        Array.isArray(response.models) ? response.models : [],
-      )
+    async listModels() {
+      const response = await api.listModels() as BridgeListModelsResponse
+      return Array.isArray(response.models) ? response.models : []
     },
     async getModel(modelId) {
       if (typeof modelId !== "string" || modelId.length === 0) {
         throw new Error("modelId is required")
       }
 
-      const descriptor = await request("get-model", { modelId })
-      return createLanguageModel(modelId, descriptor)
+      const descriptor = await api.getModel({
+        modelId,
+        requestId: nextId(),
+      })
+
+      return createLanguageModel(modelId, descriptor as BridgeModelDescriptorResponse)
     },
     getState() {
-      return request("get-state", {})
+      return api.getState()
     },
     requestPermission(payload = {}) {
-      return request("request-permission", payload as Record<string, unknown>)
+      return api.requestPermission(payload as InternalBridgePermissionRequest)
     },
     abort(requestId) {
       if (!requestId) return
-      post("abort", { requestId }, requestId)
+      void api.abort({ requestId })
     },
     destroy() {
-      root.removeEventListener("message", onMessage)
-      for (const [requestId, match] of pending.entries()) {
-        root.clearTimeout(match.timeoutId)
-        match.reject(new Error(`Bridge client destroyed before response for ${requestId}`))
-      }
-      pending.clear()
-      streamHandlers.clear()
+      channel.destroy()
     },
   }
 }

@@ -27,7 +27,7 @@ export const extensionQueryKeys = {
   pendingRequests: (origin: string) =>
     [...extensionQueryKeys.pendingRequestsRoot, origin] as const,
 
-  authMethodsRoot: ["authMethods"] as const,
-  authMethods: (providerID: string) =>
-    [...extensionQueryKeys.authMethodsRoot, providerID] as const,
+  authFlowRoot: ["authFlow"] as const,
+  authFlow: (providerID: string) =>
+    [...extensionQueryKeys.authFlowRoot, providerID] as const,
 }

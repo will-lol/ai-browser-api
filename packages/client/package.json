@@ -17,7 +17,11 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "kkrpc": "^0.6.7"
+  },
   "devDependencies": {
+    "@llm-bridge/extension": "workspace:*",
     "typescript": "5.9.3"
   }
 }

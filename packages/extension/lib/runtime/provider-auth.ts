@@ -1,11 +1,14 @@
 import { getAuth, removeAuth, setAuth } from "@/lib/runtime/auth-store"
 import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store"
-import type { AuthAuthorization, AuthMethod, ResolvedAuthMethod } from "@/lib/runtime/plugin-manager"
+import type {
+  AuthContinuationContext,
+  AuthMethod,
+  PendingAuthResult,
+  ResolvedAuthReference,
+} from "@/lib/runtime/plugin-manager"
 import { getPluginManager } from "@/lib/runtime/plugins"
 import { getProvider } from "@/lib/runtime/provider-registry"
 import type { ProviderInfo } from "@/lib/runtime/provider-registry"
-
-const PENDING_AUTH_TTL_MS = 10 * 60_000
 
 type AuthContextResolved = {
   providerID: string
@@ -13,17 +16,24 @@ type AuthContextResolved = {
   auth?: AuthRecord
 }
 
-type PendingAuthSession = {
-  providerID: string
+export type PendingProviderAuthSession = {
   methodIndex: number
   method: AuthMethod
-  resolved: ResolvedAuthMethod
-  authorization: AuthAuthorization
-  createdAt: number
-  expiresAt: number
+  resolved: ResolvedAuthReference
+  authorization: PendingAuthResult["authorization"]
+  context?: AuthContinuationContext
 }
 
-const pendingSessions = new Map<string, PendingAuthSession>()
+export type StartProviderAuthResult =
+  | {
+      methodIndex: number
+      method: AuthMethod
+      connected: true
+    }
+  | ({
+      connected: false
+      pending: true
+    } & PendingProviderAuthSession)
 
 async function resolveAuthContext(
   providerID: string,
@@ -63,56 +73,11 @@ async function resolveMethod(providerID: string, methodIndex: number) {
     ctx,
     method: resolved.method,
     resolved,
-    methods,
   }
 }
 
-function clearPendingSession(providerID: string) {
-  pendingSessions.delete(providerID)
-}
-
-function setPendingSession(input: {
-  providerID: string
-  methodIndex: number
-  method: AuthMethod
-  resolved: ResolvedAuthMethod
-  authorization: AuthAuthorization
-}) {
-  const now = Date.now()
-  pendingSessions.set(input.providerID, {
-    providerID: input.providerID,
-    methodIndex: input.methodIndex,
-    method: input.method,
-    resolved: input.resolved,
-    authorization: input.authorization,
-    createdAt: now,
-    expiresAt: now + PENDING_AUTH_TTL_MS,
-  })
-}
-
-function getPendingSession(providerID: string) {
-  const pending = pendingSessions.get(providerID)
-  if (!pending) return undefined
-  if (Date.now() <= pending.expiresAt) return pending
-  pendingSessions.delete(providerID)
-  return undefined
-}
-
-export async function listProviderAuthMethods(
-  providerID: string,
-  options: {
-    provider?: ProviderInfo
-    auth?: AuthRecord
-  } = {},
-) {
-  const provider = options.provider ?? (await getProvider(providerID))
-  if (!provider) return []
-  const pluginManager = getPluginManager()
-  return pluginManager.listAuthMethods({
-    providerID,
-    provider,
-    auth: options.auth ?? (await getAuth(providerID)),
-  })
+function isPendingAuthResult(value: AuthResult | PendingAuthResult): value is PendingAuthResult {
+  return "authorization" in value
 }
 
 async function persistAuth(providerID: string, result: AuthResult) {
@@ -135,19 +100,35 @@ async function persistAuth(providerID: string, result: AuthResult) {
   })
 }
 
+export async function listProviderAuthMethods(
+  providerID: string,
+  options: {
+    provider?: ProviderInfo
+    auth?: AuthRecord
+  } = {},
+) {
+  const provider = options.provider ?? (await getProvider(providerID))
+  if (!provider) return []
+  const pluginManager = getPluginManager()
+  return pluginManager.listAuthMethods({
+    providerID,
+    provider,
+    auth: options.auth ?? (await getAuth(providerID)),
+  })
+}
+
 export async function startProviderAuth(input: {
   providerID: string
   methodIndex: number
   values?: Record<string, string>
-}) {
+}): Promise<StartProviderAuthResult> {
   const { ctx, method, resolved } = await resolveMethod(input.providerID, input.methodIndex)
   const pluginManager = getPluginManager()
-  const authorization = await pluginManager.authorize(ctx, resolved, input.values ?? {})
-  if (!authorization) throw new Error(`Auth method index ${input.methodIndex} did not return authorization`)
+  const result = await pluginManager.authorize(ctx, resolved, input.values ?? {})
+  if (!result) throw new Error(`Auth method index ${input.methodIndex} did not return authorization`)
 
-  if ("type" in authorization) {
-    await persistAuth(input.providerID, authorization)
-    clearPendingSession(input.providerID)
+  if (!isPendingAuthResult(result)) {
+    await persistAuth(input.providerID, result)
     return {
       methodIndex: input.methodIndex,
       method,
@@ -159,42 +140,51 @@ export async function startProviderAuth(input: {
     throw new Error(`Authorization flow for provider ${input.providerID} method ${input.methodIndex} is invalid`)
   }
 
-  setPendingSession({
-    providerID: input.providerID,
-    methodIndex: input.methodIndex,
-    method,
-    resolved,
-    authorization,
-  })
-
   return {
-    methodIndex: input.methodIndex,
-    method,
     connected: false,
     pending: true,
-    authorization,
+    methodIndex: input.methodIndex,
+    method,
+    authorization: result.authorization,
+    context: result.context,
+    resolved: {
+      pluginID: resolved.pluginID,
+      pluginMethodIndex: resolved.pluginMethodIndex,
+    },
   }
 }
 
 export async function finishProviderAuth(input: {
   providerID: string
   methodIndex: number
+  resolved: ResolvedAuthReference
+  context?: AuthContinuationContext
   code?: string
   callbackUrl?: string
+  signal?: AbortSignal
 }) {
-  const pending = getPendingSession(input.providerID)
-  if (!pending) {
-    throw new Error(`Pending auth session for provider ${input.providerID} not found or expired`)
-  }
-  if (pending.methodIndex !== input.methodIndex) {
-    throw new Error(`Auth method index mismatch for provider ${input.providerID}`)
-  }
-
   const ctx = await resolveAuthContext(input.providerID)
   const pluginManager = getPluginManager()
-  const result = await pluginManager.callback(ctx, pending.resolved, {
+  const resolved = await pluginManager.resolveAuthMethodByReference(ctx, input.resolved)
+  if (!resolved) {
+    throw new Error(`Pending auth method ${input.resolved.pluginID}:${input.resolved.pluginMethodIndex} was not found for provider ${input.providerID}`)
+  }
+
+  const methods = await pluginManager.listAuthMethods(ctx)
+  if (input.methodIndex < 0 || input.methodIndex >= methods.length) {
+    throw new Error(`Auth method index ${input.methodIndex} is out of bounds for provider ${input.providerID}`)
+  }
+
+  const method = methods[input.methodIndex]
+  if (method.type !== resolved.method.type || method.label !== resolved.method.label) {
+    throw new Error(`Auth method changed while finishing provider ${input.providerID}`)
+  }
+
+  const result = await pluginManager.callback(ctx, resolved, {
+    context: input.context,
     code: input.code?.trim() || undefined,
     callbackUrl: input.callbackUrl?.trim() || undefined,
+    signal: input.signal,
   })
 
   if (!result) {
@@ -202,16 +192,14 @@ export async function finishProviderAuth(input: {
   }
 
   await persistAuth(input.providerID, result)
-  clearPendingSession(input.providerID)
 
   return {
     methodIndex: input.methodIndex,
-    method: pending.method,
+    method: resolved.method,
     connected: true,
   }
 }
 
 export async function disconnectProvider(providerID: string) {
-  clearPendingSession(providerID)
   await removeAuth(providerID)
 }

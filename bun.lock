@@ -8,7 +8,11 @@
     "packages/client": {
       "name": "@llm-bridge/client",
       "version": "0.1.0",
+      "dependencies": {
+        "kkrpc": "^0.6.7",
+      },
       "devDependencies": {
+        "@llm-bridge/extension": "workspace:*",
         "typescript": "5.9.3",
       },
     },

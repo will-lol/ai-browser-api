@@ -1,83 +1,50 @@
-import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
+import { IframeParentIO, RPCChannel, type IoInterface } from "kkrpc/browser"
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
+import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
 import type { RuntimeModelCallInput } from "@/lib/runtime/rpc/runtime-rpc-types"
+import type {
+  BridgeModelCallRequest,
+  BridgeModelDescriptorResponse,
+  PageBridgeService,
+} from "@/lib/bridge/page-rpc-types"
 
-const PAGE_SOURCE = "llm-bridge-page"
-const CONTENT_SOURCE = "llm-bridge-content"
-
-type BridgeMessage = {
-  source?: string
-  requestId?: string
-  type?: string
-  payload?: Record<string, unknown>
-}
-
-type SerializedSupportedUrlPattern = {
-  source: string
-  flags: string
-}
+const BRIDGE_TIMEOUT_MS = 30_000
 
 const activeStreamIterators = new Map<string, AsyncIterator<LanguageModelV3StreamPart>>()
-let bridgeInstalled = false
 
-function sendToPage(
-  requestId: string,
-  type: "response" | "stream",
-  payload: unknown,
-  ok = true,
-  error?: string,
-) {
-  window.postMessage(
-    {
-      source: CONTENT_SOURCE,
-      requestId,
-      type,
-      ok,
-      payload,
-      error,
-    },
-    "*",
-  )
+let bridgeChannel: RPCChannel<PageBridgeService, Record<string, never>, IoInterface> | null = null
+
+function nextBridgeRequestId() {
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
 }
 
-function isBridgeMessage(data: unknown): data is BridgeMessage {
-  return !!data && typeof data === "object"
-}
+function normalizeModelCallInput(input: BridgeModelCallRequest) {
+  const requestId = typeof input.requestId === "string" && input.requestId.length > 0
+    ? input.requestId
+    : nextBridgeRequestId()
 
-async function pumpStreamToPage(
-  requestId: string,
-  iterator: AsyncIterator<LanguageModelV3StreamPart>,
-) {
-  try {
-    while (true) {
-      const chunk = await iterator.next()
-      if (chunk.done) {
-        sendToPage(requestId, "stream", { type: "done" })
-        return
-      }
+  const sessionID = typeof input.sessionID === "string" && input.sessionID.length > 0
+    ? input.sessionID
+    : requestId
 
-      sendToPage(requestId, "stream", {
-        type: "chunk",
-        data: chunk.value,
-      })
-    }
-  } catch (error) {
-    if (!activeStreamIterators.has(requestId)) {
-      sendToPage(requestId, "stream", { type: "done" })
-      return
-    }
+  const modelId = typeof input.modelId === "string" ? input.modelId : ""
 
-    const message = error instanceof Error ? error.message : String(error)
-    sendToPage(requestId, "stream", { type: "done" }, false, message)
-  } finally {
-    activeStreamIterators.delete(requestId)
+  const options = (input.options as RuntimeModelCallInput["options"] | undefined) ?? {
+    prompt: [],
+  }
+
+  return {
+    requestId,
+    sessionID,
+    modelId,
+    options,
   }
 }
 
 function serializeSupportedUrls(
   input: Record<string, RegExp[]> | undefined,
-): Record<string, SerializedSupportedUrlPattern[]> {
-  const output: Record<string, SerializedSupportedUrlPattern[]> = {}
+): BridgeModelDescriptorResponse["supportedUrls"] {
+  const output: BridgeModelDescriptorResponse["supportedUrls"] = {}
   if (!input) return output
 
   for (const [mediaType, patterns] of Object.entries(input)) {
@@ -93,16 +60,12 @@ function serializeSupportedUrls(
   return output
 }
 
-async function handleRequest(message: BridgeMessage) {
-  const requestId = message.requestId
-  if (!requestId || !message.type) return
-
-  try {
-    const payload = message.payload ?? {}
-    const runtime = getRuntimeRPC()
-
-    if (message.type === "get-state") {
+function createPageBridgeService(): PageBridgeService {
+  return {
+    async getState() {
+      const runtime = getRuntimeRPC()
       const currentOrigin = window.location.origin
+
       const [providersData, modelsData, permissionsData, pendingData, originData] = await Promise.all([
         runtime.listProviders({ origin: currentOrigin }),
         runtime.listModels({ origin: currentOrigin }),
@@ -111,7 +74,8 @@ async function handleRequest(message: BridgeMessage) {
         runtime.getOriginState({ origin: currentOrigin }),
       ])
 
-      const modelsByProvider = new Map<string, Array<Record<string, unknown>>>()
+      const modelsByProvider = new Map<string, Array<{ id: string; name: string; capabilities?: unknown }>>()
+
       for (const model of modelsData) {
         const providerID = model.provider
         if (!providerID) continue
@@ -127,52 +91,52 @@ async function handleRequest(message: BridgeMessage) {
         modelsByProvider.set(providerID, existing)
       }
 
-      const normalizedProviders = providersData.map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        connected: provider.connected,
-        env: provider.env,
-        authMethods: [],
-        models: modelsByProvider.get(provider.id) ?? [],
-      }))
-
-      sendToPage(requestId, "response", {
-        providers: normalizedProviders,
+      return {
+        providers: providersData.map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          connected: provider.connected,
+          env: provider.env,
+          authMethods: [],
+          models: modelsByProvider.get(provider.id) ?? [],
+        })),
         permissions: permissionsData,
         pendingRequests: pendingData,
         originEnabled: originData.enabled,
         currentOrigin,
-      })
-      return
-    }
+      }
+    },
 
-    if (message.type === "list-models") {
+    async listModels() {
+      const runtime = getRuntimeRPC()
       const response = await runtime.listConnectedModels({
         origin: window.location.origin,
       })
 
-      const models = response.map((model) => ({
-        id: model.id,
-        name: model.name,
-        provider: model.provider,
-        capabilities: model.capabilities,
-        connected: model.connected,
-      }))
+      return {
+        models: response.map((model) => ({
+          id: model.id,
+          name: model.name,
+          provider: model.provider,
+          capabilities: model.capabilities,
+          connected: model.connected,
+        })),
+      }
+    },
 
-      sendToPage(requestId, "response", {
-        models,
-      })
-      return
-    }
-
-    if (message.type === "get-model") {
-      const modelId = typeof payload.modelId === "string" ? payload.modelId : ""
+    async getModel(input) {
+      const runtime = getRuntimeRPC()
+      const modelId = typeof input.modelId === "string" ? input.modelId : ""
       if (!modelId) {
-        throw new Error("Model is required for get-model")
+        throw new Error("Model is required for getModel")
       }
 
-      const sessionID = typeof payload.sessionID === "string"
-        ? payload.sessionID
+      const requestId = typeof input.requestId === "string" && input.requestId.length > 0
+        ? input.requestId
+        : nextBridgeRequestId()
+
+      const sessionID = typeof input.sessionID === "string" && input.sessionID.length > 0
+        ? input.sessionID
         : requestId
 
       const descriptor = await runtime.acquireModel({
@@ -182,138 +146,107 @@ async function handleRequest(message: BridgeMessage) {
         modelId,
       })
 
-      sendToPage(requestId, "response", {
+      return {
         specificationVersion: "v3",
         provider: descriptor.provider,
         modelId: descriptor.modelId,
         supportedUrls: serializeSupportedUrls(descriptor.supportedUrls),
-      })
-      return
-    }
+      }
+    },
 
-    if (message.type === "request-permission") {
-      const modelId = typeof payload.modelId === "string"
-        ? payload.modelId
-        : undefined
-      const modelName = typeof payload.modelName === "string"
-        ? payload.modelName
-        : undefined
-      const provider = typeof payload.provider === "string"
-        ? payload.provider
-        : undefined
-      const capabilities = Array.isArray(payload.capabilities)
-        ? payload.capabilities.filter((item): item is string => typeof item === "string")
-        : undefined
-
-      const response = await runtime.requestPermission({
+    async requestPermission(input) {
+      const runtime = getRuntimeRPC()
+      return runtime.requestPermission({
         origin: window.location.origin,
-        modelId,
-        modelName,
-        provider,
-        capabilities,
+        modelId: typeof input.modelId === "string" ? input.modelId : undefined,
+        modelName: typeof input.modelName === "string" ? input.modelName : undefined,
+        provider: typeof input.provider === "string" ? input.provider : undefined,
+        capabilities: Array.isArray(input.capabilities)
+          ? input.capabilities.filter((item): item is string => typeof item === "string")
+          : undefined,
       })
-      sendToPage(requestId, "response", response)
-      return
-    }
+    },
 
-    if (message.type === "abort") {
-      const streamId = typeof payload.requestId === "string"
-        ? payload.requestId
-        : undefined
+    async abort(input) {
+      const runtime = getRuntimeRPC()
+      const requestId = typeof input.requestId === "string" ? input.requestId : undefined
+      if (!requestId) {
+        return { ok: true }
+      }
 
-      if (streamId) {
-        const iterator = activeStreamIterators.get(streamId)
-        activeStreamIterators.delete(streamId)
+      const iterator = activeStreamIterators.get(requestId)
+      activeStreamIterators.delete(requestId)
+
+      try {
+        await iterator?.return?.()
+      } catch {
+        // Ignore iterator return errors during cancellation.
+      }
+
+      await runtime.abortModelCall({
+        requestId,
+      })
+
+      return { ok: true }
+    },
+
+    async modelDoGenerate(input) {
+      const runtime = getRuntimeRPC()
+      const normalized = normalizeModelCallInput(input)
+
+      if (!normalized.modelId) {
+        throw new Error("Model is required for modelDoGenerate")
+      }
+
+      return runtime.modelDoGenerate({
+        origin: window.location.origin,
+        requestId: normalized.requestId,
+        sessionID: normalized.sessionID,
+        modelId: normalized.modelId,
+        options: normalized.options,
+      })
+    },
+
+    modelDoStream(input) {
+      const runtime = getRuntimeRPC()
+      const normalized = normalizeModelCallInput(input)
+
+      if (!normalized.modelId) {
+        throw new Error("Model is required for modelDoStream")
+      }
+
+      return (async function* stream() {
+        const iterable = await runtime.modelDoStream({
+          origin: window.location.origin,
+          requestId: normalized.requestId,
+          sessionID: normalized.sessionID,
+          modelId: normalized.modelId,
+          options: normalized.options,
+        })
+
+        const iterator = iterable[Symbol.asyncIterator]()
+        activeStreamIterators.set(normalized.requestId, iterator)
 
         try {
-          await iterator?.return?.()
-        } catch {
-          // Ignore iterator return errors during cancellation.
+          while (true) {
+            const chunk = await iterator.next()
+            if (chunk.done) return
+            yield chunk.value
+          }
+        } finally {
+          activeStreamIterators.delete(normalized.requestId)
         }
-
-        await runtime.abortModelCall({
-          requestId: streamId,
-        })
-      }
-
-      sendToPage(requestId, "response", { ok: true })
-      return
-    }
-
-    if (message.type === "model-do-generate") {
-      const modelId = typeof payload.modelId === "string" ? payload.modelId : ""
-      if (!modelId) {
-        throw new Error("Model is required for model-do-generate")
-      }
-
-      const sessionID = typeof payload.sessionID === "string"
-        ? payload.sessionID
-        : requestId
-      const options = (payload.options as RuntimeModelCallInput["options"] | undefined) ?? {
-        prompt: [],
-      }
-      const response = await runtime.modelDoGenerate({
-        origin: window.location.origin,
-        requestId,
-        sessionID,
-        modelId,
-        options,
-      })
-
-      sendToPage(requestId, "response", response)
-      return
-    }
-
-    if (message.type === "model-do-stream") {
-      const modelId = typeof payload.modelId === "string" ? payload.modelId : ""
-      if (!modelId) {
-        throw new Error("Model is required for model-do-stream")
-      }
-
-      const sessionID = typeof payload.sessionID === "string"
-        ? payload.sessionID
-        : requestId
-      const options = (payload.options as RuntimeModelCallInput["options"] | undefined) ?? {
-        prompt: [],
-      }
-
-      const iterable = await runtime.modelDoStream({
-        origin: window.location.origin,
-        requestId,
-        sessionID,
-        modelId,
-        options,
-      })
-
-      const iterator = iterable[Symbol.asyncIterator]()
-      activeStreamIterators.set(requestId, iterator)
-      void pumpStreamToPage(requestId, iterator)
-
-      sendToPage(requestId, "response", {
-        requestId,
-        stream: true,
-      })
-      return
-    }
-
-    sendToPage(requestId, "response", {}, false, `Unknown request type: ${message.type}`)
-  } catch (error) {
-    activeStreamIterators.delete(requestId)
-    const messageText = error instanceof Error ? error.message : String(error)
-    sendToPage(requestId, "response", {}, false, messageText)
+      })()
+    },
   }
 }
 
-function onPageMessage(event: MessageEvent<unknown>) {
-  if (event.source !== window) return
-  if (!isBridgeMessage(event.data)) return
-  if (event.data.source !== PAGE_SOURCE) return
-
-  void handleRequest(event.data)
-}
-
 export function setupPageApiBridge() {
-  if (bridgeInstalled) return
-  bridgeInstalled = true
-  window.addEventListener("message", onPageMessage)
+  if (bridgeChannel) return
+
+  const io = new IframeParentIO(window)
+  bridgeChannel = new RPCChannel<PageBridgeService, Record<string, never>, IoInterface>(io, {
+    expose: createPageBridgeService(),
+    timeout: BRIDGE_TIMEOUT_MS,
+  })
 }

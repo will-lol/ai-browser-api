@@ -1,11 +1,8 @@
 import { runtimeDb } from "@/lib/runtime/db/runtime-db"
 import {
-  getProvider,
-  getProviderAuth,
   listModelRows,
   listProviderRows,
 } from "@/lib/runtime/provider-registry"
-import { listProviderAuthMethods as listProviderAuthMethodsInternal } from "@/lib/runtime/provider-auth"
 import {
   getOriginPermissions,
   listPendingRequests,
@@ -89,18 +86,4 @@ export async function listPermissionsForOrigin(origin: string) {
 
 export async function listPendingRequestsForOrigin(origin: string) {
   return listPendingRequests(origin)
-}
-
-export async function listProviderAuthMethods(providerID: string) {
-  const [provider, auth] = await Promise.all([
-    getProvider(providerID),
-    getProviderAuth(providerID),
-  ])
-
-  if (!provider) return []
-
-  return listProviderAuthMethodsInternal(providerID, {
-    provider,
-    auth,
-  })
 }

@@ -29,8 +29,53 @@ type PendingDeviceAuth = {
   intervalMs: number
 }
 
-const pendingBrowser = new Map<string, PendingBrowserAuth>()
-const pendingDevice = new Map<string, PendingDeviceAuth>()
+function resolvePendingBrowserAuth(value: unknown): PendingBrowserAuth {
+  if (!value || typeof value !== "object") {
+    throw new Error("Codex browser auth context is missing")
+  }
+
+  const input = value as Record<string, unknown>
+  const verifier = typeof input.verifier === "string" ? input.verifier : ""
+  const state = typeof input.state === "string" ? input.state : ""
+  const redirectUri = typeof input.redirectUri === "string" ? input.redirectUri : ""
+
+  if (!verifier || !state || !redirectUri) {
+    throw new Error("Codex browser auth context is invalid")
+  }
+
+  return {
+    verifier,
+    state,
+    redirectUri,
+  }
+}
+
+function resolvePendingDeviceAuth(value: unknown): PendingDeviceAuth {
+  if (!value || typeof value !== "object") {
+    throw new Error("Codex device auth context is missing")
+  }
+
+  const input = value as Record<string, unknown>
+  const deviceAuthId = typeof input.deviceAuthId === "string" ? input.deviceAuthId : ""
+  const userCode = typeof input.userCode === "string" ? input.userCode : ""
+  const intervalMs = typeof input.intervalMs === "number" ? input.intervalMs : 0
+
+  if (!deviceAuthId || !userCode || intervalMs <= 0) {
+    throw new Error("Codex device auth context is invalid")
+  }
+
+  return {
+    deviceAuthId,
+    userCode,
+    intervalMs,
+  }
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new Error("Authentication canceled")
+  }
+}
 
 function decodeJwtPayload(token: string) {
   const parts = token.split(".")
@@ -227,7 +272,7 @@ export const codexAuthPlugin: RuntimePlugin = {
           },
         ]
       },
-      async authorize(ctx, method, _input, info) {
+      async authorize(_ctx, method, _input, info) {
         if (method.type !== "oauth") return undefined
 
         if (info.methodIndex === 0) {
@@ -248,16 +293,17 @@ export const codexAuthPlugin: RuntimePlugin = {
             originator: "llm-bridge",
           })
 
-          pendingBrowser.set(ctx.providerID, {
-            verifier: pkce.verifier,
-            state,
-            redirectUri,
-          })
-
           return {
-            mode: "auto",
-            url: `${ISSUER}/oauth/authorize?${params.toString()}`,
-            instructions: "Complete authorization in your browser.",
+            authorization: {
+              mode: "auto",
+              url: `${ISSUER}/oauth/authorize?${params.toString()}`,
+              instructions: "Complete authorization in your browser.",
+            },
+            context: {
+              verifier: pkce.verifier,
+              state,
+              redirectUri,
+            },
           }
         }
 
@@ -284,125 +330,117 @@ export const codexAuthPlugin: RuntimePlugin = {
             interval: string
           }
 
-          pendingDevice.set(ctx.providerID, {
-            deviceAuthId: data.device_auth_id,
-            userCode: data.user_code,
-            intervalMs: Math.max(parseInt(data.interval, 10) || 5, 1) * 1000,
-          })
-
           return {
-            mode: "auto",
-            url: `${ISSUER}/codex/device`,
-            instructions: `Enter code: ${data.user_code}`,
+            authorization: {
+              mode: "auto",
+              url: `${ISSUER}/codex/device`,
+              instructions: `Enter code: ${data.user_code}`,
+            },
+            context: {
+              deviceAuthId: data.device_auth_id,
+              userCode: data.user_code,
+              intervalMs: Math.max(parseInt(data.interval, 10) || 5, 1) * 1000,
+            },
           }
         }
 
         return undefined
       },
-      async callback(ctx, method, input, info) {
+      async callback(_ctx, method, input, info) {
         if (method.type !== "oauth") return undefined
 
         if (info.methodIndex === 0) {
-          const pending = pendingBrowser.get(ctx.providerID)
-          if (!pending) throw new Error("Codex browser auth session not found")
+          const pending = resolvePendingBrowserAuth(input.context)
+          const parsed = parseOAuthCallbackInput(input)
+          if (!parsed.code) throw new Error("Missing authorization code")
+          if (parsed.state && parsed.state !== pending.state) {
+            throw new Error("OAuth state mismatch")
+          }
 
-          try {
-            const parsed = parseOAuthCallbackInput(input)
-            if (!parsed.code) throw new Error("Missing authorization code")
-            if (parsed.state && parsed.state !== pending.state) {
-              throw new Error("OAuth state mismatch")
-            }
+          const tokens = await exchangeCodeForTokens(parsed.code, pending.redirectUri, pending.verifier)
+          const accountId = extractAccountId(tokens)
 
-            const tokens = await exchangeCodeForTokens(parsed.code, pending.redirectUri, pending.verifier)
-            const accountId = extractAccountId(tokens)
-
-            return {
-              type: "oauth",
-              access: tokens.access_token,
-              refresh: tokens.refresh_token,
-              expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-              accountId,
-              metadata: {
-                authMode: "codex_oauth",
-                ...(accountId ? { accountId } : {}),
-              },
-            }
-          } finally {
-            pendingBrowser.delete(ctx.providerID)
+          return {
+            type: "oauth",
+            access: tokens.access_token,
+            refresh: tokens.refresh_token,
+            expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+            accountId,
+            metadata: {
+              authMode: "codex_oauth",
+              ...(accountId ? { accountId } : {}),
+            },
           }
         }
 
         if (info.methodIndex === 1) {
-          const pending = pendingDevice.get(ctx.providerID)
-          if (!pending) throw new Error("Codex device auth session not found")
+          const pending = resolvePendingDeviceAuth(input.context)
+          const signal = input.signal
+          const deadline = Date.now() + 5 * 60_000
+          while (Date.now() < deadline) {
+            throwIfAborted(signal)
+            const response = await fetch(`${ISSUER}/api/accounts/deviceauth/token`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "User-Agent": "llm-bridge",
+              },
+              body: JSON.stringify({
+                device_auth_id: pending.deviceAuthId,
+                user_code: pending.userCode,
+              }),
+            })
 
-          try {
-            const deadline = Date.now() + 5 * 60_000
-            while (Date.now() < deadline) {
-              const response = await fetch(`${ISSUER}/api/accounts/deviceauth/token`, {
+            if (response.ok) {
+              const payload = (await response.json()) as {
+                authorization_code: string
+                code_verifier: string
+              }
+
+              const tokenResponse = await fetch(`${ISSUER}/oauth/token`, {
                 method: "POST",
                 headers: {
-                  "Content-Type": "application/json",
-                  "User-Agent": "llm-bridge",
+                  "Content-Type": "application/x-www-form-urlencoded",
                 },
-                body: JSON.stringify({
-                  device_auth_id: pending.deviceAuthId,
-                  user_code: pending.userCode,
-                }),
+                body: new URLSearchParams({
+                  grant_type: "authorization_code",
+                  code: payload.authorization_code,
+                  redirect_uri: `${ISSUER}/deviceauth/callback`,
+                  client_id: CLIENT_ID,
+                  code_verifier: payload.code_verifier,
+                }).toString(),
               })
 
-              if (response.ok) {
-                const payload = (await response.json()) as {
-                  authorization_code: string
-                  code_verifier: string
-                }
-
-                const tokenResponse = await fetch(`${ISSUER}/oauth/token`, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                  },
-                  body: new URLSearchParams({
-                    grant_type: "authorization_code",
-                    code: payload.authorization_code,
-                    redirect_uri: `${ISSUER}/deviceauth/callback`,
-                    client_id: CLIENT_ID,
-                    code_verifier: payload.code_verifier,
-                  }).toString(),
-                })
-
-                if (!tokenResponse.ok) {
-                  const detail = await tokenResponse.text().catch(() => "")
-                  throw new Error(`Codex device token exchange failed (${tokenResponse.status}): ${detail.slice(0, 300)}`)
-                }
-
-                const tokens = (await tokenResponse.json()) as TokenResponse
-                const accountId = extractAccountId(tokens)
-                return {
-                  type: "oauth",
-                  access: tokens.access_token,
-                  refresh: tokens.refresh_token,
-                  expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-                  accountId,
-                  metadata: {
-                    authMode: "codex_oauth",
-                    ...(accountId ? { accountId } : {}),
-                  },
-                }
+              if (!tokenResponse.ok) {
+                const detail = await tokenResponse.text().catch(() => "")
+                throw new Error(`Codex device token exchange failed (${tokenResponse.status}): ${detail.slice(0, 300)}`)
               }
 
-              if (response.status !== 403 && response.status !== 404) {
-                const detail = await response.text().catch(() => "")
-                throw new Error(`Codex device auth failed (${response.status}): ${detail.slice(0, 300)}`)
+              const tokens = (await tokenResponse.json()) as TokenResponse
+              const accountId = extractAccountId(tokens)
+              return {
+                type: "oauth",
+                access: tokens.access_token,
+                refresh: tokens.refresh_token,
+                expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+                accountId,
+                metadata: {
+                  authMode: "codex_oauth",
+                  ...(accountId ? { accountId } : {}),
+                },
               }
-
-              await sleep(pending.intervalMs + OAUTH_POLLING_SAFETY_MARGIN_MS)
             }
 
-            throw new Error("Codex device authorization timed out")
-          } finally {
-            pendingDevice.delete(ctx.providerID)
+            if (response.status !== 403 && response.status !== 404) {
+              const detail = await response.text().catch(() => "")
+              throw new Error(`Codex device auth failed (${response.status}): ${detail.slice(0, 300)}`)
+            }
+
+            await sleep(pending.intervalMs + OAUTH_POLLING_SAFETY_MARGIN_MS)
+            throwIfAborted(signal)
           }
+
+          throw new Error("Codex device authorization timed out")
         }
 
         return undefined

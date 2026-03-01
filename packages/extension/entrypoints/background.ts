@@ -9,12 +9,16 @@ import {
   streamRuntimeModel,
 } from "@/lib/runtime/service"
 import {
+  cancelRuntimeProviderAuthFlow,
+  getRuntimeProviderAuthFlow,
+  openRuntimeProviderAuthWindow,
+  retryRuntimeProviderAuthFlow,
+  startRuntimeProviderAuthFlow,
+  submitRuntimeProviderAuthCode,
   createRuntimePermissionRequest,
   disconnectRuntimeProvider,
   dismissRuntimePermissionRequest,
-  finishRuntimeProviderAuth,
   resolveRuntimePermissionRequest,
-  startRuntimeProviderAuth,
   setRuntimeOriginEnabled,
   updateRuntimePermission,
 } from "@/lib/runtime/mutation-service"
@@ -23,12 +27,12 @@ import {
   listModels,
   listPendingRequestsForOrigin,
   listPermissionsForOrigin,
-  listProviderAuthMethods,
   listProviders,
 } from "@/lib/runtime/query-service"
 import { ensureProviderCatalog, refreshProviderCatalog } from "@/lib/runtime/provider-registry"
 import { runtimeDb } from "@/lib/runtime/db/runtime-db"
 import { subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events"
+import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager"
 import {
   RUNTIME_RPC_PORT_NAME,
   type RuntimeAcquireModelInput,
@@ -301,11 +305,15 @@ const runtimeService: RuntimeRPCService = {
   async listPending(input) {
     return listPendingRequestsForOrigin(getRequestOrigin(input.origin))
   },
-  async getAuthMethods(input) {
-    return listProviderAuthMethods(input.providerID)
+  async openProviderAuthWindow(input) {
+    const response = await openRuntimeProviderAuthWindow(input.providerID)
+    return response
   },
-  async startProviderAuth(input) {
-    const response = await startRuntimeProviderAuth({
+  async getProviderAuthFlow(input) {
+    return getRuntimeProviderAuthFlow(input.providerID)
+  },
+  async startProviderAuthFlow(input) {
+    const response = await startRuntimeProviderAuthFlow({
       providerID: input.providerID,
       methodIndex: input.methodIndex,
       values: input.values ?? {},
@@ -313,12 +321,23 @@ const runtimeService: RuntimeRPCService = {
     await updateActionState()
     return response
   },
-  async finishProviderAuth(input) {
-    const response = await finishRuntimeProviderAuth({
+  async submitProviderAuthCode(input) {
+    const response = await submitRuntimeProviderAuthCode({
       providerID: input.providerID,
-      methodIndex: input.methodIndex,
       code: input.code,
-      callbackUrl: input.callbackUrl,
+    })
+    await updateActionState()
+    return response
+  },
+  async retryProviderAuthFlow(input) {
+    const response = await retryRuntimeProviderAuthFlow(input.providerID)
+    await updateActionState()
+    return response
+  },
+  async cancelProviderAuthFlow(input) {
+    const response = await cancelRuntimeProviderAuthFlow({
+      providerID: input.providerID,
+      reason: input.reason,
     })
     await updateActionState()
     return response
@@ -424,6 +443,10 @@ export default defineBackground(() => {
   browser.alarms?.onAlarm.addListener((alarm) => {
     if (alarm.name !== MODELS_REFRESH_ALARM) return
     void refreshModelsSnapshotOnce()
+  })
+
+  browser.windows?.onRemoved.addListener((windowId) => {
+    void getAuthFlowManager().handleWindowClosed(windowId)
   })
 
   registerRuntimeRPCHandlers()

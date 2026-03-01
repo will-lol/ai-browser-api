@@ -1,19 +1,19 @@
 import { useMemo, useState } from "react"
-import { useNavigate } from "@tanstack/react-router"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Unplug, Plug } from "lucide-react"
 import { SearchInput } from "@/components/extension/search-input"
 import { useFrozenOrder } from "@/hooks/use-frozen-order"
 import {
   useProviderDisconnectMutation,
+  useProviderOpenAuthWindowMutation,
   useProvidersQuery,
 } from "@/lib/extension-query-hooks"
 
 export function ProvidersView() {
   const [search, setSearch] = useState("")
-  const navigate = useNavigate()
   const providersQuery = useProvidersQuery()
   const disconnectProviderMutation = useProviderDisconnectMutation()
+  const openProviderAuthWindowMutation = useProviderOpenAuthWindowMutation()
 
   const providers = providersQuery.data ?? []
 
@@ -78,6 +78,9 @@ export function ProvidersView() {
             const controlsDisabled =
               disconnectProviderMutation.isPending &&
               disconnectProviderMutation.variables?.providerID === provider.id
+            const connectPending =
+              openProviderAuthWindowMutation.isPending
+              && openProviderAuthWindowMutation.variables?.providerID === provider.id
 
             return (
               <div
@@ -101,14 +104,9 @@ export function ProvidersView() {
                       disconnectProviderMutation.mutate({ providerID: provider.id })
                       return
                     }
-                    void navigate({
-                      to: "/providers/$providerId/connect",
-                      params: {
-                        providerId: provider.id,
-                      },
-                    })
+                    openProviderAuthWindowMutation.mutate({ providerID: provider.id })
                   }}
-                  disabled={controlsDisabled}
+                  disabled={controlsDisabled || connectPending}
                   className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     provider.connected
                       ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
@@ -124,7 +122,7 @@ export function ProvidersView() {
                   ) : (
                     <>
                       <Plug className="size-3" />
-                      Connect
+                      {connectPending ? "Opening..." : "Connect"}
                     </>
                   )}
                 </button>

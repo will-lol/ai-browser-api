@@ -12,7 +12,36 @@ type PendingCopilotAuth = {
   enterpriseUrl?: string
 }
 
-const pendingCopilot = new Map<string, PendingCopilotAuth>()
+function resolvePendingCopilotAuth(value: unknown): PendingCopilotAuth {
+  if (!value || typeof value !== "object") {
+    throw new Error("Copilot device auth context is missing")
+  }
+
+  const input = value as Record<string, unknown>
+  const domain = typeof input.domain === "string" ? input.domain : ""
+  const deviceCode = typeof input.deviceCode === "string" ? input.deviceCode : ""
+  const intervalSeconds = typeof input.intervalSeconds === "number" ? input.intervalSeconds : 0
+  const enterpriseUrl = typeof input.enterpriseUrl === "string" && input.enterpriseUrl
+    ? input.enterpriseUrl
+    : undefined
+
+  if (!domain || !deviceCode || intervalSeconds <= 0) {
+    throw new Error("Copilot device auth context is invalid")
+  }
+
+  return {
+    domain,
+    deviceCode,
+    intervalSeconds,
+    enterpriseUrl,
+  }
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new Error("Authentication canceled")
+  }
+}
 
 function getUrls(domain: string) {
   return {
@@ -93,7 +122,7 @@ export const copilotAuthPlugin: RuntimePlugin = {
           },
         ]
       },
-      async authorize(ctx, method, input, info) {
+      async authorize(_ctx, method, input, info) {
         if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
 
         const deploymentType = input.deploymentType?.trim().toLowerCase()
@@ -128,27 +157,29 @@ export const copilotAuthPlugin: RuntimePlugin = {
           interval: number
         }
 
-        pendingCopilot.set(ctx.providerID, {
-          domain,
-          deviceCode: deviceData.device_code,
-          intervalSeconds: Math.max(deviceData.interval || 5, 1),
-          enterpriseUrl: enterprise ? domain : undefined,
-        })
-
         return {
-          mode: "auto",
-          url: deviceData.verification_uri,
-          instructions: `Enter code: ${deviceData.user_code}`,
+          authorization: {
+            mode: "auto",
+            url: deviceData.verification_uri,
+            instructions: `Enter code: ${deviceData.user_code}`,
+          },
+          context: {
+            domain,
+            deviceCode: deviceData.device_code,
+            intervalSeconds: Math.max(deviceData.interval || 5, 1),
+            enterpriseUrl: enterprise ? domain : undefined,
+          },
         }
       },
-      async callback(ctx, method, _input, info) {
+      async callback(_ctx, method, input, info) {
         if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
-        const pending = pendingCopilot.get(ctx.providerID)
-        if (!pending) throw new Error("Copilot device auth session not found")
+        const pending = resolvePendingCopilotAuth(input.context)
+        const signal = input.signal
 
         const urls = getUrls(pending.domain)
         const deadline = Date.now() + 10 * 60_000
         while (Date.now() < deadline) {
+          throwIfAborted(signal)
           const response = await fetch(urls.accessTokenURL, {
             method: "POST",
             headers: {
@@ -165,7 +196,6 @@ export const copilotAuthPlugin: RuntimePlugin = {
 
           if (!response.ok) {
             const detail = await response.text().catch(() => "")
-            pendingCopilot.delete(ctx.providerID)
             throw new Error(`Copilot token polling failed (${response.status}): ${detail.slice(0, 300)}`)
           }
 
@@ -176,7 +206,6 @@ export const copilotAuthPlugin: RuntimePlugin = {
           }
 
           if (data.access_token) {
-            pendingCopilot.delete(ctx.providerID)
             return {
               type: "oauth",
               access: data.access_token,
@@ -190,20 +219,20 @@ export const copilotAuthPlugin: RuntimePlugin = {
 
           if (data.error === "authorization_pending") {
             await sleep(pending.intervalSeconds * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS)
+            throwIfAborted(signal)
             continue
           }
 
           if (data.error === "slow_down") {
             const nextInterval = data.interval && data.interval > 0 ? data.interval : pending.intervalSeconds + 5
             await sleep(nextInterval * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS)
+            throwIfAborted(signal)
             continue
           }
 
-          pendingCopilot.delete(ctx.providerID)
           throw new Error(`Copilot authorization failed: ${data.error ?? "unknown_error"}`)
         }
 
-        pendingCopilot.delete(ctx.providerID)
         throw new Error("Copilot device authorization timed out")
       },
       async loader(ctx) {

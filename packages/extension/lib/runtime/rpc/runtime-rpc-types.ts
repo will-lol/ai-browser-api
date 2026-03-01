@@ -21,15 +21,24 @@ export type RuntimeProviderSummary = Awaited<ReturnType<QueryService["listProvid
 export type RuntimeModelSummary = Awaited<ReturnType<QueryService["listModels"]>>[number]
 export type RuntimeOriginState = Awaited<ReturnType<QueryService["getOriginState"]>>
 export type RuntimePermissionEntry = Awaited<ReturnType<QueryService["listPermissionsForOrigin"]>>[number]
-export type RuntimeAuthMethod = Awaited<ReturnType<QueryService["listProviderAuthMethods"]>>[number]
-export type RuntimeStartProviderAuthResponse = Awaited<
-  ReturnType<MutationService["startRuntimeProviderAuth"]>
+export type RuntimeAuthFlowSnapshot = Awaited<
+  ReturnType<MutationService["getRuntimeProviderAuthFlow"]>
+>["result"]
+export type RuntimeAuthMethod = RuntimeAuthFlowSnapshot["methods"][number]
+export type RuntimeOpenProviderAuthWindowResponse = Awaited<
+  ReturnType<MutationService["openRuntimeProviderAuthWindow"]>
 >
-export type RuntimeFinishProviderAuthResponse = Awaited<
-  ReturnType<MutationService["finishRuntimeProviderAuth"]>
+export type RuntimeStartProviderAuthFlowResponse = Awaited<
+  ReturnType<MutationService["startRuntimeProviderAuthFlow"]>
 >
-export type RuntimeDisconnectProviderResponse = Awaited<
-  ReturnType<MutationService["disconnectRuntimeProvider"]>
+export type RuntimeSubmitProviderAuthCodeResponse = Awaited<
+  ReturnType<MutationService["submitRuntimeProviderAuthCode"]>
+>
+export type RuntimeRetryProviderAuthFlowResponse = Awaited<
+  ReturnType<MutationService["retryRuntimeProviderAuthFlow"]>
+>
+export type RuntimeCancelProviderAuthFlowResponse = Awaited<
+  ReturnType<MutationService["cancelRuntimeProviderAuthFlow"]>
 >
 
 export type RuntimeUpdatePermissionInput =
@@ -104,23 +113,34 @@ export interface RuntimeRPCService {
   getOriginState(input: { origin?: string }): Promise<Awaited<ReturnType<QueryService["getOriginState"]>>>
   listPermissions(input: { origin?: string }): Promise<Awaited<ReturnType<QueryService["listPermissionsForOrigin"]>>>
   listPending(input: { origin?: string }): Promise<Awaited<ReturnType<QueryService["listPendingRequestsForOrigin"]>>>
-  getAuthMethods(input: {
+  openProviderAuthWindow(input: {
     origin?: string
     providerID: string
-  }): Promise<Awaited<ReturnType<QueryService["listProviderAuthMethods"]>>>
-  startProviderAuth(input: {
+  }): Promise<Awaited<ReturnType<MutationService["openRuntimeProviderAuthWindow"]>>>
+  getProviderAuthFlow(input: {
+    origin?: string
+    providerID: string
+  }): Promise<Awaited<ReturnType<MutationService["getRuntimeProviderAuthFlow"]>>>
+  startProviderAuthFlow(input: {
     origin?: string
     providerID: string
     methodIndex: number
     values?: Record<string, string>
-  }): Promise<Awaited<ReturnType<MutationService["startRuntimeProviderAuth"]>>>
-  finishProviderAuth(input: {
+  }): Promise<Awaited<ReturnType<MutationService["startRuntimeProviderAuthFlow"]>>>
+  submitProviderAuthCode(input: {
     origin?: string
     providerID: string
-    methodIndex: number
-    code?: string
-    callbackUrl?: string
-  }): Promise<Awaited<ReturnType<MutationService["finishRuntimeProviderAuth"]>>>
+    code: string
+  }): Promise<Awaited<ReturnType<MutationService["submitRuntimeProviderAuthCode"]>>>
+  retryProviderAuthFlow(input: {
+    origin?: string
+    providerID: string
+  }): Promise<Awaited<ReturnType<MutationService["retryRuntimeProviderAuthFlow"]>>>
+  cancelProviderAuthFlow(input: {
+    origin?: string
+    providerID: string
+    reason?: string
+  }): Promise<Awaited<ReturnType<MutationService["cancelRuntimeProviderAuthFlow"]>>>
   disconnectProvider(input: {
     origin?: string
     providerID: string

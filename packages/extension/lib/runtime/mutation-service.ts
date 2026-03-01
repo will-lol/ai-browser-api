@@ -1,8 +1,7 @@
 import {
-  finishProviderAuth,
   disconnectProvider,
-  startProviderAuth,
 } from "@/lib/runtime/provider-auth"
+import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager"
 import {
   createPermissionRequest,
   dismissPermissionRequest,
@@ -12,34 +11,64 @@ import {
 } from "@/lib/runtime/permissions"
 import { refreshProviderCatalogForProvider } from "@/lib/runtime/provider-registry"
 
-export async function startRuntimeProviderAuth(input: {
+export async function openRuntimeProviderAuthWindow(providerID: string) {
+  const manager = getAuthFlowManager()
+  const result = await manager.openProviderAuthWindow(providerID)
+  return {
+    providerID,
+    result,
+  }
+}
+
+export async function getRuntimeProviderAuthFlow(providerID: string) {
+  const manager = getAuthFlowManager()
+  const result = await manager.getProviderAuthFlow(providerID)
+  return {
+    providerID,
+    result,
+  }
+}
+
+export async function startRuntimeProviderAuthFlow(input: {
   providerID: string
   methodIndex: number
   values?: Record<string, string>
 }) {
-  const result = await startProviderAuth(input)
-
-  if (result.connected) {
-    await refreshProviderCatalogForProvider(input.providerID)
-  }
-
+  const manager = getAuthFlowManager()
+  const result = await manager.startProviderAuthFlow(input)
   return {
     providerID: input.providerID,
     result,
   }
 }
 
-export async function finishRuntimeProviderAuth(input: {
+export async function submitRuntimeProviderAuthCode(input: {
   providerID: string
-  methodIndex: number
-  code?: string
-  callbackUrl?: string
+  code: string
 }) {
-  const result = await finishProviderAuth(input)
-  if (result.connected) {
-    await refreshProviderCatalogForProvider(input.providerID)
+  const manager = getAuthFlowManager()
+  const result = await manager.submitProviderAuthCode(input)
+  return {
+    providerID: input.providerID,
+    result,
   }
+}
 
+export async function retryRuntimeProviderAuthFlow(providerID: string) {
+  const manager = getAuthFlowManager()
+  const result = await manager.retryProviderAuthFlow(providerID)
+  return {
+    providerID,
+    result,
+  }
+}
+
+export async function cancelRuntimeProviderAuthFlow(input: {
+  providerID: string
+  reason?: string
+}) {
+  const manager = getAuthFlowManager()
+  const result = await manager.cancelProviderAuthFlow(input)
   return {
     providerID: input.providerID,
     result,
@@ -47,6 +76,14 @@ export async function finishRuntimeProviderAuth(input: {
 }
 
 export async function disconnectRuntimeProvider(providerID: string) {
+  const manager = getAuthFlowManager()
+  await manager.cancelProviderAuthFlow({
+    providerID,
+    reason: "disconnect",
+  }).catch(() => {
+    // Ignore cancellation failures and continue disconnecting stored auth.
+  })
+
   await disconnectProvider(providerID)
   await refreshProviderCatalogForProvider(providerID)
 

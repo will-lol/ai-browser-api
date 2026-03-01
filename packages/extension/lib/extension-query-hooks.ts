@@ -4,17 +4,20 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import {
+  cancelRuntimeProviderAuthFlow,
   currentOrigin,
   disconnectRuntimeProvider,
-  finishRuntimeProviderAuth,
-  fetchProviderAuthMethods,
+  fetchProviderAuthFlow,
   fetchModels,
   fetchOriginState,
   fetchPendingRequests,
   fetchPermissions,
   fetchProviders,
-  startRuntimeProviderAuth,
+  openRuntimeProviderAuthWindow,
+  retryRuntimeProviderAuthFlow,
+  startRuntimeProviderAuthFlow,
   setRuntimeOriginEnabled,
+  submitRuntimeProviderAuthCode,
   resolveRuntimePermissionRequest,
   dismissRuntimePermissionRequest,
   updateRuntimeModelPermission,
@@ -29,14 +32,19 @@ export function useProvidersQuery(origin = currentOrigin()) {
   })
 }
 
-export function useProviderAuthMethodsQuery(
+export function useProviderAuthFlowQuery(
   providerID: string,
   origin = currentOrigin(),
 ) {
   return useQuery({
-    queryKey: extensionQueryKeys.authMethods(providerID),
-    queryFn: () => fetchProviderAuthMethods(providerID, origin),
+    queryKey: extensionQueryKeys.authFlow(providerID),
+    queryFn: () => fetchProviderAuthFlow({ providerID, origin }).then((response) => response.result),
     enabled: providerID.length > 0,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      if (status === "running" || status === "awaiting_external") return 1_000
+      return false
+    },
   })
 }
 
@@ -121,13 +129,20 @@ export function useProviderDisconnectMutation(origin = currentOrigin()) {
         queryKey: extensionQueryKeys.providersRoot,
       })
       queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.authMethods(providerID),
+        queryKey: extensionQueryKeys.authFlow(providerID),
       })
     },
   })
 }
 
-export function useProviderStartAuthMutation(origin = currentOrigin()) {
+export function useProviderOpenAuthWindowMutation(origin = currentOrigin()) {
+  return useMutation({
+    mutationFn: ({ providerID }: { providerID: string }) =>
+      openRuntimeProviderAuthWindow({ providerID, origin }),
+  })
+}
+
+export function useProviderStartAuthFlowMutation(origin = currentOrigin()) {
   const queryClient = useQueryClient()
 
   return useMutation({
@@ -139,96 +154,67 @@ export function useProviderStartAuthMutation(origin = currentOrigin()) {
       providerID: string
       methodIndex: number
       values?: Record<string, string>
-    }) => startRuntimeProviderAuth({ providerID, methodIndex, values, origin }),
-    onSuccess: (response, variables) => {
-      if (!response.result.connected) return
-
-      queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.authMethods(variables.providerID),
-      })
-
+    }) => startRuntimeProviderAuthFlow({ providerID, methodIndex, values, origin }),
+    onSuccess: (response) => {
       queryClient.setQueryData(
-        extensionQueryKeys.providers(),
-        (
-          prev:
-            | Array<{
-                id: string
-                connected: boolean
-              }>
-            | undefined,
-        ) => {
-          if (!prev) return prev
-          return prev.map((provider) =>
-            provider.id === variables.providerID
-              ? {
-                  ...provider,
-                  connected: true,
-                }
-              : provider,
-          )
-        },
+        extensionQueryKeys.authFlow(response.providerID),
+        response.result,
       )
-
-      queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.modelsRoot,
-      })
-      queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.providersRoot,
-      })
     },
   })
 }
 
-export function useProviderFinishAuthMutation(origin = currentOrigin()) {
+export function useProviderSubmitAuthCodeMutation(origin = currentOrigin()) {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: ({
       providerID,
-      methodIndex,
       code,
-      callbackUrl,
     }: {
       providerID: string
-      methodIndex: number
-      code?: string
-      callbackUrl?: string
-    }) => finishRuntimeProviderAuth({ providerID, methodIndex, code, callbackUrl, origin }),
-    onSuccess: (response, variables) => {
-      if (!response.result.connected) return
-
-      queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.authMethods(variables.providerID),
-      })
-
+      code: string
+    }) => submitRuntimeProviderAuthCode({ providerID, code, origin }),
+    onSuccess: (response) => {
       queryClient.setQueryData(
-        extensionQueryKeys.providers(),
-        (
-          prev:
-            | Array<{
-                id: string
-                connected: boolean
-              }>
-            | undefined,
-        ) => {
-          if (!prev) return prev
-          return prev.map((provider) =>
-            provider.id === variables.providerID
-              ? {
-                  ...provider,
-                  connected: true,
-                }
-              : provider,
-          )
-        },
+        extensionQueryKeys.authFlow(response.providerID),
+        response.result,
       )
+    },
+  })
+}
 
-      queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.modelsRoot,
-      })
-      queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.providersRoot,
-      })
+export function useProviderRetryAuthFlowMutation(origin = currentOrigin()) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ providerID }: { providerID: string }) =>
+      retryRuntimeProviderAuthFlow({ providerID, origin }),
+    onSuccess: (response) => {
+      queryClient.setQueryData(
+        extensionQueryKeys.authFlow(response.providerID),
+        response.result,
+      )
+    },
+  })
+}
+
+export function useProviderCancelAuthFlowMutation(origin = currentOrigin()) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      providerID,
+      reason,
+    }: {
+      providerID: string
+      reason?: string
+    }) => cancelRuntimeProviderAuthFlow({ providerID, reason, origin }),
+    onSuccess: (response) => {
+      queryClient.setQueryData(
+        extensionQueryKeys.authFlow(response.providerID),
+        response.result,
+      )
     },
   })
 }

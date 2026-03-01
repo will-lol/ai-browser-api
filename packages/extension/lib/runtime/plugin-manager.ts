@@ -61,6 +61,18 @@ export type AuthAuthorization = {
   instructions?: string
 }
 
+export type AuthContinuationContext = Record<string, unknown>
+
+export type PendingAuthResult = {
+  authorization: AuthAuthorization
+  context?: AuthContinuationContext
+}
+
+export type ResolvedAuthReference = {
+  pluginID: string
+  pluginMethodIndex: number
+}
+
 export interface ResolvedAuthMethod {
   pluginID: string
   pluginMethodIndex: number
@@ -102,11 +114,16 @@ export interface PluginHooks {
       method: AuthMethod,
       input: Record<string, string>,
       info: { methodIndex: number },
-    ) => Promise<AuthAuthorization | AuthResult | void>
+    ) => Promise<PendingAuthResult | AuthResult | void>
     callback?: (
       ctx: AuthContext,
       method: AuthMethod,
-      input: { code?: string; callbackUrl?: string },
+      input: {
+        context?: AuthContinuationContext
+        code?: string
+        callbackUrl?: string
+        signal?: AbortSignal
+      },
       info: { methodIndex: number },
     ) => Promise<AuthResult | void>
     loader?: (ctx: AuthContext) => Promise<Record<string, unknown>>
@@ -250,6 +267,13 @@ export class PluginManager {
     return methods[methodIndex]
   }
 
+  async resolveAuthMethodByReference(ctx: AuthContext, reference: ResolvedAuthReference) {
+    const methods = await this.listResolvedAuthMethods(ctx)
+    return methods.find((resolved) =>
+      resolved.pluginID === reference.pluginID
+      && resolved.pluginMethodIndex === reference.pluginMethodIndex)
+  }
+
   async authorize(ctx: AuthContext, resolved: ResolvedAuthMethod, input: Record<string, string>) {
     const result = await resolved.plugin.hooks.auth?.authorize?.(ctx, resolved.method, input, {
       methodIndex: resolved.pluginMethodIndex,
@@ -258,7 +282,16 @@ export class PluginManager {
     return result
   }
 
-  async callback(ctx: AuthContext, resolved: ResolvedAuthMethod, input: { code?: string; callbackUrl?: string }) {
+  async callback(
+    ctx: AuthContext,
+    resolved: ResolvedAuthMethod,
+    input: {
+      context?: AuthContinuationContext
+      code?: string
+      callbackUrl?: string
+      signal?: AbortSignal
+    },
+  ) {
     const result = await resolved.plugin.hooks.auth?.callback?.(ctx, resolved.method, input, {
       methodIndex: resolved.pluginMethodIndex,
     })
@@ -438,4 +471,4 @@ export class PluginManager {
   }
 }
 
-export type PluginAuthResolved = AuthAuthorization | AuthResult
+export type PluginAuthResolved = PendingAuthResult | AuthResult

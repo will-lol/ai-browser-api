@@ -26,8 +26,30 @@ type GitLabTokenResponse = {
   expires_in: number
 }
 
-const pendingOAuth = new Map<string, PendingGitLabOAuth>()
 const refreshLocks = new Map<string, Promise<void>>()
+
+function resolvePendingGitLabOAuth(value: unknown): PendingGitLabOAuth {
+  if (!value || typeof value !== "object") {
+    throw new Error("GitLab OAuth session context is missing")
+  }
+
+  const input = value as Record<string, unknown>
+  const state = typeof input.state === "string" ? input.state : ""
+  const codeVerifier = typeof input.codeVerifier === "string" ? input.codeVerifier : ""
+  const redirectUri = typeof input.redirectUri === "string" ? input.redirectUri : ""
+  const instanceUrl = typeof input.instanceUrl === "string" ? input.instanceUrl : ""
+
+  if (!state || !codeVerifier || !redirectUri || !instanceUrl) {
+    throw new Error("GitLab OAuth session context is invalid")
+  }
+
+  return {
+    state,
+    codeVerifier,
+    redirectUri,
+    instanceUrl,
+  }
+}
 
 async function exchangeAuthorizationCode(
   instanceUrl: string,
@@ -124,7 +146,7 @@ export const gitlabAuthPlugin: RuntimePlugin = {
           },
         ]
       },
-      async authorize(ctx, method, input, info) {
+      async authorize(_ctx, method, input, info) {
         if (method.type === "api" && info.methodIndex === 1) {
           const instanceUrl = normalizeInstanceUrl(input.instanceUrl?.trim() || GITLAB_COM_URL)
           const token = input.token?.trim()
@@ -169,54 +191,50 @@ export const gitlabAuthPlugin: RuntimePlugin = {
           })
 
           const url = `${instanceUrl}/oauth/authorize?${params.toString()}`
-          pendingOAuth.set(ctx.providerID, {
-            state,
-            codeVerifier: pkce.verifier,
-            redirectUri,
-            instanceUrl,
-          })
-
           return {
-            mode: "auto",
-            url,
-            instructions: "Complete GitLab OAuth in your browser.",
+            authorization: {
+              mode: "auto",
+              url,
+              instructions: "Complete GitLab OAuth in your browser.",
+            },
+            context: {
+              state,
+              codeVerifier: pkce.verifier,
+              redirectUri,
+              instanceUrl,
+            },
           }
         }
 
         return undefined
       },
-      async callback(ctx, method, input, info) {
+      async callback(_ctx, method, input, info) {
         if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
 
-        const pending = pendingOAuth.get(ctx.providerID)
-        if (!pending) throw new Error("GitLab OAuth session not found")
+        const pending = resolvePendingGitLabOAuth(input.context)
 
-        try {
-          const parsed = parseOAuthCallbackInput(input)
-          if (!parsed.code) throw new Error("Missing GitLab authorization code")
-          if (parsed.state && parsed.state !== pending.state) {
-            throw new Error("OAuth state mismatch")
-          }
+        const parsed = parseOAuthCallbackInput(input)
+        if (!parsed.code) throw new Error("Missing GitLab authorization code")
+        if (parsed.state && parsed.state !== pending.state) {
+          throw new Error("OAuth state mismatch")
+        }
 
-          const tokens = await exchangeAuthorizationCode(
-            pending.instanceUrl,
-            parsed.code,
-            pending.codeVerifier,
-            pending.redirectUri,
-          )
+        const tokens = await exchangeAuthorizationCode(
+          pending.instanceUrl,
+          parsed.code,
+          pending.codeVerifier,
+          pending.redirectUri,
+        )
 
-          return {
-            type: "oauth",
-            access: tokens.access_token,
-            refresh: tokens.refresh_token,
-            expiresAt: Date.now() + tokens.expires_in * 1000,
-            metadata: {
-              authMode: "gitlab_oauth",
-              instanceUrl: pending.instanceUrl,
-            },
-          }
-        } finally {
-          pendingOAuth.delete(ctx.providerID)
+        return {
+          type: "oauth",
+          access: tokens.access_token,
+          refresh: tokens.refresh_token,
+          expiresAt: Date.now() + tokens.expires_in * 1000,
+          metadata: {
+            authMode: "gitlab_oauth",
+            instanceUrl: pending.instanceUrl,
+          },
         }
       },
       async loader(ctx) {
