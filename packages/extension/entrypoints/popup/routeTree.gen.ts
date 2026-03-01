@@ -46,17 +46,10 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/providers'
-    | '/providers/'
+  fullPaths: '/' | '/providers' | '/providers/'
   fileRoutesByTo: FileRoutesByTo
   to: '/' | '/providers'
-  id:
-    | '__root__'
-    | '/'
-    | '/providers'
-    | '/providers/'
+  id: '__root__' | '/' | '/providers' | '/providers/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
