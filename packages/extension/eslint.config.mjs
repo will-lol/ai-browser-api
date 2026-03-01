@@ -1,8 +1,9 @@
-import autoImports from "./.wxt/eslint-auto-imports.mjs";
-
 import eslint from "@eslint/js";
 import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
+
+const autoImportsModule = await import("./.wxt/eslint-auto-imports.mjs").catch(() => null);
+const autoImports = autoImportsModule?.default ?? {};
 
 export default defineConfig(
   {

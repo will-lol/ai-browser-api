@@ -23,12 +23,6 @@ export default defineConfig({
     action: {
       default_title: "LLM Bridge",
     },
-    web_accessible_resources: [
-      {
-        resources: ["llm-bridge-page-api.js"],
-        matches: ["<all_urls>"],
-      },
-    ],
   },
   vite: () => ({
     plugins: [

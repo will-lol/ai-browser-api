@@ -1,11 +1,9 @@
-import { browser } from "@wxt-dev/browser"
 import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import type { RuntimeModelCallInput } from "@/lib/runtime/rpc/runtime-rpc-types"
 
 const PAGE_SOURCE = "llm-bridge-page"
 const CONTENT_SOURCE = "llm-bridge-content"
-const PAGE_API_SCRIPT_ID = "llm-bridge-page-api"
 
 type BridgeMessage = {
   source?: string
@@ -20,16 +18,7 @@ type SerializedSupportedUrlPattern = {
 }
 
 const activeStreamIterators = new Map<string, AsyncIterator<LanguageModelV3StreamPart>>()
-
-function injectPageApi() {
-  if (document.getElementById(PAGE_API_SCRIPT_ID)) return
-
-  const script = document.createElement("script")
-  script.id = PAGE_API_SCRIPT_ID
-  script.src = browser.runtime.getURL("llm-bridge-page-api.js")
-  const mountTarget = document.head ?? document.documentElement
-  mountTarget.append(script)
-}
+let bridgeInstalled = false
 
 function sendToPage(
   requestId: string,
@@ -324,6 +313,7 @@ function onPageMessage(event: MessageEvent<unknown>) {
 }
 
 export function setupPageApiBridge() {
-  injectPageApi()
+  if (bridgeInstalled) return
+  bridgeInstalled = true
   window.addEventListener("message", onPageMessage)
 }

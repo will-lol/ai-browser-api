@@ -4,6 +4,17 @@
   "workspaces": {
     "": {
       "name": "llm-bridge-extension-prototype",
+    },
+    "packages/client": {
+      "name": "@llm-bridge/client",
+      "version": "0.1.0",
+      "devDependencies": {
+        "typescript": "5.9.3",
+      },
+    },
+    "packages/extension": {
+      "name": "@llm-bridge/extension",
+      "version": "0.1.0",
       "dependencies": {
         "@ai-sdk/amazon-bedrock": "^4.0.69",
         "@ai-sdk/anthropic": "^3.0.50",
@@ -57,6 +68,7 @@
         "@tanstack/react-query": "^5.90.21",
         "@tanstack/react-query-persist-client": "^5.90.23",
         "@tanstack/react-router": "^1.132.24",
+        "@wxt-dev/browser": "^0.1.37",
         "ai": "^6.0.105",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
@@ -306,6 +318,10 @@
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "3.1.2", "@jridgewell/sourcemap-codec": "1.5.5" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
+
+    "@llm-bridge/client": ["@llm-bridge/client@workspace:packages/client"],
+
+    "@llm-bridge/extension": ["@llm-bridge/extension@workspace:packages/extension"],
 
     "@nodelib/fs.scandir": ["@nodelib/fs.scandir@2.1.5", "", { "dependencies": { "@nodelib/fs.stat": "2.0.5", "run-parallel": "^1.1.9" } }, "sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g=="],
 
