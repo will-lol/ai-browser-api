@@ -4,35 +4,68 @@ import type { RuntimeConfig } from "@/lib/runtime/config-store"
 import type { ProviderInfo, ProviderModelInfo } from "@/lib/runtime/provider-registry"
 import { isObject } from "@/lib/runtime/util"
 
-type PromptField = {
+type AuthFieldCondition = {
+  key: string
+  equals: string
+}
+
+type AuthFieldValidation = {
+  regex?: string
+  message?: string
+  minLength?: number
+  maxLength?: number
+}
+
+type AuthFieldBase = {
   key: string
   label: string
   placeholder?: string
+  defaultValue?: string
   required?: boolean
-  secret?: boolean
   description?: string
+  condition?: AuthFieldCondition
+  validate?: AuthFieldValidation
 }
+
+type AuthFieldOption = {
+  label: string
+  value: string
+  hint?: string
+}
+
+export type AuthField =
+  | ({
+      type: "text" | "secret"
+    } & AuthFieldBase)
+  | ({
+      type: "select"
+      options: AuthFieldOption[]
+    } & AuthFieldBase)
 
 export type AuthMethod =
   | {
-      id: string
       type: "api"
       label: string
-      prompt: PromptField[]
+      fields?: AuthField[]
     }
   | {
-      id: string
       type: "oauth"
       label: string
-      mode: "browser" | "device"
-      prompt?: PromptField[]
+      mode?: "browser" | "device"
+      fields?: AuthField[]
     }
 
 export type AuthAuthorization = {
-  methodID: string
   mode: "auto" | "code"
   url: string
   instructions?: string
+}
+
+export interface ResolvedAuthMethod {
+  pluginID: string
+  pluginMethodIndex: number
+  method: AuthMethod
+  plugin: RuntimePlugin
 }
 
 export interface AuthContext {
@@ -68,11 +101,13 @@ export interface PluginHooks {
       ctx: AuthContext,
       method: AuthMethod,
       input: Record<string, string>,
+      info: { methodIndex: number },
     ) => Promise<AuthAuthorization | AuthResult | void>
     callback?: (
       ctx: AuthContext,
       method: AuthMethod,
       input: { code?: string; callbackUrl?: string },
+      info: { methodIndex: number },
     ) => Promise<AuthResult | void>
     loader?: (ctx: AuthContext) => Promise<Record<string, unknown>>
   }
@@ -150,6 +185,14 @@ function mergeObjects<T extends Record<string, unknown>>(base: T, value: Record<
   } as T
 }
 
+function normalizeAuthMethod(method: AuthMethod): AuthMethod {
+  if (method.type !== "oauth") return method
+  return {
+    ...method,
+    mode: method.mode ?? "browser",
+  }
+}
+
 export class PluginManager {
   readonly plugins: RuntimePlugin[]
 
@@ -164,44 +207,63 @@ export class PluginManager {
     return this.plugins.filter((plugin) => supportsProvider(plugin, providerID))
   }
 
-  async listAuthMethods(ctx: AuthContext) {
-    const methods: AuthMethod[] = []
+  private isFallbackAuthPlugin(plugin: RuntimePlugin) {
+    return plugin.id === "builtin-api-key-auth"
+  }
+
+  async listResolvedAuthMethods(ctx: AuthContext) {
+    const providerSpecific: ResolvedAuthMethod[] = []
+    const fallback: ResolvedAuthMethod[] = []
+
     for (const plugin of this.providerPlugins(ctx.providerID)) {
       try {
-        const next = await plugin.hooks.auth?.methods?.(ctx)
-        if (!next || next.length === 0) continue
-        methods.push(...next)
+        const methods = await plugin.hooks.auth?.methods?.(ctx)
+        if (!methods || methods.length === 0) continue
+
+        const target = this.isFallbackAuthPlugin(plugin) ? fallback : providerSpecific
+        methods.forEach((method, pluginMethodIndex) => {
+          target.push({
+            pluginID: plugin.id,
+            pluginMethodIndex,
+            method: normalizeAuthMethod(method),
+            plugin,
+          })
+        })
       } catch (error) {
         console.error(`[plugin:${plugin.id}] auth.methods failed`, error)
       }
     }
-    return methods
+
+    if (providerSpecific.length > 0) {
+      return [...providerSpecific, ...fallback]
+    }
+    return fallback
   }
 
-  async authorize(ctx: AuthContext, method: AuthMethod, input: Record<string, string>) {
-    for (const plugin of this.providerPlugins(ctx.providerID)) {
-      try {
-        const result = await plugin.hooks.auth?.authorize?.(ctx, method, input)
-        if (!result) continue
-        return result
-      } catch (error) {
-        console.error(`[plugin:${plugin.id}] auth.authorize failed`, error)
-      }
-    }
-    return undefined
+  async listAuthMethods(ctx: AuthContext) {
+    const methods = await this.listResolvedAuthMethods(ctx)
+    return methods.map((item) => item.method)
   }
 
-  async callback(ctx: AuthContext, method: AuthMethod, input: { code?: string; callbackUrl?: string }) {
-    for (const plugin of this.providerPlugins(ctx.providerID)) {
-      try {
-        const result = await plugin.hooks.auth?.callback?.(ctx, method, input)
-        if (!result) continue
-        return result
-      } catch (error) {
-        console.error(`[plugin:${plugin.id}] auth.callback failed`, error)
-      }
-    }
-    return undefined
+  async resolveAuthMethod(ctx: AuthContext, methodIndex: number) {
+    const methods = await this.listResolvedAuthMethods(ctx)
+    return methods[methodIndex]
+  }
+
+  async authorize(ctx: AuthContext, resolved: ResolvedAuthMethod, input: Record<string, string>) {
+    const result = await resolved.plugin.hooks.auth?.authorize?.(ctx, resolved.method, input, {
+      methodIndex: resolved.pluginMethodIndex,
+    })
+    if (!result) return undefined
+    return result
+  }
+
+  async callback(ctx: AuthContext, resolved: ResolvedAuthMethod, input: { code?: string; callbackUrl?: string }) {
+    const result = await resolved.plugin.hooks.auth?.callback?.(ctx, resolved.method, input, {
+      methodIndex: resolved.pluginMethodIndex,
+    })
+    if (!result) return undefined
+    return result
   }
 
   async loadAuthOptions(ctx: AuthContext) {

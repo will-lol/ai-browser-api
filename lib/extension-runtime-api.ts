@@ -5,8 +5,10 @@ import type {
   RuntimePermissionDecision,
   RuntimePermissionEntry,
   RuntimeProviderSummary,
+  RuntimeAuthMethod,
+  RuntimeFinishProviderAuthResponse,
+  RuntimeStartProviderAuthResponse,
 } from "@/lib/runtime/rpc/runtime-rpc-types"
-import type { AuthMethod } from "@/lib/runtime/plugin-manager"
 import type { PermissionStatus } from "@/lib/runtime/permissions"
 
 export type ExtensionProvider = RuntimeProviderSummary
@@ -14,6 +16,7 @@ export type ModelPermission = RuntimePermissionEntry
 export type AvailableModel = RuntimeModelSummary
 export type OriginState = RuntimeOriginState
 export type PermissionDecision = RuntimePermissionDecision
+export type ExtensionAuthMethod = RuntimeAuthMethod
 
 export function currentOrigin() {
   if (typeof window === "undefined") return "https://chat.example.com"
@@ -62,93 +65,50 @@ export async function fetchProviderAuthMethods(providerID: string, origin = curr
   })
 }
 
-async function promptAuthValues(method: AuthMethod) {
-  const prompts = method.type === "api" ? method.prompt : method.prompt ?? []
-  const values: Record<string, string> = {}
-
-  for (const prompt of prompts) {
-    const value = window.prompt(prompt.label, "")
-    if (!value && prompt.required) {
-      throw new Error(`${prompt.label} is required`)
-    }
-    values[prompt.key] = value ?? ""
-  }
-
-  return values
-}
-
-async function connectProviderWithMethod(input: {
-  providerId: string
-  method: AuthMethod
-  values: Record<string, string>
-  code?: string
-  origin: string
-}) {
+export async function startRuntimeProviderAuth(input: {
+  providerID: string
+  methodIndex: number
+  values?: Record<string, string>
+  origin?: string
+}): Promise<RuntimeStartProviderAuthResponse> {
   const runtime = getRuntimeRPC()
-  return runtime.connectProvider({
-    providerID: input.providerId,
-    methodID: input.method.id,
+  const origin = input.origin ?? currentOrigin()
+  return runtime.startProviderAuth({
+    origin,
+    providerID: input.providerID,
+    methodIndex: input.methodIndex,
     values: input.values,
-    code: input.code,
-    origin: input.origin,
   })
 }
 
-export async function toggleProviderConnection(input: {
-  provider: ExtensionProvider
+export async function finishRuntimeProviderAuth(input: {
+  providerID: string
+  methodIndex: number
+  code?: string
+  callbackUrl?: string
+  origin?: string
+}): Promise<RuntimeFinishProviderAuthResponse> {
+  const runtime = getRuntimeRPC()
+  const origin = input.origin ?? currentOrigin()
+  return runtime.finishProviderAuth({
+    origin,
+    providerID: input.providerID,
+    methodIndex: input.methodIndex,
+    code: input.code,
+    callbackUrl: input.callbackUrl,
+  })
+}
+
+export async function disconnectRuntimeProvider(input: {
+  providerID: string
   origin?: string
 }) {
   const origin = input.origin ?? currentOrigin()
   const runtime = getRuntimeRPC()
-
-  if (input.provider.connected) {
-    return runtime.disconnectProvider({
-      providerID: input.provider.id,
-      origin,
-    })
-  }
-
-  const methods = await fetchProviderAuthMethods(input.provider.id, origin)
-  const method =
-    methods.find((item) => item.type === "oauth") ??
-    methods.find((item) => item.type === "api") ??
-    methods[0]
-
-  if (!method) {
-    throw new Error(`No auth method available for provider ${input.provider.id}`)
-  }
-
-  const values = await promptAuthValues(method)
-  const connected = await connectProviderWithMethod({
-    providerId: input.provider.id,
-    method,
-    values,
+  return runtime.disconnectProvider({
+    providerID: input.providerID,
     origin,
   })
-
-  if (
-    connected.result.pending &&
-    method.type === "oauth" &&
-    connected.result.authorization?.mode === "code"
-  ) {
-    const instructions =
-      connected.result.authorization.instructions ??
-      "Complete provider authorization and paste the code."
-    const code = window.prompt(instructions, "")
-    if (!code) {
-      throw new Error("Authorization code is required")
-    }
-
-    return connectProviderWithMethod({
-      providerId: input.provider.id,
-      method,
-      values,
-      code,
-      origin,
-    })
-  }
-
-  return connected
 }
 
 export async function setRuntimeOriginEnabled(input: {

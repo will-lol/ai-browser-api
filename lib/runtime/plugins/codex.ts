@@ -216,23 +216,21 @@ export const codexAuthPlugin: RuntimePlugin = {
       async methods() {
         return [
           {
-            id: "codex-oauth-browser",
             type: "oauth",
             mode: "browser",
             label: "ChatGPT Pro/Plus (browser)",
           },
           {
-            id: "codex-oauth-device",
             type: "oauth",
             mode: "device",
             label: "ChatGPT Pro/Plus (headless)",
           },
         ]
       },
-      async authorize(ctx, method) {
+      async authorize(ctx, method, _input, info) {
         if (method.type !== "oauth") return undefined
 
-        if (method.id === "codex-oauth-browser") {
+        if (info.methodIndex === 0) {
           const redirectUri = browser.identity?.getRedirectURL("openai-codex") ?? "https://localhost.invalid/openai-codex"
           const pkce = await generatePKCE()
           const state = generateState()
@@ -257,14 +255,13 @@ export const codexAuthPlugin: RuntimePlugin = {
           })
 
           return {
-            methodID: method.id,
             mode: "auto",
             url: `${ISSUER}/oauth/authorize?${params.toString()}`,
             instructions: "Complete authorization in your browser.",
           }
         }
 
-        if (method.id === "codex-oauth-device") {
+        if (info.methodIndex === 1) {
           const response = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
             method: "POST",
             headers: {
@@ -294,7 +291,6 @@ export const codexAuthPlugin: RuntimePlugin = {
           })
 
           return {
-            methodID: method.id,
             mode: "auto",
             url: `${ISSUER}/codex/device`,
             instructions: `Enter code: ${data.user_code}`,
@@ -303,10 +299,10 @@ export const codexAuthPlugin: RuntimePlugin = {
 
         return undefined
       },
-      async callback(ctx, method, input) {
+      async callback(ctx, method, input, info) {
         if (method.type !== "oauth") return undefined
 
-        if (method.id === "codex-oauth-browser") {
+        if (info.methodIndex === 0) {
           const pending = pendingBrowser.get(ctx.providerID)
           if (!pending) throw new Error("Codex browser auth session not found")
 
@@ -336,7 +332,7 @@ export const codexAuthPlugin: RuntimePlugin = {
           }
         }
 
-        if (method.id === "codex-oauth-device") {
+        if (info.methodIndex === 1) {
           const pending = pendingDevice.get(ctx.providerID)
           if (!pending) throw new Error("Codex device auth session not found")
 

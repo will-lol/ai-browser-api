@@ -89,12 +89,12 @@ export const gitlabAuthPlugin: RuntimePlugin = {
       async methods() {
         return [
           {
-            id: "gitlab-oauth",
             type: "oauth",
             mode: "browser",
             label: "GitLab OAuth",
-            prompt: [
+            fields: [
               {
+                type: "text",
                 key: "instanceUrl",
                 label: "GitLab instance URL",
                 placeholder: "https://gitlab.com",
@@ -103,29 +103,29 @@ export const gitlabAuthPlugin: RuntimePlugin = {
             ],
           },
           {
-            id: "gitlab-pat",
             type: "api",
             label: "GitLab Personal Access Token",
-            prompt: [
+            fields: [
               {
+                type: "text",
                 key: "instanceUrl",
                 label: "GitLab instance URL",
                 placeholder: "https://gitlab.com",
                 required: false,
               },
               {
+                type: "secret",
                 key: "token",
                 label: "Personal Access Token",
                 placeholder: "glpat-xxxxxxxxxxxxxxxxxxxx",
                 required: true,
-                secret: true,
               },
             ],
           },
         ]
       },
-      async authorize(ctx, method, input) {
-        if (method.id === "gitlab-pat" && method.type === "api") {
+      async authorize(ctx, method, input, info) {
+        if (method.type === "api" && info.methodIndex === 1) {
           const instanceUrl = normalizeInstanceUrl(input.instanceUrl?.trim() || GITLAB_COM_URL)
           const token = input.token?.trim()
           if (!token) {
@@ -152,7 +152,7 @@ export const gitlabAuthPlugin: RuntimePlugin = {
           }
         }
 
-        if (method.id === "gitlab-oauth" && method.type === "oauth") {
+        if (method.type === "oauth" && info.methodIndex === 0) {
           const instanceUrl = normalizeInstanceUrl(input.instanceUrl?.trim() || GITLAB_COM_URL)
           const redirectUri = browser.identity?.getRedirectURL("gitlab-oauth") ?? "https://localhost.invalid/gitlab-oauth"
           const pkce = await generatePKCE()
@@ -177,7 +177,6 @@ export const gitlabAuthPlugin: RuntimePlugin = {
           })
 
           return {
-            methodID: method.id,
             mode: "auto",
             url,
             instructions: "Complete GitLab OAuth in your browser.",
@@ -186,8 +185,8 @@ export const gitlabAuthPlugin: RuntimePlugin = {
 
         return undefined
       },
-      async callback(ctx, method, input) {
-        if (method.type !== "oauth" || method.id !== "gitlab-oauth") return undefined
+      async callback(ctx, method, input, info) {
+        if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
 
         const pending = pendingOAuth.get(ctx.providerID)
         if (!pending) throw new Error("GitLab OAuth session not found")

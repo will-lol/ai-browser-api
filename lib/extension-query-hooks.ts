@@ -5,17 +5,19 @@ import {
 } from "@tanstack/react-query"
 import {
   currentOrigin,
+  disconnectRuntimeProvider,
+  finishRuntimeProviderAuth,
+  fetchProviderAuthMethods,
   fetchModels,
   fetchOriginState,
   fetchPendingRequests,
   fetchPermissions,
   fetchProviders,
+  startRuntimeProviderAuth,
   setRuntimeOriginEnabled,
-  toggleProviderConnection,
   resolveRuntimePermissionRequest,
   dismissRuntimePermissionRequest,
   updateRuntimeModelPermission,
-  type ExtensionProvider,
 } from "@/lib/extension-runtime-api"
 import { extensionQueryKeys } from "@/lib/extension-query-keys"
 import type { PermissionStatus } from "@/lib/runtime/permissions"
@@ -24,6 +26,17 @@ export function useProvidersQuery(origin = currentOrigin()) {
   return useQuery({
     queryKey: extensionQueryKeys.providers(),
     queryFn: () => fetchProviders(origin),
+  })
+}
+
+export function useProviderAuthMethodsQuery(
+  providerID: string,
+  origin = currentOrigin(),
+) {
+  return useQuery({
+    queryKey: extensionQueryKeys.authMethods(providerID),
+    queryFn: () => fetchProviderAuthMethods(providerID, origin),
+    enabled: providerID.length > 0,
   })
 }
 
@@ -70,27 +83,140 @@ export function usePendingRequestsQuery(origin = currentOrigin()) {
   })
 }
 
-export function useProviderToggleMutation(origin = currentOrigin()) {
+export function useProviderDisconnectMutation(origin = currentOrigin()) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ provider }: { provider: ExtensionProvider }) =>
-      toggleProviderConnection({ provider, origin }),
-    onSuccess: (result, variables) => {
-      const providerID = variables.provider.id
-      const connected =
-        Boolean((result as { result?: { connected?: boolean } })?.result?.connected) ||
-        Boolean((result as { connected?: boolean }).connected)
+    mutationFn: ({ providerID }: { providerID: string }) =>
+      disconnectRuntimeProvider({ providerID, origin }),
+    onSuccess: (_result, variables) => {
+      const providerID = variables.providerID
 
       queryClient.setQueryData(
         extensionQueryKeys.providers(),
-        (prev: ExtensionProvider[] | undefined) => {
+        (
+          prev:
+            | Array<{
+                id: string
+                connected: boolean
+              }>
+            | undefined,
+        ) => {
           if (!prev) return prev
           return prev.map((provider) =>
             provider.id === providerID
               ? {
                   ...provider,
-                  connected,
+                  connected: false,
+                }
+              : provider,
+          )
+        },
+      )
+
+      queryClient.invalidateQueries({
+        queryKey: extensionQueryKeys.modelsRoot,
+      })
+      queryClient.invalidateQueries({
+        queryKey: extensionQueryKeys.providersRoot,
+      })
+      queryClient.invalidateQueries({
+        queryKey: extensionQueryKeys.authMethods(providerID),
+      })
+    },
+  })
+}
+
+export function useProviderStartAuthMutation(origin = currentOrigin()) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      providerID,
+      methodIndex,
+      values,
+    }: {
+      providerID: string
+      methodIndex: number
+      values?: Record<string, string>
+    }) => startRuntimeProviderAuth({ providerID, methodIndex, values, origin }),
+    onSuccess: (response, variables) => {
+      if (!response.result.connected) return
+
+      queryClient.invalidateQueries({
+        queryKey: extensionQueryKeys.authMethods(variables.providerID),
+      })
+
+      queryClient.setQueryData(
+        extensionQueryKeys.providers(),
+        (
+          prev:
+            | Array<{
+                id: string
+                connected: boolean
+              }>
+            | undefined,
+        ) => {
+          if (!prev) return prev
+          return prev.map((provider) =>
+            provider.id === variables.providerID
+              ? {
+                  ...provider,
+                  connected: true,
+                }
+              : provider,
+          )
+        },
+      )
+
+      queryClient.invalidateQueries({
+        queryKey: extensionQueryKeys.modelsRoot,
+      })
+      queryClient.invalidateQueries({
+        queryKey: extensionQueryKeys.providersRoot,
+      })
+    },
+  })
+}
+
+export function useProviderFinishAuthMutation(origin = currentOrigin()) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      providerID,
+      methodIndex,
+      code,
+      callbackUrl,
+    }: {
+      providerID: string
+      methodIndex: number
+      code?: string
+      callbackUrl?: string
+    }) => finishRuntimeProviderAuth({ providerID, methodIndex, code, callbackUrl, origin }),
+    onSuccess: (response, variables) => {
+      if (!response.result.connected) return
+
+      queryClient.invalidateQueries({
+        queryKey: extensionQueryKeys.authMethods(variables.providerID),
+      })
+
+      queryClient.setQueryData(
+        extensionQueryKeys.providers(),
+        (
+          prev:
+            | Array<{
+                id: string
+                connected: boolean
+              }>
+            | undefined,
+        ) => {
+          if (!prev) return prev
+          return prev.map((provider) =>
+            provider.id === variables.providerID
+              ? {
+                  ...provider,
+                  connected: true,
                 }
               : provider,
           )

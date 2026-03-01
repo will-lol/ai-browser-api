@@ -1,5 +1,7 @@
 import { browser } from "@wxt-dev/browser"
 import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
+import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
+import type { RuntimeModelCallInput } from "@/lib/runtime/rpc/runtime-rpc-types"
 
 const PAGE_SOURCE = "llm-bridge-page"
 const CONTENT_SOURCE = "llm-bridge-content"
@@ -12,7 +14,12 @@ type BridgeMessage = {
   payload?: Record<string, unknown>
 }
 
-const activeStreamIterators = new Map<string, AsyncIterator<string>>()
+type SerializedSupportedUrlPattern = {
+  source: string
+  flags: string
+}
+
+const activeStreamIterators = new Map<string, AsyncIterator<LanguageModelV3StreamPart>>()
 
 function injectPageApi() {
   if (document.getElementById(PAGE_API_SCRIPT_ID)) return
@@ -48,7 +55,10 @@ function isBridgeMessage(data: unknown): data is BridgeMessage {
   return !!data && typeof data === "object"
 }
 
-async function pumpStreamToPage(requestId: string, iterator: AsyncIterator<string>) {
+async function pumpStreamToPage(
+  requestId: string,
+  iterator: AsyncIterator<LanguageModelV3StreamPart>,
+) {
   try {
     while (true) {
       const chunk = await iterator.next()
@@ -59,7 +69,7 @@ async function pumpStreamToPage(requestId: string, iterator: AsyncIterator<strin
 
       sendToPage(requestId, "stream", {
         type: "chunk",
-        data: chunk.value ?? "",
+        data: chunk.value,
       })
     }
   } catch (error) {
@@ -73,6 +83,25 @@ async function pumpStreamToPage(requestId: string, iterator: AsyncIterator<strin
   } finally {
     activeStreamIterators.delete(requestId)
   }
+}
+
+function serializeSupportedUrls(
+  input: Record<string, RegExp[]> | undefined,
+): Record<string, SerializedSupportedUrlPattern[]> {
+  const output: Record<string, SerializedSupportedUrlPattern[]> = {}
+  if (!input) return output
+
+  for (const [mediaType, patterns] of Object.entries(input)) {
+    if (!Array.isArray(patterns)) continue
+    output[mediaType] = patterns
+      .filter((pattern): pattern is RegExp => pattern instanceof RegExp)
+      .map((pattern) => ({
+        source: pattern.source,
+        flags: pattern.flags,
+      }))
+  }
+
+  return output
 }
 
 async function handleRequest(message: BridgeMessage) {
@@ -129,7 +158,7 @@ async function handleRequest(message: BridgeMessage) {
     }
 
     if (message.type === "list-models") {
-      const response = await runtime.listModels({
+      const response = await runtime.listConnectedModels({
         origin: window.location.origin,
       })
 
@@ -143,6 +172,32 @@ async function handleRequest(message: BridgeMessage) {
 
       sendToPage(requestId, "response", {
         models,
+      })
+      return
+    }
+
+    if (message.type === "get-model") {
+      const modelId = typeof payload.modelId === "string" ? payload.modelId : ""
+      if (!modelId) {
+        throw new Error("Model is required for get-model")
+      }
+
+      const sessionID = typeof payload.sessionID === "string"
+        ? payload.sessionID
+        : requestId
+
+      const descriptor = await runtime.acquireModel({
+        origin: window.location.origin,
+        requestId,
+        sessionID,
+        modelId,
+      })
+
+      sendToPage(requestId, "response", {
+        specificationVersion: "v3",
+        provider: descriptor.provider,
+        modelId: descriptor.modelId,
+        supportedUrls: serializeSupportedUrls(descriptor.supportedUrls),
       })
       return
     }
@@ -187,7 +242,7 @@ async function handleRequest(message: BridgeMessage) {
           // Ignore iterator return errors during cancellation.
         }
 
-        await runtime.abort({
+        await runtime.abortModelCall({
           requestId: streamId,
         })
       }
@@ -196,47 +251,59 @@ async function handleRequest(message: BridgeMessage) {
       return
     }
 
-    if (message.type === "invoke") {
-      const model = typeof payload.model === "string" ? payload.model : ""
-      if (!model) {
-        throw new Error("Model is required for invoke")
+    if (message.type === "model-do-generate") {
+      const modelId = typeof payload.modelId === "string" ? payload.modelId : ""
+      if (!modelId) {
+        throw new Error("Model is required for model-do-generate")
       }
 
       const sessionID = typeof payload.sessionID === "string"
         ? payload.sessionID
         : requestId
-      const body = (payload.body as Record<string, unknown> | undefined) ?? payload
-      const stream = payload.stream === true
-
-      if (stream) {
-        const iterable = await runtime.invokeStream({
-          origin: window.location.origin,
-          requestId,
-          sessionID,
-          model,
-          body,
-        })
-
-        const iterator = iterable[Symbol.asyncIterator]()
-        activeStreamIterators.set(requestId, iterator)
-        void pumpStreamToPage(requestId, iterator)
-
-        sendToPage(requestId, "response", {
-          requestId,
-          stream: true,
-        })
-        return
+      const options = (payload.options as RuntimeModelCallInput["options"] | undefined) ?? {
+        prompt: [],
       }
-
-      const response = await runtime.invoke({
+      const response = await runtime.modelDoGenerate({
         origin: window.location.origin,
         requestId,
         sessionID,
-        model,
-        body,
+        modelId,
+        options,
       })
 
       sendToPage(requestId, "response", response)
+      return
+    }
+
+    if (message.type === "model-do-stream") {
+      const modelId = typeof payload.modelId === "string" ? payload.modelId : ""
+      if (!modelId) {
+        throw new Error("Model is required for model-do-stream")
+      }
+
+      const sessionID = typeof payload.sessionID === "string"
+        ? payload.sessionID
+        : requestId
+      const options = (payload.options as RuntimeModelCallInput["options"] | undefined) ?? {
+        prompt: [],
+      }
+
+      const iterable = await runtime.modelDoStream({
+        origin: window.location.origin,
+        requestId,
+        sessionID,
+        modelId,
+        options,
+      })
+
+      const iterator = iterable[Symbol.asyncIterator]()
+      activeStreamIterators.set(requestId, iterator)
+      void pumpStreamToPage(requestId, iterator)
+
+      sendToPage(requestId, "response", {
+        requestId,
+        stream: true,
+      })
       return
     }
 

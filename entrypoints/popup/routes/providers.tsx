@@ -1,9 +1,6 @@
-"use client"
-
 import { ArrowLeft } from "lucide-react"
-import { createFileRoute, useRouter } from "@tanstack/react-router"
+import { Outlet, createFileRoute, useRouter } from "@tanstack/react-router"
 import { PopupNav } from "@/components/extension/popup-nav"
-import { ProvidersView } from "@/components/extension/providers-view"
 
 export const Route = createFileRoute("/providers")({
   staticData: {
@@ -32,7 +29,7 @@ function ProvidersRoute() {
           </button>
         )}
       />
-      <ProvidersView />
+      <Outlet />
     </div>
   )
 }

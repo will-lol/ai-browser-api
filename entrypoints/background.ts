@@ -3,13 +3,18 @@ import { ChromePortIO, RPCChannel } from "kkrpc/chrome-extension"
 import { defineBackground } from "wxt/utils/define-background"
 import { MODELS_REFRESH_INTERVAL_MS, RUNTIME_STATE_KEY } from "@/lib/runtime/constants"
 import { getModelsDevUpdatedAt, refreshModelsDevData } from "@/lib/runtime/models-dev"
-import { invokeRuntimeModel } from "@/lib/runtime/service"
 import {
-  connectRuntimeProvider,
+  acquireRuntimeModel,
+  generateRuntimeModel,
+  streamRuntimeModel,
+} from "@/lib/runtime/service"
+import {
   createRuntimePermissionRequest,
   disconnectRuntimeProvider,
   dismissRuntimePermissionRequest,
+  finishRuntimeProviderAuth,
   resolveRuntimePermissionRequest,
+  startRuntimeProviderAuth,
   setRuntimeOriginEnabled,
   updateRuntimePermission,
 } from "@/lib/runtime/mutation-service"
@@ -26,8 +31,9 @@ import { runtimeDb } from "@/lib/runtime/db/runtime-db"
 import { subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events"
 import {
   RUNTIME_RPC_PORT_NAME,
-  type RuntimeInvokeInput,
-  type RuntimeInvokeResult,
+  type RuntimeAcquireModelInput,
+  type RuntimeAcquireModelResult,
+  type RuntimeModelCallInput,
   type RuntimeRPCService,
 } from "@/lib/runtime/rpc/runtime-rpc-types"
 import { parseProviderModel } from "@/lib/runtime/util"
@@ -201,74 +207,61 @@ function cancelRequest(requestId: string) {
   activeRequestControllers.delete(requestId)
 }
 
-async function invokeRuntime(input: RuntimeInvokeInput): Promise<RuntimeInvokeResult> {
+async function acquireModel(input: RuntimeAcquireModelInput): Promise<RuntimeAcquireModelResult> {
+  const requestId = input.requestId
+  return acquireRuntimeModel({
+    origin: getRequestOrigin(input.origin),
+    sessionID: input.sessionID ?? requestId,
+    requestID: requestId,
+    model: input.modelId,
+  })
+}
+
+async function modelDoGenerate(input: RuntimeModelCallInput) {
   const requestId = input.requestId
   const controller = new AbortController()
   activeRequestControllers.set(requestId, controller)
-
   try {
-    const result = await invokeRuntimeModel(
+    return generateRuntimeModel(
       {
         origin: getRequestOrigin(input.origin),
         sessionID: input.sessionID ?? requestId,
         requestID: requestId,
-        model: input.model,
-        stream: false,
-        body: input.body ?? {},
+        model: input.modelId,
+        options: input.options,
       },
       controller.signal,
     )
-
-    if (result.stream) {
-      throw new Error("Unexpected stream response for non-stream invoke")
-    }
-
-    return result
   } finally {
     activeRequestControllers.delete(requestId)
   }
 }
 
-async function* invokeRuntimeStream(input: RuntimeInvokeInput) {
+async function* modelDoStream(input: RuntimeModelCallInput) {
   const requestId = input.requestId
   const controller = new AbortController()
   activeRequestControllers.set(requestId, controller)
 
   try {
-    const result = await invokeRuntimeModel(
+    const stream = await streamRuntimeModel(
       {
         origin: getRequestOrigin(input.origin),
         sessionID: input.sessionID ?? requestId,
         requestID: requestId,
-        model: input.model,
-        stream: true,
-        body: input.body ?? {},
+        model: input.modelId,
+        options: input.options,
       },
       controller.signal,
     )
 
-    if (!result.stream || !result.response.body) {
-      return
-    }
-
-    const reader = result.response.body.getReader()
-    const decoder = new TextDecoder()
+    const reader = stream.getReader()
 
     try {
       while (true) {
         const chunk = await reader.read()
         if (chunk.done) break
-        if (!chunk.value || chunk.value.length === 0) continue
-
-        const data = decoder.decode(chunk.value, { stream: true })
-        if (data.length > 0) {
-          yield data
-        }
-      }
-
-      const finalChunk = decoder.decode()
-      if (finalChunk.length > 0) {
-        yield finalChunk
+        if (!chunk.value) continue
+        yield chunk.value
       }
     } finally {
       try {
@@ -293,6 +286,12 @@ const runtimeService: RuntimeRPCService = {
       connectedOnly: Boolean(input.connectedOnly),
     })
   },
+  async listConnectedModels(input) {
+    void input
+    return listModels({
+      connectedOnly: true,
+    })
+  },
   async getOriginState(input) {
     return getOriginState(getRequestOrigin(input.origin))
   },
@@ -305,12 +304,21 @@ const runtimeService: RuntimeRPCService = {
   async getAuthMethods(input) {
     return listProviderAuthMethods(input.providerID)
   },
-  async connectProvider(input) {
-    const response = await connectRuntimeProvider({
+  async startProviderAuth(input) {
+    const response = await startRuntimeProviderAuth({
       providerID: input.providerID,
-      methodID: input.methodID,
+      methodIndex: input.methodIndex,
       values: input.values ?? {},
+    })
+    await updateActionState()
+    return response
+  },
+  async finishProviderAuth(input) {
+    const response = await finishRuntimeProviderAuth({
+      providerID: input.providerID,
+      methodIndex: input.methodIndex,
       code: input.code,
+      callbackUrl: input.callbackUrl,
     })
     await updateActionState()
     return response
@@ -362,13 +370,16 @@ const runtimeService: RuntimeRPCService = {
     await updateActionState()
     return result
   },
-  async invoke(input) {
-    return invokeRuntime(input)
+  async acquireModel(input) {
+    return acquireModel(input)
   },
-  invokeStream(input) {
-    return invokeRuntimeStream(input)
+  async modelDoGenerate(input) {
+    return modelDoGenerate(input)
   },
-  async abort(input) {
+  modelDoStream(input) {
+    return modelDoStream(input)
+  },
+  async abortModelCall(input) {
     cancelRequest(input.requestId)
   },
 }

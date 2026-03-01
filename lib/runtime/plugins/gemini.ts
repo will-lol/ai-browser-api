@@ -100,12 +100,12 @@ export const geminiOAuthPlugin: RuntimePlugin = {
       async methods() {
         return [
           {
-            id: "gemini-oauth-google",
             type: "oauth",
             mode: "browser",
             label: "OAuth with Google (Gemini CLI)",
-            prompt: [
+            fields: [
               {
+                type: "text",
                 key: "projectId",
                 label: "Google Cloud project ID (optional)",
                 placeholder: "my-gcp-project",
@@ -115,8 +115,8 @@ export const geminiOAuthPlugin: RuntimePlugin = {
           },
         ]
       },
-      async authorize(ctx, method, input) {
-        if (method.type !== "oauth" || method.id !== "gemini-oauth-google") return undefined
+      async authorize(ctx, method, input, info) {
+        if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
 
         const redirectUri = browser.identity?.getRedirectURL("google-gemini") ?? "https://localhost.invalid/google-gemini"
         const pkce = await generatePKCE()
@@ -142,14 +142,13 @@ export const geminiOAuthPlugin: RuntimePlugin = {
         })
 
         return {
-          methodID: method.id,
           mode: "auto",
           url: url.toString(),
           instructions: "Complete Google OAuth in your browser.",
         }
       },
-      async callback(ctx, method, input) {
-        if (method.type !== "oauth" || method.id !== "gemini-oauth-google") return undefined
+      async callback(ctx, method, input, info) {
+        if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
         const pending = pendingGemini.get(ctx.providerID)
         if (!pending) throw new Error("Gemini OAuth session not found")
 

@@ -1,6 +1,7 @@
 import {
-  connectProvider,
+  finishProviderAuth,
   disconnectProvider,
+  startProviderAuth,
 } from "@/lib/runtime/provider-auth"
 import {
   createPermissionRequest,
@@ -11,14 +12,30 @@ import {
 } from "@/lib/runtime/permissions"
 import { refreshProviderCatalogForProvider } from "@/lib/runtime/provider-registry"
 
-export async function connectRuntimeProvider(input: {
+export async function startRuntimeProviderAuth(input: {
   providerID: string
-  methodID?: string
+  methodIndex: number
   values?: Record<string, string>
-  code?: string
 }) {
-  const result = await connectProvider(input)
+  const result = await startProviderAuth(input)
 
+  if (result.connected) {
+    await refreshProviderCatalogForProvider(input.providerID)
+  }
+
+  return {
+    providerID: input.providerID,
+    result,
+  }
+}
+
+export async function finishRuntimeProviderAuth(input: {
+  providerID: string
+  methodIndex: number
+  code?: string
+  callbackUrl?: string
+}) {
+  const result = await finishProviderAuth(input)
   if (result.connected) {
     await refreshProviderCatalogForProvider(input.providerID)
   }

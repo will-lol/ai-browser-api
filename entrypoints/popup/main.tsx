@@ -5,6 +5,7 @@ import {
   createHashHistory,
   createRouter,
 } from "@tanstack/react-router"
+import { Toaster } from "sonner"
 import { ExtensionQueryProvider } from "@/components/extension/extension-query-provider"
 import { routeTree } from "./routeTree.gen"
 import "@/styles/globals.css"
@@ -24,6 +25,13 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ExtensionQueryProvider persist>
       <RouterProvider router={router} />
+      <Toaster
+        position="top-right"
+        expand={false}
+        gap={8}
+        visibleToasts={4}
+        closeButton={false}
+      />
     </ExtensionQueryProvider>
   </StrictMode>,
 )

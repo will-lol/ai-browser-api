@@ -8,16 +8,15 @@ export const apiKeyAuthPlugin: RuntimePlugin = {
       async methods(ctx) {
         return [
           {
-            id: "api-key",
             type: "api",
             label: "API Key",
-            prompt: [
+            fields: [
               {
+                type: "secret",
                 key: "apiKey",
                 label: ctx.provider.env[0] ?? `${ctx.providerID.toUpperCase()}_API_KEY`,
                 placeholder: "Paste API key",
                 required: true,
-                secret: true,
                 description: "Stored encrypted in extension local storage.",
               },
             ],

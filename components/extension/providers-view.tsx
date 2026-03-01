@@ -1,17 +1,19 @@
 import { useMemo, useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Unplug, Plug } from "lucide-react"
 import { SearchInput } from "@/components/extension/search-input"
 import { useFrozenOrder } from "@/hooks/use-frozen-order"
 import {
-  useProviderToggleMutation,
+  useProviderDisconnectMutation,
   useProvidersQuery,
 } from "@/lib/extension-query-hooks"
 
 export function ProvidersView() {
   const [search, setSearch] = useState("")
+  const navigate = useNavigate()
   const providersQuery = useProvidersQuery()
-  const toggleProviderMutation = useProviderToggleMutation()
+  const disconnectProviderMutation = useProviderDisconnectMutation()
 
   const providers = providersQuery.data ?? []
 
@@ -74,8 +76,8 @@ export function ProvidersView() {
         <div className="flex flex-col">
           {sorted.map((provider) => {
             const controlsDisabled =
-              toggleProviderMutation.isPending &&
-              toggleProviderMutation.variables?.provider.id === provider.id
+              disconnectProviderMutation.isPending &&
+              disconnectProviderMutation.variables?.providerID === provider.id
 
             return (
               <div
@@ -95,7 +97,16 @@ export function ProvidersView() {
 
                 <button
                   onClick={() => {
-                    toggleProviderMutation.mutate({ provider })
+                    if (provider.connected) {
+                      disconnectProviderMutation.mutate({ providerID: provider.id })
+                      return
+                    }
+                    void navigate({
+                      to: "/providers/$providerId/connect",
+                      params: {
+                        providerId: provider.id,
+                      },
+                    })
                   }}
                   disabled={controlsDisabled}
                   className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${

@@ -57,29 +57,44 @@ export const copilotAuthPlugin: RuntimePlugin = {
       async methods() {
         return [
           {
-            id: "copilot-oauth",
             type: "oauth",
             mode: "device",
             label: "Login with GitHub Copilot",
-            prompt: [
+            fields: [
               {
+                type: "select",
                 key: "deploymentType",
-                label: "Deployment Type (github.com or enterprise)",
-                placeholder: "github.com",
+                label: "Deployment Type",
                 required: false,
+                defaultValue: "github.com",
+                options: [
+                  {
+                    label: "GitHub.com",
+                    value: "github.com",
+                  },
+                  {
+                    label: "Enterprise",
+                    value: "enterprise",
+                  },
+                ],
               },
               {
+                type: "text",
                 key: "enterpriseUrl",
                 label: "Enterprise URL (if using enterprise)",
                 placeholder: "company.ghe.com",
                 required: false,
+                condition: {
+                  key: "deploymentType",
+                  equals: "enterprise",
+                },
               },
             ],
           },
         ]
       },
-      async authorize(ctx, method, input) {
-        if (method.type !== "oauth" || method.id !== "copilot-oauth") return undefined
+      async authorize(ctx, method, input, info) {
+        if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
 
         const deploymentType = input.deploymentType?.trim().toLowerCase()
         const enterpriseInput = input.enterpriseUrl?.trim()
@@ -121,14 +136,13 @@ export const copilotAuthPlugin: RuntimePlugin = {
         })
 
         return {
-          methodID: method.id,
           mode: "auto",
           url: deviceData.verification_uri,
           instructions: `Enter code: ${deviceData.user_code}`,
         }
       },
-      async callback(ctx, method) {
-        if (method.type !== "oauth" || method.id !== "copilot-oauth") return undefined
+      async callback(ctx, method, _input, info) {
+        if (method.type !== "oauth" || info.methodIndex !== 0) return undefined
         const pending = pendingCopilot.get(ctx.providerID)
         if (!pending) throw new Error("Copilot device auth session not found")
 
