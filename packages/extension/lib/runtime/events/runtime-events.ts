@@ -3,6 +3,7 @@ import { RuntimeEventPayloadSchema, type RuntimeEventPayload } from "@/lib/runti
 export const RUNTIME_EVENT_CHANNEL_NAME = "llm-bridge-runtime-events-v1"
 
 let runtimeChannel: BroadcastChannel | null = null
+const localListeners = new Set<(event: RuntimeEventPayload) => void>()
 
 function getRuntimeChannel() {
   if (typeof BroadcastChannel === "undefined") return null
@@ -16,6 +17,13 @@ function getRuntimeChannel() {
 
 export function publishRuntimeEvent(event: RuntimeEventPayload) {
   const parsed = RuntimeEventPayloadSchema.parse(event)
+  for (const listener of localListeners) {
+    try {
+      listener(parsed)
+    } catch (error) {
+      console.warn("runtime event listener failed", error)
+    }
+  }
   const channel = getRuntimeChannel()
   channel?.postMessage(parsed)
 }
@@ -23,9 +31,13 @@ export function publishRuntimeEvent(event: RuntimeEventPayload) {
 export function subscribeRuntimeEvents(
   handler: (event: RuntimeEventPayload) => void,
 ) {
+  localListeners.add(handler)
+
   const channel = getRuntimeChannel()
   if (!channel) {
-    return () => {}
+    return () => {
+      localListeners.delete(handler)
+    }
   }
 
   const listener = (input: MessageEvent<unknown>) => {
@@ -37,6 +49,7 @@ export function subscribeRuntimeEvents(
   channel.addEventListener("message", listener)
 
   return () => {
+    localListeners.delete(handler)
     channel.removeEventListener("message", listener)
   }
 }

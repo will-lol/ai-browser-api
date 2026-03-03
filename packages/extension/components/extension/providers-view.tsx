@@ -25,6 +25,9 @@ export function ProvidersView() {
       if (!a.connected && b.connected) return 1
       return a.name.localeCompare(b.name)
     },
+    {
+      groupBy: (provider) => (provider.connected ? 0 : 1),
+    },
   )
 
   const sorted = useMemo(() => {

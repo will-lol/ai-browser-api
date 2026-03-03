@@ -200,6 +200,14 @@ async function updateActionState() {
   await updateToolbarIcon(active)
 }
 
+async function updateActionStateSafe() {
+  try {
+    await updateActionState()
+  } catch (error) {
+    console.warn("updateActionState failed", error)
+  }
+}
+
 function getRequestOrigin(origin?: string) {
   return origin ?? "https://unknown.invalid"
 }
@@ -211,12 +219,16 @@ function cancelRequest(requestId: string) {
 
 async function acquireModel(input: RuntimeAcquireModelInput): Promise<RuntimeAcquireModelResult> {
   const requestId = input.requestId
-  return acquireRuntimeModel({
-    origin: getRequestOrigin(input.origin),
-    sessionID: input.sessionID ?? requestId,
-    requestID: requestId,
-    model: input.modelId,
-  })
+  try {
+    return await acquireRuntimeModel({
+      origin: getRequestOrigin(input.origin),
+      sessionID: input.sessionID ?? requestId,
+      requestID: requestId,
+      model: input.modelId,
+    })
+  } finally {
+    await updateActionStateSafe()
+  }
 }
 
 async function modelDoGenerate(input: RuntimeModelCallInput) {
@@ -224,7 +236,7 @@ async function modelDoGenerate(input: RuntimeModelCallInput) {
   const controller = new AbortController()
   activeRequestControllers.set(requestId, controller)
   try {
-    return generateRuntimeModel(
+    return await generateRuntimeModel(
       {
         origin: getRequestOrigin(input.origin),
         sessionID: input.sessionID ?? requestId,
@@ -236,6 +248,7 @@ async function modelDoGenerate(input: RuntimeModelCallInput) {
     )
   } finally {
     activeRequestControllers.delete(requestId)
+    await updateActionStateSafe()
   }
 }
 
@@ -275,6 +288,7 @@ async function* modelDoStream(input: RuntimeModelCallInput) {
   } finally {
     controller.abort()
     activeRequestControllers.delete(requestId)
+    await updateActionStateSafe()
   }
 }
 

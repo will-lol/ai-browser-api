@@ -3,7 +3,7 @@ import { normalizeDomain, sleep } from "@/lib/runtime/plugins/oauth-util"
 import type { RuntimePlugin } from "@/lib/runtime/plugin-manager"
 import { isObject } from "@/lib/runtime/util"
 
-const CLIENT_ID = "Ov23li8tweQw6odWQebz"
+const CLIENT_ID = "Ov23liGAD0bPGkreWZNE"
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3_000
 
 function throwIfAborted(signal?: AbortSignal) {

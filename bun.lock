@@ -16,6 +16,16 @@
         "typescript": "5.9.3",
       },
     },
+    "packages/example-app": {
+      "name": "@llm-bridge/example-app",
+      "dependencies": {
+        "@llm-bridge/client": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "5.9.3",
+        "vite": "^7.3.1",
+      },
+    },
     "packages/extension": {
       "name": "@llm-bridge/extension",
       "version": "0.1.0",
@@ -324,6 +334,8 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "3.1.2", "@jridgewell/sourcemap-codec": "1.5.5" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@llm-bridge/client": ["@llm-bridge/client@workspace:packages/client"],
+
+    "@llm-bridge/example-app": ["@llm-bridge/example-app@workspace:packages/example-app"],
 
     "@llm-bridge/extension": ["@llm-bridge/extension@workspace:packages/extension"],
 

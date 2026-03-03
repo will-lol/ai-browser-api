@@ -1,25 +1,25 @@
-import { setAuth } from "@/lib/runtime/auth-store"
-import { getAuth } from "@/lib/runtime/auth-store"
+import { setAuth } from "@/lib/runtime/auth-store";
+import { getAuth } from "@/lib/runtime/auth-store";
 import {
   buildExtensionRedirectPath,
   generatePKCE,
   generateState,
   normalizeInstanceUrl,
-} from "@/lib/runtime/plugins/oauth-util"
-import type { RuntimePlugin } from "@/lib/runtime/plugin-manager"
+} from "@/lib/runtime/plugins/oauth-util";
+import type { RuntimePlugin } from "@/lib/runtime/plugin-manager";
 
 const CLIENT_ID =
-  "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e"
-const GITLAB_COM_URL = "https://gitlab.com"
-const OAUTH_SCOPES = ["api"]
+  "6d66e9e281cd4298d71adfb271cd1baf57f18f7a186dbad4e94ca3e4ff2acb2e";
+const GITLAB_COM_URL = "https://gitlab.com";
+const OAUTH_SCOPES = ["api"];
 
 type GitLabTokenResponse = {
-  access_token: string
-  refresh_token: string
-  expires_in: number
-}
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+};
 
-const refreshLocks = new Map<string, Promise<void>>()
+const refreshLocks = new Map<string, Promise<void>>();
 
 async function exchangeAuthorizationCode(
   instanceUrl: string,
@@ -40,14 +40,16 @@ async function exchangeAuthorizationCode(
       redirect_uri: redirectUri,
       code_verifier: codeVerifier,
     }).toString(),
-  })
+  });
 
   if (!response.ok) {
-    const detail = await response.text().catch(() => "")
-    throw new Error(`GitLab token exchange failed (${response.status}): ${detail.slice(0, 300)}`)
+    const detail = await response.text().catch(() => "");
+    throw new Error(
+      `GitLab token exchange failed (${response.status}): ${detail.slice(0, 300)}`,
+    );
   }
 
-  return (await response.json()) as GitLabTokenResponse
+  return (await response.json()) as GitLabTokenResponse;
 }
 
 async function exchangeRefreshToken(instanceUrl: string, refreshToken: string) {
@@ -62,14 +64,16 @@ async function exchangeRefreshToken(instanceUrl: string, refreshToken: string) {
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     }).toString(),
-  })
+  });
 
   if (!response.ok) {
-    const detail = await response.text().catch(() => "")
-    throw new Error(`GitLab token refresh failed (${response.status}): ${detail.slice(0, 300)}`)
+    const detail = await response.text().catch(() => "");
+    throw new Error(
+      `GitLab token refresh failed (${response.status}): ${detail.slice(0, 300)}`,
+    );
   }
 
-  return (await response.json()) as GitLabTokenResponse
+  return (await response.json()) as GitLabTokenResponse;
 }
 
 export const gitlabAuthPlugin: RuntimePlugin = {
@@ -95,12 +99,14 @@ export const gitlabAuthPlugin: RuntimePlugin = {
               },
             ],
             async authorize(input) {
-              const instanceUrl = normalizeInstanceUrl(input.values.instanceUrl?.trim() || GITLAB_COM_URL)
+              const instanceUrl = normalizeInstanceUrl(
+                input.values.instanceUrl?.trim() || GITLAB_COM_URL,
+              );
               const redirectUri = input.oauth.getRedirectURL(
                 buildExtensionRedirectPath(input.providerID, "oauth"),
-              )
-              const pkce = await generatePKCE()
-              const state = generateState()
+              );
+              const pkce = await generatePKCE();
+              const state = generateState();
 
               const params = new URLSearchParams({
                 client_id: CLIENT_ID,
@@ -110,18 +116,21 @@ export const gitlabAuthPlugin: RuntimePlugin = {
                 scope: OAUTH_SCOPES.join(" "),
                 code_challenge: pkce.challenge,
                 code_challenge_method: "S256",
-              })
+              });
 
-              const url = `${instanceUrl}/oauth/authorize?${params.toString()}`
-              const callbackUrl = await input.oauth.launchWebAuthFlow(url)
-              const parsed = input.oauth.parseCallback(callbackUrl)
+              const url = `${instanceUrl}/oauth/authorize?${params.toString()}`;
+              const callbackUrl = await input.oauth.launchWebAuthFlow(url);
+              const parsed = input.oauth.parseCallback(callbackUrl);
 
               if (parsed.error) {
-                throw new Error(`GitLab OAuth failed: ${parsed.errorDescription ?? parsed.error}`)
+                throw new Error(
+                  `GitLab OAuth failed: ${parsed.errorDescription ?? parsed.error}`,
+                );
               }
-              if (!parsed.code) throw new Error("Missing GitLab authorization code")
+              if (!parsed.code)
+                throw new Error("Missing GitLab authorization code");
               if (parsed.state && parsed.state !== state) {
-                throw new Error("OAuth state mismatch")
+                throw new Error("OAuth state mismatch");
               }
 
               const tokens = await exchangeAuthorizationCode(
@@ -129,7 +138,7 @@ export const gitlabAuthPlugin: RuntimePlugin = {
                 parsed.code,
                 pkce.verifier,
                 redirectUri,
-              )
+              );
 
               return {
                 type: "oauth",
@@ -140,7 +149,7 @@ export const gitlabAuthPlugin: RuntimePlugin = {
                   authMode: "gitlab_oauth",
                   instanceUrl,
                 },
-              }
+              };
             },
           },
           {
@@ -164,20 +173,24 @@ export const gitlabAuthPlugin: RuntimePlugin = {
               },
             ],
             async authorize(input) {
-              const instanceUrl = normalizeInstanceUrl(input.values.instanceUrl?.trim() || GITLAB_COM_URL)
-              const token = input.values.token?.trim()
+              const instanceUrl = normalizeInstanceUrl(
+                input.values.instanceUrl?.trim() || GITLAB_COM_URL,
+              );
+              const token = input.values.token?.trim();
               if (!token) {
-                throw new Error("GitLab personal access token is required")
+                throw new Error("GitLab personal access token is required");
               }
 
               const response = await fetch(`${instanceUrl}/api/v4/user`, {
                 headers: {
                   Authorization: `Bearer ${token}`,
                 },
-              })
+              });
 
               if (!response.ok) {
-                throw new Error("GitLab personal access token validation failed")
+                throw new Error(
+                  "GitLab personal access token validation failed",
+                );
               }
 
               return {
@@ -187,45 +200,45 @@ export const gitlabAuthPlugin: RuntimePlugin = {
                   authMode: "gitlab_pat",
                   instanceUrl,
                 },
-              }
+              };
             },
           },
-        ]
+        ];
       },
       async loader(auth, _provider, ctx) {
-        if (!auth) return {}
+        if (!auth) return {};
 
-        const instanceUrl = auth.metadata?.instanceUrl || GITLAB_COM_URL
+        const instanceUrl = auth.metadata?.instanceUrl || GITLAB_COM_URL;
         if (auth.type === "api") {
           return {
             $baseURL: instanceUrl,
             $apiKey: auth.key,
             $authType: "bearer",
-          }
+          };
         }
 
-        const oauthAuth = auth
-        let access = oauthAuth.access
-        let refresh = oauthAuth.refresh
-        let expiresAt = oauthAuth.expiresAt
+        const oauthAuth = auth;
+        let access = oauthAuth.access;
+        let refresh = oauthAuth.refresh;
+        let expiresAt = oauthAuth.expiresAt;
 
         if (refresh && (!expiresAt || expiresAt <= Date.now() + 5 * 60_000)) {
-          const lockKey = `${ctx.providerID}:${instanceUrl}`
-          const existingLock = refreshLocks.get(lockKey)
+          const lockKey = `${ctx.providerID}:${instanceUrl}`;
+          const existingLock = refreshLocks.get(lockKey);
           if (existingLock) {
-            await existingLock
-            const latest = await getAuth(ctx.providerID)
+            await existingLock;
+            const latest = await getAuth(ctx.providerID);
             if (latest?.type === "oauth") {
-              access = latest.access
-              refresh = latest.refresh
-              expiresAt = latest.expiresAt
+              access = latest.access;
+              refresh = latest.refresh;
+              expiresAt = latest.expiresAt;
             }
           } else {
             const task = (async () => {
-              const next = await exchangeRefreshToken(instanceUrl, refresh)
-              access = next.access_token
-              refresh = next.refresh_token
-              expiresAt = Date.now() + next.expires_in * 1000
+              const next = await exchangeRefreshToken(instanceUrl, refresh);
+              access = next.access_token;
+              refresh = next.refresh_token;
+              expiresAt = Date.now() + next.expires_in * 1000;
               await setAuth(ctx.providerID, {
                 type: "oauth",
                 access,
@@ -237,13 +250,13 @@ export const gitlabAuthPlugin: RuntimePlugin = {
                   authMode: "gitlab_oauth",
                   instanceUrl,
                 },
-              })
-            })()
-            refreshLocks.set(lockKey, task)
+              });
+            })();
+            refreshLocks.set(lockKey, task);
             try {
-              await task
+              await task;
             } finally {
-              refreshLocks.delete(lockKey)
+              refreshLocks.delete(lockKey);
             }
           }
         }
@@ -252,8 +265,8 @@ export const gitlabAuthPlugin: RuntimePlugin = {
           $baseURL: instanceUrl,
           $apiKey: access,
           $authType: "bearer",
-        }
+        };
       },
     },
   },
-}
+};

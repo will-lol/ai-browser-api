@@ -19,6 +19,15 @@ export interface PermissionRequest {
   status: "pending" | "resolved"
 }
 
+export type CreatePermissionRequestResult =
+  | {
+      status: "alreadyAllowed"
+    }
+  | {
+      status: "requested"
+      request: PermissionRequest
+    }
+
 export async function listPermissions(origin: string) {
   const rows = await runtimeDb.permissions.where("origin").equals(origin).toArray()
   return rows.map((row) => ({
@@ -109,14 +118,24 @@ export async function createPermissionRequest(input: {
   provider: string
   modelName: string
   capabilities?: string[]
-}) {
+}): Promise<CreatePermissionRequestResult> {
+  const permission = await getModelPermission(input.origin, input.modelId)
+  if (permission === "allowed") {
+    return {
+      status: "alreadyAllowed",
+    }
+  }
+
   const duplicate = await runtimeDb.pendingRequests
     .where("origin")
     .equals(input.origin)
     .filter((item) => item.modelId === input.modelId && item.status === "pending" && !item.dismissed)
     .first()
   if (duplicate) {
-    return duplicate
+    return {
+      status: "requested",
+      request: duplicate,
+    }
   }
 
   const capabilities = input.capabilities ?? getModelCapabilities(input.modelId)
@@ -172,7 +191,10 @@ export async function createPermissionRequest(input: {
     })
   })
 
-  return request
+  return {
+    status: "requested",
+    request,
+  }
 }
 
 export async function dismissPermissionRequest(requestId: string) {

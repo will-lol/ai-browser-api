@@ -217,6 +217,11 @@ export class AuthFlowManager {
     methodID: string
     values?: Record<string, string>
   }): Promise<RuntimeAuthFlowSnapshot> {
+    console.info("[auth-flow] start requested", {
+      providerID: input.providerID,
+      methodID: input.methodID,
+    })
+
     let flow = this.flows.get(input.providerID)
     if (!flow || isTerminalStatus(flow.status)) {
       flow = await this.buildIdleFlow(input.providerID)
@@ -241,6 +246,10 @@ export class AuthFlowManager {
     this.setFlow(flow)
 
     try {
+      console.info("[auth-flow] invoking provider auth", {
+        providerID: input.providerID,
+        methodID: selected.id,
+      })
       const task = startProviderAuth({
         providerID: input.providerID,
         methodID: selected.id,
@@ -250,8 +259,19 @@ export class AuthFlowManager {
       flow.task = task
 
       const result = await task
+      console.info("[auth-flow] provider auth resolved", {
+        providerID: input.providerID,
+        methodID: selected.id,
+        connected: result.connected,
+      })
       if (result.connected) {
+        console.info("[auth-flow] refreshing provider catalog", {
+          providerID: input.providerID,
+        })
         await refreshProviderCatalogForProvider(input.providerID)
+        console.info("[auth-flow] provider catalog refreshed", {
+          providerID: input.providerID,
+        })
       }
 
       const latest = this.flows.get(input.providerID)
@@ -283,6 +303,11 @@ export class AuthFlowManager {
       } else {
         latest.status = "error"
         latest.error = toErrorMessage(error)
+        console.error("[auth-flow] provider auth failed", {
+          providerID: input.providerID,
+          methodID: selected.id,
+          error: latest.error,
+        })
       }
       this.clearExecution(latest)
       latest.methods = await listProviderAuthMethods(input.providerID)

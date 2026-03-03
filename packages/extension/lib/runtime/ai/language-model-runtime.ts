@@ -596,7 +596,7 @@ export async function getRuntimeModelDescriptor(input: {
 
   return {
     provider: languageModel.provider,
-    modelId: languageModel.modelId,
+    modelId: input.modelID,
     supportedUrls,
   }
 }

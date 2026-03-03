@@ -103,10 +103,7 @@ export async function createRuntimePermissionRequest(input: {
   modelName: string
   capabilities?: string[]
 }) {
-  const request = await createPermissionRequest(input)
-  return {
-    request,
-  }
+  return createPermissionRequest(input)
 }
 
 export async function resolveRuntimePermissionRequest(input: {

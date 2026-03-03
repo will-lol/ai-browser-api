@@ -72,6 +72,14 @@ export function SitePermissionsView({
       if (aPermission !== "allowed" && bPermission === "allowed") return 1;
       return a.name.localeCompare(b.name);
     },
+    {
+      groupBy: (model) => {
+        if (pendingModelIds.has(model.id)) return 0;
+        const permission = permissionByModelId.get(model.id) ?? "denied";
+        if (permission === "allowed") return 1;
+        return 2;
+      },
+    },
   );
 
   const sortedModels = useMemo(() => {
@@ -206,10 +214,10 @@ export function SitePermissionsView({
         onChange={setSearch}
       />
 
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col">
+      <ScrollArea className="min-h-0 w-full min-w-0 flex-1">
+        <div className="flex w-full min-w-0 max-w-full flex-col">
           {pendingRequests.length > 0 && !search && (
-            <div className="flex flex-col">
+            <div className="flex w-full min-w-0 max-w-full flex-col">
               <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-1 backdrop-blur-sm">
                 <span className="text-[10px] font-medium uppercase tracking-wider text-warning">
                   Pending requests
@@ -228,7 +236,7 @@ export function SitePermissionsView({
           )}
 
           {sortedModels.length > 0 ? (
-            <div className="flex flex-col">
+            <div className="flex w-full min-w-0 max-w-full flex-col">
               {!search && pendingRequests.length > 0 && (
                 <div className="sticky top-0 z-10 border-b border-border bg-background/95 px-3 py-1 backdrop-blur-sm">
                   <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">

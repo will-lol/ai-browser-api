@@ -21,12 +21,15 @@ async function ensureRequestAllowed(origin: string, model: string) {
   if (permission === "allowed") return
 
   const parsed = parseProviderModel(model)
-  const request = await createPermissionRequest({
+  const requestResult = await createPermissionRequest({
     origin,
     modelId: model,
     provider: parsed.providerID,
     modelName: parsed.modelID,
   })
+  if (requestResult.status === "alreadyAllowed") return
+
+  const request = requestResult.request
   const decision = await waitForPermissionDecision(request.id)
   if (decision === "timeout") {
     throw new Error("Permission request timed out")

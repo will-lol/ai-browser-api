@@ -15,10 +15,18 @@ export default defineConfig({
   },
   manifest: {
     name: "LLM Bridge",
+    key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuYp7++8TzvrW13EfJNznAVYkJMirsIIW3u1v1bfNOKVyry1bauoWb3PozbVqrdOefaiFo0RZvi8B9OSd4jq1j5QPkkQfWY9kUr2i4MrTv3mvH8yYQUePUD+BXaMBqWXjYCoGtdjJRP9xNBlGRjB30J7Q8ft0cv/2E2z+ui0sOWU8U+T5EiHDp8vdChumFY2Laot7mGGs4UFKtmO84c0B3AecJE4r2f29Hkf84TN/FSDfXI04ICwRabQgS320aQXebFOHhEJ6YqyFzoYkSA7XrEWfyZUF+KFYNly1XK3fAUpP1nDwRk9/M4cYTEixROu34tFPRi3apsBSmHsW8CKL6QIDAQAB",
     description:
       "Browser AI gateway with provider plugins, permissions, and website bridge APIs.",
     version: "0.1.0",
-    permissions: ["storage", "activeTab", "scripting", "identity", "alarms"],
+    permissions: [
+      "storage",
+      "activeTab",
+      "scripting",
+      "identity",
+      "alarms",
+      "webRequest",
+    ],
     host_permissions: ["<all_urls>"],
     action: {
       default_title: "LLM Bridge",

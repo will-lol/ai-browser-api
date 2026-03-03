@@ -1,0 +1,18 @@
+{
+  "name": "@llm-bridge/example-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4174",
+    "typecheck": "node ../../node_modules/.bun/typescript@*/node_modules/typescript/bin/tsc --noEmit",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4174"
+  },
+  "dependencies": {
+    "@llm-bridge/client": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "^7.3.1"
+  }
+}

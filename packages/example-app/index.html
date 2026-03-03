@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LLM Bridge Example</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>LLM Bridge Example</h1>
+      <p class="muted">
+        Lists connected models from the extension and sends a prompt to Gemini.
+      </p>
+
+      <section class="card">
+        <div class="row">
+          <button id="refresh-models" type="button">Refresh Models</button>
+          <span id="model-count" class="muted">0 models</span>
+        </div>
+        <label for="model-select">Model</label>
+        <select id="model-select"></select>
+      </section>
+
+      <section class="card">
+        <label for="prompt">Prompt</label>
+        <textarea id="prompt" rows="8">Write a short haiku about OAuth debugging.</textarea>
+        <div class="row">
+          <button id="generate" type="button">Generate</button>
+          <span id="status" class="muted">Idle</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <label for="result">Result</label>
+        <pre id="result"></pre>
+      </section>
+
+      <section class="card">
+        <label for="debug">Debug</label>
+        <pre id="debug"></pre>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
