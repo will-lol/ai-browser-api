@@ -6,7 +6,7 @@ import type {
   RuntimeDismissPermissionRequestResponse,
   RuntimeDisconnectProviderResponse,
   RuntimeGenerateResponse,
-  RuntimeModelCallInput,
+  RuntimeModelCallOptions,
   RuntimeModelDescriptor,
   RuntimeModelSummary,
   RuntimeOpenProviderAuthWindowResponse,
@@ -16,6 +16,7 @@ import type {
   RuntimePermissionEntry,
   RuntimeProviderSummary,
   RuntimeResolvePermissionRequestResponse,
+  RuntimeRpcError,
   RuntimeSetOriginEnabledResponse,
   RuntimeStartProviderAuthFlowResponse,
   RuntimeStreamPart,
@@ -24,7 +25,7 @@ import type {
 import type * as Effect from "effect/Effect"
 import * as Context from "effect/Context"
 
-type AppEffect<A> = Effect.Effect<A, unknown>
+type AppEffect<A> = Effect.Effect<A, RuntimeRpcError>
 
 export interface ProvidersRepositoryApi {
   listProviders: () => AppEffect<ReadonlyArray<RuntimeProviderSummary>>
@@ -143,7 +144,7 @@ export interface ModelExecutionRepositoryApi {
     sessionID: string
     requestID: string
     modelID: string
-    options: RuntimeModelCallInput["options"]
+    options: RuntimeModelCallOptions
     signal?: AbortSignal
   }) => AppEffect<RuntimeGenerateResponse>
   streamModel: (input: {
@@ -151,7 +152,7 @@ export interface ModelExecutionRepositoryApi {
     sessionID: string
     requestID: string
     modelID: string
-    options: RuntimeModelCallInput["options"]
+    options: RuntimeModelCallOptions
     signal?: AbortSignal
   }) => AppEffect<ReadableStream<RuntimeStreamPart>>
 }
@@ -170,13 +171,4 @@ export interface CatalogRepositoryApi {
 export class CatalogRepository extends Context.Tag("@llm-bridge/runtime-core/CatalogRepository")<
   CatalogRepository,
   CatalogRepositoryApi
->() {}
-
-export interface ActionStateRepositoryApi {
-  refreshActionState: () => AppEffect<void>
-}
-
-export class ActionStateRepository extends Context.Tag("@llm-bridge/runtime-core/ActionStateRepository")<
-  ActionStateRepository,
-  ActionStateRepositoryApi
 >() {}

@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
-import type { PermissionStatus } from "@/lib/runtime/permissions"
+import type { RuntimePermissionDecision } from "@llm-bridge/contracts"
 import { getProviderLabel } from "@/lib/provider-labels"
 import { usePermissionUpdateMutation } from "@/lib/extension-query-hooks"
 
@@ -9,7 +9,7 @@ interface ModelRowProps {
   name: string
   provider: string
   capabilities: ReadonlyArray<string>
-  permission: PermissionStatus
+  permission: RuntimePermissionDecision
   origin: string
   disabled?: boolean
 }

@@ -13,12 +13,12 @@ import {
   type BridgeModelCallRequest,
 } from "@llm-bridge/contracts"
 import * as RpcServer from "@effect/rpc/RpcServer"
+import type { FromClient } from "@effect/rpc/RpcMessage"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
-import { decodeClientMessage, encodeServerMessage } from "@/lib/rpc/rpc-wire"
 
 const BRIDGE_TIMEOUT_MS = 30_000
 
@@ -59,21 +59,14 @@ function parseProviderModel(modelId: string) {
 }
 
 function normalizeModelCallInput(input: BridgeModelCallRequest) {
-  const requestId =
-    typeof input.requestId === "string" && input.requestId.length > 0
-      ? input.requestId
-      : nextBridgeRequestId()
-
-  const sessionID =
-    typeof input.sessionID === "string" && input.sessionID.length > 0
-      ? input.sessionID
-      : requestId
+  const requestId = input.requestId ?? nextBridgeRequestId()
+  const sessionID = input.sessionID ?? requestId
 
   return {
     requestId,
     sessionID,
     modelId: input.modelId,
-    options: input.options ?? {},
+    options: input.options,
   }
 }
 
@@ -138,26 +131,14 @@ function createPageBridgeHandlers() {
 
     getModel: (input) =>
       fromPromise(async () => {
-        const modelId = input.modelId
-        if (!modelId) {
-          throw new Error("Model is required for getModel")
-        }
-
-        const requestId =
-          typeof input.requestId === "string" && input.requestId.length > 0
-            ? input.requestId
-            : nextBridgeRequestId()
-
-        const sessionID =
-          typeof input.sessionID === "string" && input.sessionID.length > 0
-            ? input.sessionID
-            : requestId
+        const requestId = input.requestId ?? nextBridgeRequestId()
+        const sessionID = input.sessionID ?? requestId
 
         const descriptor = await runtime.acquireModel({
           origin: window.location.origin,
           requestId,
           sessionID,
-          modelId,
+          modelId: input.modelId,
         })
 
         return descriptor
@@ -196,6 +177,11 @@ function createPageBridgeHandlers() {
     modelDoGenerate: (input) =>
       fromPromise(async () => {
         const normalized = normalizeModelCallInput(input)
+        if (!normalized.options) {
+          throw new RuntimeValidationError({
+            message: "modelDoGenerate requires call options with prompt",
+          })
+        }
         return runtime.modelDoGenerate({
           origin: window.location.origin,
           requestId: normalized.requestId,
@@ -207,6 +193,14 @@ function createPageBridgeHandlers() {
 
     modelDoStream: (input) => {
       const normalized = normalizeModelCallInput(input)
+      const options = normalized.options
+      if (!options) {
+        return Stream.fail(
+          new RuntimeValidationError({
+            message: "modelDoStream requires call options with prompt",
+          }),
+        )
+      }
 
       return Stream.fromAsyncIterable(
         {
@@ -216,7 +210,7 @@ function createPageBridgeHandlers() {
               requestId: normalized.requestId,
               sessionID: normalized.sessionID,
               modelId: normalized.modelId,
-              options: normalized.options,
+              options,
             })
 
             for await (const chunk of iterable) {
@@ -239,7 +233,7 @@ async function attachServerToPort(port: MessagePort) {
     RpcServer.makeNoSerialization(PageBridgeRpcGroup, {
       onFromServer: (message) =>
         Effect.sync(() => {
-          port.postMessage(encodeServerMessage(message))
+          port.postMessage(message)
         }),
       disableTracing: true,
       concurrency: "unbounded",
@@ -249,13 +243,10 @@ async function attachServerToPort(port: MessagePort) {
     ),
   )
 
-  const onMessage = (event: MessageEvent<unknown>) => {
-    const decoded = decodeClientMessage<PageBridgeRpc>(event.data)
-    if (!decoded) return
-
+  const onMessage = (event: MessageEvent<FromClient<PageBridgeRpc>>) => {
     void Effect.runPromise(
       Effect.timeout(
-        server.write(0, decoded),
+        server.write(0, event.data),
         BRIDGE_TIMEOUT_MS,
       ),
     ).catch((error) => {

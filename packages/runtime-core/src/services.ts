@@ -6,8 +6,10 @@ import {
   type RuntimeDismissPermissionRequestResponse,
   type RuntimeDisconnectProviderResponse,
   type RuntimeGenerateResponse,
-  type RuntimeModelCallInput,
+  type RuntimeAuthFlowSnapshot,
+  type RuntimeModelCallOptions,
   type RuntimeModelDescriptor,
+  type RuntimeModelSummary,
   type RuntimeOpenProviderAuthWindowResponse,
   type RuntimeOriginState,
   type RuntimePendingRequest,
@@ -16,10 +18,10 @@ import {
   type RuntimeProviderSummary,
   type RuntimeRequestPermissionInput,
   type RuntimeResolvePermissionRequestResponse,
+  type RuntimeRpcError,
   type RuntimeSetOriginEnabledResponse,
   type RuntimeStartProviderAuthFlowResponse,
   type RuntimeStreamPart,
-  type RuntimeUpdatePermissionInput,
   type RuntimeUpdatePermissionResponse,
   RuntimeValidationError,
 } from "@llm-bridge/contracts"
@@ -27,7 +29,6 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import {
-  ActionStateRepository,
   AuthRepository,
   CatalogRepository,
   MetaRepository,
@@ -38,7 +39,7 @@ import {
   ProvidersRepository,
 } from "./repositories"
 
-type AppEffect<A> = Effect.Effect<A, unknown>
+type AppEffect<A> = Effect.Effect<A, RuntimeRpcError>
 
 export interface CatalogServiceApi {
   ensureCatalog: () => AppEffect<void>
@@ -68,7 +69,7 @@ export interface RuntimeQueryServiceApi {
   listModels: (input: {
     connectedOnly?: boolean
     providerID?: string
-  }) => AppEffect<ReadonlyArray<import("@llm-bridge/contracts").RuntimeModelSummary>>
+  }) => AppEffect<ReadonlyArray<RuntimeModelSummary>>
   getOriginState: (origin: string) => AppEffect<RuntimeOriginState>
   listPermissions: (origin: string) => AppEffect<ReadonlyArray<RuntimePermissionEntry>>
   listPending: (origin: string) => AppEffect<ReadonlyArray<RuntimePendingRequest>>
@@ -101,7 +102,7 @@ export interface AuthFlowServiceApi {
   openProviderAuthWindow: (providerID: string) => AppEffect<RuntimeOpenProviderAuthWindowResponse>
   getProviderAuthFlow: (providerID: string) => AppEffect<{
     providerID: string
-    result: import("@llm-bridge/contracts").RuntimeAuthFlowSnapshot
+    result: RuntimeAuthFlowSnapshot
   }>
   startProviderAuthFlow: (input: {
     providerID: string
@@ -124,7 +125,6 @@ export const AuthFlowServiceLive = Layer.effect(
   AuthFlowService,
   Effect.gen(function*() {
     const auth = yield* AuthRepository
-    const action = yield* ActionStateRepository
     const catalog = yield* CatalogService
 
     return {
@@ -133,16 +133,11 @@ export const AuthFlowServiceLive = Layer.effect(
       startProviderAuthFlow: (input) =>
         auth.startProviderAuthFlow(input).pipe(
           Effect.tap(() => catalog.refreshCatalogForProvider(input.providerID)),
-          Effect.tap(() => action.refreshActionState()),
         ),
-      cancelProviderAuthFlow: (input) =>
-        auth.cancelProviderAuthFlow(input).pipe(
-          Effect.tap(() => action.refreshActionState()),
-        ),
+      cancelProviderAuthFlow: (input) => auth.cancelProviderAuthFlow(input),
       disconnectProvider: (providerID) =>
         auth.disconnectProvider(providerID).pipe(
           Effect.tap(() => catalog.refreshCatalogForProvider(providerID)),
-          Effect.tap(() => action.refreshActionState()),
         ),
     } satisfies AuthFlowServiceApi
   }),
@@ -174,10 +169,9 @@ export const PermissionServiceLive = Layer.effect(
   PermissionService,
   Effect.gen(function*() {
     const permissions = yield* PermissionsRepository
-    const action = yield* ActionStateRepository
     const meta = yield* MetaRepository
 
-    const ensureOriginEnabled: PermissionServiceApi["ensureOriginEnabled"] = (origin) =>
+    const ensureOriginEnabled = (origin: string) =>
       Effect.gen(function*() {
         const state = yield* permissions.getOriginState(origin)
         if (state.enabled) return
@@ -186,7 +180,7 @@ export const PermissionServiceLive = Layer.effect(
         })
       })
 
-    const ensureRequestAllowed: PermissionServiceApi["ensureRequestAllowed"] = (origin, modelID) =>
+    const ensureRequestAllowed = (origin: string, modelID: string) =>
       Effect.gen(function*() {
         const permission = yield* permissions.getModelPermission(origin, modelID)
         if (permission === "allowed") return
@@ -221,32 +215,26 @@ export const PermissionServiceLive = Layer.effect(
         }
       })
 
-    const requestPermission: PermissionServiceApi["requestPermission"] = (input) =>
+    const requestPermission = (input: RuntimeRequestPermissionInput) =>
       Effect.gen(function*() {
         switch (input.action) {
           case "resolve": {
-            const result = yield* permissions.resolvePermissionRequest({
+            return yield* permissions.resolvePermissionRequest({
               requestId: input.requestId,
               decision: input.decision,
             })
-            yield* action.refreshActionState()
-            return result
           }
           case "dismiss": {
-            const result = yield* permissions.dismissPermissionRequest(input.requestId)
-            yield* action.refreshActionState()
-            return result
+            return yield* permissions.dismissPermissionRequest(input.requestId)
           }
           case "create": {
-            const result = yield* permissions.createPermissionRequest({
+            return yield* permissions.createPermissionRequest({
               origin: input.origin,
               modelId: input.modelId,
               modelName: input.modelName,
               provider: input.provider,
               capabilities: input.capabilities,
             })
-            yield* action.refreshActionState()
-            return result
           }
         }
       })
@@ -254,14 +242,8 @@ export const PermissionServiceLive = Layer.effect(
     return {
       ensureOriginEnabled,
       ensureRequestAllowed,
-      setOriginEnabled: (origin, enabled) =>
-        permissions.setOriginEnabled(origin, enabled).pipe(
-          Effect.tap(() => action.refreshActionState()),
-        ),
-      updatePermission: (input) =>
-        permissions.updatePermission(input).pipe(
-          Effect.tap(() => action.refreshActionState()),
-        ),
+      setOriginEnabled: (origin, enabled) => permissions.setOriginEnabled(origin, enabled),
+      updatePermission: (input) => permissions.updatePermission(input),
       requestPermission,
     } satisfies PermissionServiceApi
   }),
@@ -279,14 +261,14 @@ export interface ModelExecutionServiceApi {
     requestID: string
     sessionID: string
     modelID: string
-    options: RuntimeModelCallInput["options"]
+    options: RuntimeModelCallOptions
   }) => AppEffect<RuntimeGenerateResponse>
   streamModel: (input: {
     origin: string
     requestID: string
     sessionID: string
     modelID: string
-    options: RuntimeModelCallInput["options"]
+    options: RuntimeModelCallOptions
   }) => AppEffect<ReadableStream<RuntimeStreamPart>>
   abortModelCall: (requestID: string) => AppEffect<void>
 }
@@ -327,7 +309,6 @@ export const ModelExecutionServiceLive = Layer.effect(
   Effect.gen(function*() {
     const models = yield* ModelExecutionRepository
     const permissions = yield* PermissionService
-    const action = yield* ActionStateRepository
     const controllers = new Map<string, AbortController>()
 
     const registerController = (requestID: string) =>
@@ -348,7 +329,7 @@ export const ModelExecutionServiceLive = Layer.effect(
           yield* permissions.ensureOriginEnabled(input.origin)
           yield* permissions.ensureRequestAllowed(input.origin, input.modelID)
           return yield* models.acquireModel(input)
-        }).pipe(Effect.tap(() => action.refreshActionState())),
+        }),
       generateModel: (input) =>
         Effect.gen(function*() {
           yield* permissions.ensureOriginEnabled(input.origin)
@@ -359,7 +340,6 @@ export const ModelExecutionServiceLive = Layer.effect(
             signal: controller.signal,
           }).pipe(
             Effect.ensuring(unregisterController(input.requestID)),
-            Effect.tap(() => action.refreshActionState()),
           )
         }),
       streamModel: (input) =>
@@ -376,12 +356,12 @@ export const ModelExecutionServiceLive = Layer.effect(
             controller.abort()
             controllers.delete(input.requestID)
           })
-        }).pipe(Effect.tap(() => action.refreshActionState())),
+        }),
       abortModelCall: (requestID) =>
         Effect.sync(() => {
           controllers.get(requestID)?.abort()
           controllers.delete(requestID)
-        }).pipe(Effect.tap(() => action.refreshActionState())),
+        }),
     } satisfies ModelExecutionServiceApi
   }),
 )

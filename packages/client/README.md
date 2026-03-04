@@ -1,28 +1,37 @@
 # @llm-bridge/client
 
-Minimal browser client for talking to the LLM Bridge extension via `window.postMessage`.
+Effect-first browser client for talking to the LLM Bridge extension via `window.postMessage`.
 
 ## Install
 
 ```bash
-bun add @llm-bridge/client
+bun add @llm-bridge/client ai effect
 # or
-npm i @llm-bridge/client
+npm i @llm-bridge/client ai effect
 ```
 
 ## Usage
 
 ```ts
-import { createLLMBridgeClient } from "@llm-bridge/client"
+import { generateText } from "ai"
+import { BridgeClient, withBridgeClient } from "@llm-bridge/client"
+import * as Effect from "effect/Effect"
 
-const bridge = createLLMBridgeClient()
-const models = await bridge.listModels()
+const program = Effect.gen(function*() {
+  const client = yield* BridgeClient
+  const models = yield* client.listModels
+  const model = yield* client.getModel(models[0]!.id)
 
-if (models.length > 0) {
-  const model = await bridge.getModel(models[0].id)
-  const response = await model.doGenerate({
-    prompt: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
-  })
-  console.log(response)
-}
+  const response = yield* Effect.tryPromise(() =>
+    generateText({
+      model,
+      prompt: "Hello from the bridge",
+    }),
+  )
+
+  return response.text
+})
+
+const text = await Effect.runPromise(withBridgeClient(program, { debug: true }))
+console.log(text)
 ```

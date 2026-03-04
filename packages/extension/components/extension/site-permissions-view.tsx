@@ -47,7 +47,7 @@ export function SitePermissionsView({
     const permissions = permissionsQuery.data ?? [];
     return new Map(
       permissions.map(
-        (permission) => [permission.modelId, permission.status] as const,
+        (permission) => [permission.modelId, permission.status === "allowed" ? "allowed" : "denied"] as const,
       ),
     );
   }, [permissionsQuery.data]);
@@ -138,6 +138,13 @@ export function SitePermissionsView({
     permissionsQuery.isError ||
     pendingRequestsQuery.isError
   ) {
+    const error =
+      originStateQuery.error ??
+      modelsQuery.error ??
+      permissionsQuery.error ??
+      pendingRequestsQuery.error;
+    console.error("[site-permissions] failed to load permissions data", error);
+
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
         <p className="text-xs text-destructive">

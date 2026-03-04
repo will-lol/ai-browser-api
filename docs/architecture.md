@@ -11,7 +11,8 @@
   - Browser/extension infrastructure and entrypoints.
   - Provides runtime-core repositories, runs RPC servers, and manages UI-facing runtime state.
 - `@llm-bridge/client`
-  - Promise-first browser SDK backed by Effect RPC.
+  - Effect service (`BridgeClient`) backed by Effect RPC.
+  - Exposes AI SDK-compatible `LanguageModelV3` from `getModel`.
   - Consumes `@llm-bridge/contracts` and `@effect/rpc`.
 - `@llm-bridge/example-app`
   - Consumer application using `@llm-bridge/client`.
@@ -31,5 +32,5 @@
 1. Background worker starts `runtime-core` with infrastructure layers from `extension`.
 2. Background exposes `RuntimeRpcGroup` via Effect RPC over Chrome runtime ports.
 3. Content script exposes `PageBridgeRpcGroup` via Effect RPC over `MessagePort` to the page.
-4. `@llm-bridge/client` connects to content bridge and exposes a Promise-first SDK.
+4. `@llm-bridge/client` connects to content bridge and provides an Effect service + AI SDK model adapter.
 5. Runtime events are schema-validated with the shared event contract from `contracts`.

@@ -6,7 +6,11 @@ import * as Effect from "effect/Effect"
 import * as Scope from "effect/Scope"
 import * as Exit from "effect/Exit"
 import { RUNTIME_RPC_PORT_NAME, RuntimeRpcGroup, type RuntimeRpc } from "@llm-bridge/contracts"
-import { decodeClientMessage, encodeServerMessage } from "@/lib/rpc/rpc-wire"
+import {
+  fromRuntimeRpcClientWireMessage,
+  toRuntimeRpcServerWireMessage,
+  type RuntimeRpcClientWireMessage,
+} from "@/lib/runtime/rpc/runtime-rpc-wire"
 
 type RuntimePort = ReturnType<typeof browser.runtime.connect>
 
@@ -26,7 +30,7 @@ export async function registerRuntimeRpcServer<E>(
           if (!port) return
 
           try {
-            port.postMessage(encodeServerMessage(message))
+            port.postMessage(toRuntimeRpcServerWireMessage(message))
           } catch (error) {
             console.warn("runtime rpc postMessage failed", error)
           }
@@ -44,14 +48,8 @@ export async function registerRuntimeRpcServer<E>(
     const clientId = ++nextClientId
     ports.set(clientId, port)
 
-    const onMessage: Parameters<typeof port.onMessage.addListener>[0] = (payload) => {
-      const decoded = decodeClientMessage<RuntimeRpc>(payload)
-      if (!decoded) {
-        console.warn("runtime rpc: invalid client message", payload)
-        return
-      }
-
-      void Effect.runPromise(server.write(clientId, decoded)).catch((error) => {
+    const onMessage: Parameters<typeof port.onMessage.addListener>[0] = (payload: RuntimeRpcClientWireMessage) => {
+      void Effect.runPromise(server.write(clientId, fromRuntimeRpcClientWireMessage(payload))).catch((error) => {
         console.warn("runtime rpc write failed", error)
       })
     }

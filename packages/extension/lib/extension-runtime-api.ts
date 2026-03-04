@@ -1,17 +1,13 @@
 import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
-import type { PermissionStatus } from "@llm-bridge/contracts"
 import type {
   RuntimeAuthFlowSnapshot,
+  RuntimePermissionDecision,
   RuntimeModelSummary,
   RuntimeOriginState,
-  RuntimePermissionDecision,
   RuntimePermissionEntry,
   RuntimeProviderSummary,
   RuntimeAuthMethod,
-  RuntimeOpenProviderAuthWindowResponse,
-  RuntimeStartProviderAuthFlowResponse,
-  RuntimeCancelProviderAuthFlowResponse,
-} from "@/lib/runtime/rpc/runtime-rpc-types"
+} from "@llm-bridge/contracts"
 
 export type ExtensionProvider = RuntimeProviderSummary
 export type ModelPermission = RuntimePermissionEntry
@@ -40,7 +36,7 @@ export async function fetchModels(input?: {
   const runtime = getRuntimeRPC()
   return runtime.listModels({
     origin,
-    connectedOnly: input?.connectedOnly === true,
+    connectedOnly: input?.connectedOnly,
     providerID: input?.providerID,
   })
 }
@@ -63,7 +59,7 @@ export async function fetchPendingRequests(origin = currentOrigin()) {
 export async function openRuntimeProviderAuthWindow(input: {
   providerID: string
   origin?: string
-}): Promise<RuntimeOpenProviderAuthWindowResponse> {
+}) {
   const runtime = getRuntimeRPC()
   const origin = input.origin ?? currentOrigin()
   return runtime.openProviderAuthWindow({
@@ -89,7 +85,7 @@ export async function startRuntimeProviderAuthFlow(input: {
   methodID: string
   values?: Record<string, string>
   origin?: string
-}): Promise<RuntimeStartProviderAuthFlowResponse> {
+}) {
   const runtime = getRuntimeRPC()
   const origin = input.origin ?? currentOrigin()
   return runtime.startProviderAuthFlow({
@@ -104,7 +100,7 @@ export async function cancelRuntimeProviderAuthFlow(input: {
   providerID: string
   reason?: string
   origin?: string
-}): Promise<RuntimeCancelProviderAuthFlowResponse> {
+}) {
   const runtime = getRuntimeRPC()
   const origin = input.origin ?? currentOrigin()
   return runtime.cancelProviderAuthFlow({
@@ -172,13 +168,9 @@ export async function resolveRuntimePermissionRequest(input: {
 
 export async function updateRuntimeModelPermission(input: {
   modelId: string
-  status: PermissionStatus
+  status: RuntimePermissionDecision
   origin?: string
 }) {
-  if (input.status !== "allowed" && input.status !== "denied") {
-    throw new Error(`Invalid permission status: ${input.status}`)
-  }
-
   const origin = input.origin ?? currentOrigin()
   const runtime = getRuntimeRPC()
 

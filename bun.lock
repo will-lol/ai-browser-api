@@ -9,6 +9,7 @@
       "name": "@llm-bridge/client",
       "version": "0.1.0",
       "dependencies": {
+        "@ai-sdk/provider": "^3.0.8",
         "@effect/platform": "^0.93.2",
         "@effect/rpc": "^0.73.2",
         "@llm-bridge/contracts": "workspace:*",
@@ -35,9 +36,15 @@
       "dependencies": {
         "@llm-bridge/client": "workspace:*",
         "ai": "^6.0.105",
+        "effect": "^3.18.4",
+        "react": "^19.2.0",
+        "react-dom": "^19.2.0",
       },
       "devDependencies": {
         "@types/node": "^22.19.12",
+        "@types/react": "^19.2.14",
+        "@types/react-dom": "^19.2.3",
+        "@vitejs/plugin-react": "^5.1.4",
         "typescript": "5.9.3",
         "vite": "^7.3.1",
       },

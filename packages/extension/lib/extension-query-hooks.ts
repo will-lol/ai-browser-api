@@ -3,7 +3,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import type { PermissionStatus } from "@llm-bridge/contracts"
+import type { RuntimePermissionDecision } from "@llm-bridge/contracts"
 import {
   cancelRuntimeProviderAuthFlow,
   currentOrigin,
@@ -22,6 +22,10 @@ import {
   updateRuntimeModelPermission,
 } from "@/lib/extension-runtime-api"
 import { extensionQueryKeys } from "@/lib/extension-query-keys"
+
+type ProvidersData = Awaited<ReturnType<typeof fetchProviders>>
+type PermissionsData = Awaited<ReturnType<typeof fetchPermissions>>
+type PendingRequestsData = Awaited<ReturnType<typeof fetchPendingRequests>>
 
 export function useProvidersQuery(origin = currentOrigin()) {
   return useQuery({
@@ -98,26 +102,17 @@ export function useProviderDisconnectMutation(origin = currentOrigin()) {
     onSuccess: (_result, variables) => {
       const providerID = variables.providerID
 
-      queryClient.setQueryData(
+      queryClient.setQueryData<ProvidersData>(
         extensionQueryKeys.providers(),
-        (
-          prev:
-            | Array<{
-                id: string
-                connected: boolean
-              }>
-            | undefined,
-        ) => {
-          if (!prev) return prev
-          return prev.map((provider) =>
+        (prev) =>
+          prev?.map((provider) =>
             provider.id === providerID
               ? {
                   ...provider,
                   connected: false,
                 }
               : provider,
-          )
-        },
+          ) ?? prev,
       )
 
       queryClient.invalidateQueries({
@@ -206,33 +201,20 @@ export function usePermissionUpdateMutation(origin = currentOrigin()) {
       status,
     }: {
       modelId: string
-      status: PermissionStatus
+      status: RuntimePermissionDecision
     }) => updateRuntimeModelPermission({ modelId, status, origin }),
     onSuccess: (_result, variables) => {
-      queryClient.setQueryData(
+      queryClient.setQueryData<PermissionsData>(
         extensionQueryKeys.permissions(origin),
-        (
-          prev:
-            | Array<{
-                modelId: string
-                modelName: string
-                provider: string
-                status: PermissionStatus
-                capabilities: string[]
-                requestedAt?: number
-              }>
-            | undefined,
-        ) => {
-          if (!prev) return prev
-          return prev.map((permission) =>
+        (prev) =>
+          prev?.map((permission) =>
             permission.modelId === variables.modelId
               ? {
                   ...permission,
                   status: variables.status,
                 }
               : permission,
-          )
-        },
+          ) ?? prev,
       )
 
       queryClient.invalidateQueries({
@@ -251,21 +233,13 @@ export function usePermissionDecisionMutation(origin = currentOrigin()) {
       decision,
     }: {
       requestId: string
-      decision: "allowed" | "denied"
+      decision: RuntimePermissionDecision
     }) => resolveRuntimePermissionRequest({ requestId, decision, origin }),
     onSuccess: (_result, variables) => {
-      queryClient.setQueryData(
+      queryClient.setQueryData<PendingRequestsData>(
         extensionQueryKeys.pendingRequests(origin),
-        (
-          prev:
-            | Array<{
-                id: string
-              }>
-            | undefined,
-        ) => {
-          if (!prev) return prev
-          return prev.filter((request) => request.id !== variables.requestId)
-        },
+        (prev) =>
+          prev?.filter((request) => request.id !== variables.requestId) ?? prev,
       )
 
       queryClient.invalidateQueries({
@@ -282,18 +256,10 @@ export function usePermissionDismissMutation(origin = currentOrigin()) {
     mutationFn: ({ requestId }: { requestId: string }) =>
       dismissRuntimePermissionRequest({ requestId, origin }),
     onSuccess: (_result, variables) => {
-      queryClient.setQueryData(
+      queryClient.setQueryData<PendingRequestsData>(
         extensionQueryKeys.pendingRequests(origin),
-        (
-          prev:
-            | Array<{
-                id: string
-              }>
-            | undefined,
-        ) => {
-          if (!prev) return prev
-          return prev.filter((request) => request.id !== variables.requestId)
-        },
+        (prev) =>
+          prev?.filter((request) => request.id !== variables.requestId) ?? prev,
       )
 
       queryClient.invalidateQueries({

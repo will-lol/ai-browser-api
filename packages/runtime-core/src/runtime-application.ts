@@ -1,10 +1,26 @@
 import type {
+  RuntimeAuthFlowSnapshot,
+  RuntimeCancelProviderAuthFlowResponse,
   RuntimeCreatePermissionRequestResponse,
   RuntimeDismissPermissionRequestResponse,
+  RuntimeDisconnectProviderResponse,
+  RuntimeGenerateResponse,
+  RuntimeModelCallOptions,
+  RuntimeModelDescriptor,
   RuntimeModelSummary,
+  RuntimeOpenProviderAuthWindowResponse,
+  RuntimeOriginState,
+  RuntimePendingRequest,
+  RuntimePermissionEntry,
+  RuntimeProviderSummary,
+  RuntimeRpcError,
   RuntimeRequestPermissionInput,
   RuntimeResolvePermissionRequestResponse,
+  RuntimeSetOriginEnabledResponse,
+  RuntimeStartProviderAuthFlowResponse,
+  RuntimeStreamPart,
   RuntimeUpdatePermissionInput,
+  RuntimeUpdatePermissionResponse,
 } from "@llm-bridge/contracts"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -22,38 +38,37 @@ import {
   RuntimeQueryServiceLive,
 } from "./services"
 
-type AppEffect<A> = Effect.Effect<A, unknown>
+type AppEffect<A> = Effect.Effect<A, RuntimeRpcError>
 
 export interface RuntimeApplicationApi {
   startup: () => AppEffect<void>
-  listProviders: (origin: string) => AppEffect<ReadonlyArray<import("@llm-bridge/contracts").RuntimeProviderSummary>>
+  listProviders: (origin: string) => AppEffect<ReadonlyArray<RuntimeProviderSummary>>
   listModels: (input: {
     origin: string
     connectedOnly?: boolean
     providerID?: string
   }) => AppEffect<ReadonlyArray<RuntimeModelSummary>>
   listConnectedModels: (origin: string) => AppEffect<ReadonlyArray<RuntimeModelSummary>>
-  getOriginState: (origin: string) => AppEffect<import("@llm-bridge/contracts").RuntimeOriginState>
-  listPermissions: (origin: string) => AppEffect<ReadonlyArray<import("@llm-bridge/contracts").RuntimePermissionEntry>>
-  listPending: (origin: string) => AppEffect<ReadonlyArray<import("@llm-bridge/contracts").RuntimePendingRequest>>
-  openProviderAuthWindow: (providerID: string) => AppEffect<import("@llm-bridge/contracts").RuntimeOpenProviderAuthWindowResponse>
+  getOriginState: (origin: string) => AppEffect<RuntimeOriginState>
+  listPermissions: (origin: string) => AppEffect<ReadonlyArray<RuntimePermissionEntry>>
+  listPending: (origin: string) => AppEffect<ReadonlyArray<RuntimePendingRequest>>
+  openProviderAuthWindow: (providerID: string) => AppEffect<RuntimeOpenProviderAuthWindowResponse>
   getProviderAuthFlow: (providerID: string) => AppEffect<{
     providerID: string
-    result: import("@llm-bridge/contracts").RuntimeAuthFlowSnapshot
+    result: RuntimeAuthFlowSnapshot
   }>
   startProviderAuthFlow: (input: {
     providerID: string
     methodID: string
     values?: Record<string, string>
-  }) => AppEffect<import("@llm-bridge/contracts").RuntimeStartProviderAuthFlowResponse>
+  }) => AppEffect<RuntimeStartProviderAuthFlowResponse>
   cancelProviderAuthFlow: (input: {
     providerID: string
     reason?: string
-  }) => AppEffect<import("@llm-bridge/contracts").RuntimeCancelProviderAuthFlowResponse>
-  disconnectProvider: (providerID: string) => AppEffect<import("@llm-bridge/contracts").RuntimeDisconnectProviderResponse>
+  }) => AppEffect<RuntimeCancelProviderAuthFlowResponse>
+  disconnectProvider: (providerID: string) => AppEffect<RuntimeDisconnectProviderResponse>
   updatePermission: (input: RuntimeUpdatePermissionInput) => AppEffect<
-    | import("@llm-bridge/contracts").RuntimeSetOriginEnabledResponse
-    | import("@llm-bridge/contracts").RuntimeUpdatePermissionResponse
+    RuntimeSetOriginEnabledResponse | RuntimeUpdatePermissionResponse
   >
   requestPermission: (
     input: RuntimeRequestPermissionInput,
@@ -65,21 +80,21 @@ export interface RuntimeApplicationApi {
     requestID: string
     sessionID: string
     modelID: string
-  }) => AppEffect<import("@llm-bridge/contracts").RuntimeModelDescriptor>
+  }) => AppEffect<RuntimeModelDescriptor>
   modelDoGenerate: (input: {
     origin: string
     requestID: string
     sessionID: string
     modelID: string
-    options: import("@llm-bridge/contracts").RuntimeModelCallInput["options"]
-  }) => AppEffect<import("@llm-bridge/contracts").RuntimeGenerateResponse>
+    options: RuntimeModelCallOptions
+  }) => AppEffect<RuntimeGenerateResponse>
   modelDoStream: (input: {
     origin: string
     requestID: string
     sessionID: string
     modelID: string
-    options: import("@llm-bridge/contracts").RuntimeModelCallInput["options"]
-  }) => AppEffect<ReadableStream<import("@llm-bridge/contracts").RuntimeStreamPart>>
+    options: RuntimeModelCallOptions
+  }) => AppEffect<ReadableStream<RuntimeStreamPart>>
   abortModelCall: (requestID: string) => AppEffect<void>
 }
 
@@ -99,7 +114,7 @@ export const RuntimeApplicationLive = Layer.effect(
 
     return {
       startup: () => catalog.ensureCatalog(),
-      listProviders: (origin) => Effect.zipRight(Effect.succeed(origin), query.listProviders()),
+      listProviders: (_origin) => query.listProviders(),
       listModels: ({ connectedOnly, providerID }) =>
         query.listModels({
           connectedOnly,
