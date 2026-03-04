@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "effect-ts": {
+      "source": "sablier-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "273eb6d71f6b7732aaed3b6b61330be3ea56894223339aee4a294bd43cb61d0b"
+    }
+  }
+}

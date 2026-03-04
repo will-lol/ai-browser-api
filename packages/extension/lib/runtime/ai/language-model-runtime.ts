@@ -23,7 +23,14 @@ import * as xaiModule from "@ai-sdk/xai"
 import * as openRouterModule from "@openrouter/ai-sdk-provider"
 import { getAuth } from "@/lib/runtime/auth-store"
 import type { AuthRecord } from "@/lib/runtime/auth-store"
-import type { ChatTransformContext } from "@/lib/runtime/plugin-manager"
+import { normalizeValueForCache } from "@/lib/runtime/ai/adapter-state"
+import type {
+  RuntimeAdapterContext,
+  RuntimeAdapterState,
+  RuntimeFactoryConfig,
+  RuntimeProviderFactory,
+  RuntimeTransportConfig,
+} from "@/lib/runtime/plugin-manager"
 import { getPluginManager } from "@/lib/runtime/plugins"
 import { getModel, getProvider } from "@/lib/runtime/provider-registry"
 import type {
@@ -42,26 +49,12 @@ interface ModelRuntimeContext {
   auth?: AuthRecord
 }
 
-type ProviderFactory = (options: Record<string, unknown>) => {
-  languageModel: (modelID: string) => LanguageModelV3
-  chat?: (modelID: string) => LanguageModelV3
-  responses?: (modelID: string) => LanguageModelV3
-  [key: string]: unknown
-}
-
-type TransportOptions = {
-  baseURL?: string
-  apiKey?: string
-  authType?: "bearer" | "api-key"
-  headers: Record<string, string>
-}
-
 type PreparedCallOptions = {
   callOptions: RuntimeLanguageModelCallOptions
-  transport: TransportOptions
+  transport: Partial<RuntimeTransportConfig>
 }
 
-const providerSDKCache = new Map<string, ReturnType<ProviderFactory>>()
+const providerSDKCache = new Map<string, ReturnType<RuntimeProviderFactory>>()
 const languageModelCache = new Map<string, LanguageModelV3>()
 
 function pickFactory(moduleValue: Record<string, unknown>) {
@@ -71,14 +64,14 @@ function pickFactory(moduleValue: Record<string, unknown>) {
   if (!match) {
     throw new Error("Provider module does not export a factory function")
   }
-  return match[1] as ProviderFactory
+  return match[1] as RuntimeProviderFactory
 }
 
 const OPENAI_COMPATIBLE_FACTORY = pickFactory(
   openAICompatibleModule as unknown as Record<string, unknown>,
 )
 
-const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
+const PROVIDER_FACTORIES: Record<string, RuntimeProviderFactory> = {
   "@ai-sdk/amazon-bedrock": pickFactory(
     amazonBedrockModule as unknown as Record<string, unknown>,
   ),
@@ -101,13 +94,7 @@ const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
 }
 
 function stableStringify(value: unknown): string {
-  return JSON.stringify(value, (_key, nested) => {
-    if (Array.isArray(nested)) return nested
-    if (!isObject(nested)) return nested
-    return Object.fromEntries(
-      Object.entries(nested).sort(([a], [b]) => a.localeCompare(b)),
-    )
-  })
+  return JSON.stringify(normalizeValueForCache(value))
 }
 
 function getProviderOptionKey(model: ProviderModelInfo) {
@@ -192,47 +179,20 @@ function toHeaderRecord(value: unknown) {
   return headers
 }
 
-function splitTransportOptions(input: Record<string, unknown>) {
-  const body: Record<string, unknown> = {}
-  const transport: TransportOptions = {
-    headers: {},
+function toRecord(value: unknown) {
+  if (!isObject(value)) return {}
+  return value
+}
+
+function normalizeTransport(input: Partial<RuntimeTransportConfig>): RuntimeTransportConfig {
+  return {
+    baseURL: readString(input.baseURL),
+    apiKey: readString(input.apiKey),
+    authType: input.authType,
+    headers: toHeaderRecord(input.headers),
+    metadata: toRecord(input.metadata),
+    fetch: typeof input.fetch === "function" ? input.fetch : undefined,
   }
-
-  for (const [key, value] of Object.entries(input)) {
-    if (key === "$baseURL" || key === "baseURL" || key === "$instanceUrl" || key === "instanceUrl") {
-      transport.baseURL = readString(value)
-      continue
-    }
-
-    if (key === "$apiKey" || key === "apiKey") {
-      transport.apiKey = readString(value)
-      continue
-    }
-
-    if (key === "$authType" || key === "authType") {
-      const nextAuthType = readString(value)
-      if (nextAuthType === "bearer" || nextAuthType === "api-key") {
-        transport.authType = nextAuthType
-      }
-      continue
-    }
-
-    if (key === "$headers" || key === "headers") {
-      transport.headers = {
-        ...transport.headers,
-        ...toHeaderRecord(value),
-      }
-      continue
-    }
-
-    if (key.startsWith("$")) {
-      continue
-    }
-
-    body[key] = value
-  }
-
-  return { body, transport }
 }
 
 function toLegacyMessages(prompt: LanguageModelV3CallOptions["prompt"]) {
@@ -374,92 +334,154 @@ async function resolveModelRuntimeContext(modelID: string): Promise<ModelRuntime
   }
 }
 
-async function getLanguageModel(
+function buildBaseTransport(
   runtime: ModelRuntimeContext,
-  transport: TransportOptions,
-  staticHeaders: Record<string, string>,
-) {
-  const factory = getFactoryForModel(runtime.model)
-  const baseURL = transport.baseURL ?? runtime.model.api.url
-  const apiKey = transport.apiKey ?? resolveDefaultToken(runtime.auth)
+  patch: Partial<RuntimeTransportConfig>,
+): RuntimeTransportConfig {
+  const normalized = normalizeTransport(patch)
+
+  return {
+    ...normalized,
+    baseURL: normalized.baseURL ?? readString(runtime.model.api.url),
+    apiKey: normalized.apiKey ?? resolveDefaultToken(runtime.auth),
+    headers: {
+      ...normalized.headers,
+    },
+    metadata: mergeRecord({}, normalized.metadata),
+  }
+}
+
+function buildFactoryOptions(input: {
+  runtime: ModelRuntimeContext
+  transport: RuntimeTransportConfig
+  staticHeaders: Record<string, string>
+}) {
   const authHeaders: Record<string, string> = {}
 
-  if (apiKey && transport.authType === "api-key") {
-    authHeaders["x-api-key"] = apiKey
+  if (input.transport.apiKey && input.transport.authType === "api-key") {
+    authHeaders["x-api-key"] = input.transport.apiKey
   }
 
-  if (apiKey && transport.authType === "bearer") {
-    authHeaders.authorization = `Bearer ${apiKey}`
+  if (input.transport.apiKey && input.transport.authType === "bearer") {
+    authHeaders.authorization = `Bearer ${input.transport.apiKey}`
   }
 
-  if (apiKey && isAnthropicPackage(runtime.model.api.npm)) {
-    authHeaders["x-api-key"] = apiKey
+  if (input.transport.apiKey && isAnthropicPackage(input.runtime.model.api.npm)) {
+    authHeaders["x-api-key"] = input.transport.apiKey
     if (!("anthropic-version" in authHeaders)) {
       authHeaders["anthropic-version"] = "2023-06-01"
     }
   }
 
-  if (apiKey && isGooglePackage(runtime.model.api.npm) && transport.authType !== "bearer") {
-    authHeaders["x-goog-api-key"] = apiKey
+  if (
+    input.transport.apiKey &&
+    isGooglePackage(input.runtime.model.api.npm) &&
+    input.transport.authType !== "bearer"
+  ) {
+    authHeaders["x-goog-api-key"] = input.transport.apiKey
   }
 
   const options: Record<string, unknown> = {
-    name: runtime.providerID,
-    baseURL,
-    headers: mergeRecord(
-      mergeRecord(
-        mergeRecord({}, runtime.provider.options as Record<string, unknown>),
-        runtime.model.options as Record<string, unknown>,
-      ),
-      {
-        ...runtime.model.headers,
-        ...transport.headers,
-        ...authHeaders,
-        ...staticHeaders,
-      },
+    name: input.runtime.providerID,
+    ...mergeRecord(
+      mergeRecord({}, input.runtime.provider.options as Record<string, unknown>),
+      input.runtime.model.options as Record<string, unknown>,
     ),
+    headers: {
+      ...input.runtime.model.headers,
+      ...input.transport.headers,
+      ...authHeaders,
+      ...input.staticHeaders,
+    },
   }
 
-  if (apiKey && !(isGooglePackage(runtime.model.api.npm) && transport.authType === "bearer")) {
-    options.apiKey = apiKey
+  if (input.transport.baseURL) {
+    options.baseURL = input.transport.baseURL
   }
+
+  if (input.transport.fetch) {
+    options.fetch = input.transport.fetch
+  }
+
+  if (
+    input.transport.apiKey &&
+    !(isGooglePackage(input.runtime.model.api.npm) && input.transport.authType === "bearer")
+  ) {
+    options.apiKey = input.transport.apiKey
+  }
+
+  return options
+}
+
+async function getLanguageModel(input: {
+  runtime: ModelRuntimeContext
+  context: RuntimeAdapterContext
+  transportPatch: Partial<RuntimeTransportConfig>
+  staticHeaders: Record<string, string>
+}) {
+  const plugins = getPluginManager()
+
+  const initialState: RuntimeAdapterState = {
+    factory: {
+      npm: input.runtime.model.api.npm,
+      factory: getFactoryForModel(input.runtime.model),
+    } satisfies RuntimeFactoryConfig,
+    transport: buildBaseTransport(input.runtime, input.transportPatch),
+    cacheKeyParts: {},
+  }
+
+  const adapted = await plugins.applyAdapterState(input.context, initialState)
+
+  let factoryOptions = buildFactoryOptions({
+    runtime: input.runtime,
+    transport: adapted.transport,
+    staticHeaders: input.staticHeaders,
+  })
+
+  factoryOptions = await plugins.applyAdapterFactoryOptions(input.context, factoryOptions)
+
+  await plugins.validateAdapterState(input.context, {
+    ...adapted,
+    factoryOptions,
+  })
 
   const sdkCacheKey = stableStringify({
-    providerID: runtime.providerID,
-    npm: runtime.model.api.npm,
-    options,
+    providerID: input.runtime.providerID,
+    npm: adapted.factory.npm,
+    options: factoryOptions,
+    adapter: adapted.cacheKeyParts,
   })
 
   let sdk = providerSDKCache.get(sdkCacheKey)
   if (!sdk) {
-    sdk = factory(options)
+    sdk = adapted.factory.factory(factoryOptions)
     providerSDKCache.set(sdkCacheKey, sdk)
   }
 
-  const modelCacheKey = `${sdkCacheKey}:${runtime.model.api.id}`
+  const modelCacheKey = `${sdkCacheKey}:${input.runtime.model.api.id}`
   const existingModel = languageModelCache.get(modelCacheKey)
   if (existingModel) return existingModel
 
   const languageModel = (() => {
-    if (runtime.model.api.npm === "@ai-sdk/openai" || runtime.model.api.npm === "@ai-sdk/azure") {
+    if (adapted.factory.npm === "@ai-sdk/openai" || adapted.factory.npm === "@ai-sdk/azure") {
       const responses = sdk.responses
       if (typeof responses === "function") {
-        return responses(runtime.model.api.id)
+        return responses(input.runtime.model.api.id)
       }
     }
 
-    if (runtime.model.api.npm === "@ai-sdk/github-copilot") {
+    if (adapted.factory.npm === "@ai-sdk/github-copilot") {
       const responses = sdk.responses
       if (typeof responses === "function") {
-        return responses(runtime.model.api.id)
+        return responses(input.runtime.model.api.id)
       }
       const chat = sdk.chat
       if (typeof chat === "function") {
-        return chat(runtime.model.api.id)
+        return chat(input.runtime.model.api.id)
       }
     }
 
-    return sdk.languageModel(runtime.model.api.id)
+    return sdk.languageModel(input.runtime.model.api.id)
   })()
 
   languageModelCache.set(modelCacheKey, languageModel)
@@ -474,13 +496,15 @@ async function prepareCallOptions(input: {
   options: RuntimeLanguageModelCallOptions
 }) {
   const plugins = getPluginManager()
-  const context: ChatTransformContext = {
+  const context: RuntimeAdapterContext = {
     providerID: input.runtime.providerID,
     modelID: input.runtime.modelID,
     origin: input.origin,
     sessionID: input.sessionID,
     requestID: input.requestID,
     auth: input.runtime.auth,
+    provider: input.runtime.provider,
+    model: input.runtime.model,
   }
 
   const authOptions = await plugins.loadAuthOptions({
@@ -494,16 +518,15 @@ async function prepareCallOptions(input: {
       model: input.runtime.model.api.id,
       messages: toLegacyMessages(input.options.prompt),
     }),
-    authOptions,
+    authOptions.requestOptions,
   )
 
   const chatPatched = await plugins.applyChatParams(context, merged)
   const requestPatched = await plugins.applyRequestOptions(context, chatPatched)
-  const split = splitTransportOptions(requestPatched)
 
   const finalHeaders = await plugins.applyChatHeaders(context, {
     ...toHeaderRecord(input.options.headers),
-    ...toHeaderRecord(split.body.headers),
+    ...toHeaderRecord(requestPatched.headers),
   })
 
   const providerOptionKey = getProviderOptionKey(input.runtime.model)
@@ -533,13 +556,13 @@ async function prepareCallOptions(input: {
   ])
 
   const providerOptionsPatch: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(split.body)) {
+  for (const [key, value] of Object.entries(requestPatched)) {
     if (knownKeys.has(key)) continue
     if (value === undefined) continue
     providerOptionsPatch[key] = value
   }
 
-  const callOptions = toCallOptions(split.body, input.options)
+  const callOptions = toCallOptions(requestPatched, input.options)
   if (Object.keys(providerOptionsPatch).length > 0) {
     callOptions.providerOptions = mergeRecord(
       (callOptions.providerOptions as Record<string, unknown>) ?? {},
@@ -560,7 +583,7 @@ async function prepareCallOptions(input: {
     context,
     prepared: {
       callOptions,
-      transport: split.transport,
+      transport: authOptions.transport,
     } satisfies PreparedCallOptions,
   }
 }
@@ -572,7 +595,7 @@ export async function getRuntimeModelDescriptor(input: {
   requestID: string
 }) {
   const runtime = await resolveModelRuntimeContext(input.modelID)
-  const { prepared } = await prepareCallOptions({
+  const { context, prepared } = await prepareCallOptions({
     runtime,
     origin: input.origin,
     sessionID: input.sessionID,
@@ -587,11 +610,12 @@ export async function getRuntimeModelDescriptor(input: {
     },
   })
 
-  const languageModel = await getLanguageModel(
+  const languageModel = await getLanguageModel({
     runtime,
-    prepared.transport,
-    toHeaderRecord(prepared.callOptions.headers),
-  )
+    context,
+    transportPatch: prepared.transport,
+    staticHeaders: toHeaderRecord(prepared.callOptions.headers),
+  })
   const supportedUrls = await Promise.resolve(languageModel.supportedUrls ?? {})
 
   return {
@@ -610,7 +634,7 @@ export async function runLanguageModelGenerate(input: {
   signal?: AbortSignal
 }): Promise<LanguageModelV3GenerateResult> {
   const runtime = await resolveModelRuntimeContext(input.modelID)
-  const { prepared } = await prepareCallOptions({
+  const { context, prepared } = await prepareCallOptions({
     runtime,
     origin: input.origin,
     sessionID: input.sessionID,
@@ -618,11 +642,12 @@ export async function runLanguageModelGenerate(input: {
     options: input.options,
   })
 
-  const languageModel = await getLanguageModel(
+  const languageModel = await getLanguageModel({
     runtime,
-    prepared.transport,
-    toHeaderRecord(prepared.callOptions.headers),
-  )
+    context,
+    transportPatch: prepared.transport,
+    staticHeaders: toHeaderRecord(prepared.callOptions.headers),
+  })
   return languageModel.doGenerate({
     ...prepared.callOptions,
     abortSignal: input.signal,
@@ -638,7 +663,7 @@ export async function runLanguageModelStream(input: {
   signal?: AbortSignal
 }): Promise<ReadableStream<LanguageModelV3StreamPart>> {
   const runtime = await resolveModelRuntimeContext(input.modelID)
-  const { prepared } = await prepareCallOptions({
+  const { context, prepared } = await prepareCallOptions({
     runtime,
     origin: input.origin,
     sessionID: input.sessionID,
@@ -646,11 +671,12 @@ export async function runLanguageModelStream(input: {
     options: input.options,
   })
 
-  const languageModel = await getLanguageModel(
+  const languageModel = await getLanguageModel({
     runtime,
-    prepared.transport,
-    toHeaderRecord(prepared.callOptions.headers),
-  )
+    context,
+    transportPatch: prepared.transport,
+    staticHeaders: toHeaderRecord(prepared.callOptions.headers),
+  })
   const result = await languageModel.doStream({
     ...prepared.callOptions,
     abortSignal: input.signal,

@@ -20,8 +20,10 @@
       "name": "@llm-bridge/example-app",
       "dependencies": {
         "@llm-bridge/client": "workspace:*",
+        "ai": "^6.0.105",
       },
       "devDependencies": {
+        "@types/node": "^22.19.12",
         "typescript": "5.9.3",
         "vite": "^7.3.1",
       },

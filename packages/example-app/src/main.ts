@@ -1,4 +1,5 @@
 import { createLLMBridgeClient } from "@llm-bridge/client";
+import { generateText, type LanguageModel } from "ai";
 
 const DEFAULT_MODEL_ID = "google/gemini-3.1-pro-preview";
 const LOG_LIMIT = 250;
@@ -10,16 +11,6 @@ type BridgeModelSummary = {
   name: string;
   provider: string;
   connected: boolean;
-};
-
-type TextLikePart = {
-  type?: string;
-  text?: string;
-};
-
-type GenerateResult = {
-  text?: string;
-  output?: TextLikePart[];
 };
 
 declare global {
@@ -193,28 +184,6 @@ async function traceCall<T>(name: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
-function textFromGenerateResult(result: unknown) {
-  const typed = result as GenerateResult;
-
-  if (typed && typeof typed.text === "string" && typed.text.trim().length > 0) {
-    return typed.text;
-  }
-
-  if (Array.isArray(typed?.output)) {
-    const chunks = typed.output
-      .filter(
-        (part): part is Required<Pick<TextLikePart, "text">> & TextLikePart =>
-          part != null && part.type === "text" && typeof part.text === "string",
-      )
-      .map((part) => part.text);
-    if (chunks.length > 0) {
-      return chunks.join("");
-    }
-  }
-
-  return JSON.stringify(result, null, 2);
-}
-
 function selectedModelId() {
   return modelSelect.value;
 }
@@ -302,19 +271,20 @@ async function generate() {
     const model = await traceCall("bridge.getModel", () => bridge.getModel(modelId));
 
     setStatus("Generating...");
-    const result = await traceCall("model.doGenerate", () =>
-      model.doGenerate({
-        prompt: [
-          {
-            role: "user",
-            content: [{ type: "text", text: prompt }],
-          },
-        ],
+    const result = await traceCall("ai.generateText", () =>
+      generateText({
+        model: model as unknown as LanguageModel,
+        prompt,
         maxOutputTokens: 512,
       }));
 
-    setResult(textFromGenerateResult(result));
-    appLog("model.doGenerate.result", summary(result));
+    setResult(result.text);
+    appLog("ai.generateText.result", {
+      textLength: result.text.length,
+      finishReason: result.finishReason,
+      warnings: result.warnings?.length ?? 0,
+      usage: result.usage,
+    });
     setStatus("Done");
   } catch (error) {
     setStatus("Generation failed");

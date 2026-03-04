@@ -23,7 +23,7 @@ declare module "@tanstack/react-router" {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ExtensionQueryProvider persist>
+    <ExtensionQueryProvider>
       <RouterProvider router={router} />
       <Toaster
         position="top-right"

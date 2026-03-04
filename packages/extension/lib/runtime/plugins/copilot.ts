@@ -200,9 +200,11 @@ export const copilotAuthPlugin: RuntimePlugin = {
         const token = auth.refresh || auth.access
 
         return {
-          ...(baseURL ? { $baseURL: baseURL } : {}),
-          ...(token ? { $apiKey: token } : {}),
-          $authType: "bearer",
+          transport: {
+            ...(baseURL ? { baseURL } : {}),
+            ...(token ? { apiKey: token } : {}),
+            authType: "bearer",
+          },
         }
       },
     },
@@ -229,7 +231,7 @@ export const copilotAuthPlugin: RuntimePlugin = {
         return {
           strategy: "merge",
           value: {
-            $headers: {
+            headers: {
               "x-initiator": isAgent ? "agent" : "user",
               "Openai-Intent": "conversation-edits",
               "User-Agent": "llm-bridge",

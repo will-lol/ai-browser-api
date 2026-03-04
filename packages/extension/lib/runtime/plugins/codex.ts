@@ -402,11 +402,13 @@ export const codexAuthPlugin: RuntimePlugin = {
         }
 
         return {
-          $baseURL: CODEX_API_BASE,
-          $apiKey: access,
-          $authType: "bearer",
-          $headers: {
-            ...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
+          transport: {
+            baseURL: CODEX_API_BASE,
+            apiKey: access,
+            authType: "bearer",
+            headers: {
+              ...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
+            },
           },
         }
       },

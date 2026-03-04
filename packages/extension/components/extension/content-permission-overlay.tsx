@@ -3,7 +3,7 @@ import { FloatingPermissionPrompt } from "@/components/extension/floating-permis
 
 export function ContentPermissionOverlay() {
   return (
-    <ExtensionQueryProvider persist={false}>
+    <ExtensionQueryProvider>
       <FloatingPermissionPrompt className="pointer-events-auto" />
     </ExtensionQueryProvider>
   )

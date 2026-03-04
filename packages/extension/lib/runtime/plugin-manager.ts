@@ -1,3 +1,4 @@
+import type { LanguageModelV3 } from "@ai-sdk/provider"
 import { browser } from "@wxt-dev/browser"
 import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store"
 import type { RuntimeConfig } from "@/lib/runtime/config-store"
@@ -7,7 +8,7 @@ import type {
   ProviderModelInfo,
   ProviderRuntimeInfo,
 } from "@/lib/runtime/provider-registry"
-import { isObject } from "@/lib/runtime/util"
+import { isObject, mergeRecord } from "@/lib/runtime/util"
 
 type AuthFieldCondition = {
   key: string
@@ -114,9 +115,162 @@ export interface ChatTransformContext {
   auth?: AuthRecord
 }
 
+export type RuntimeProviderSDK = {
+  languageModel: (modelID: string) => LanguageModelV3
+  chat?: (modelID: string) => LanguageModelV3
+  responses?: (modelID: string) => LanguageModelV3
+  [key: string]: unknown
+}
+
+export type RuntimeProviderFactory = (options: Record<string, unknown>) => RuntimeProviderSDK
+
+export type RuntimeTransportAuthType = "bearer" | "api-key"
+
+export interface RuntimeTransportConfig {
+  baseURL?: string
+  apiKey?: string
+  authType?: RuntimeTransportAuthType
+  headers: Record<string, string>
+  metadata: Record<string, unknown>
+  fetch?: typeof fetch
+}
+
+export interface RuntimeFactoryConfig {
+  npm: string
+  factory: RuntimeProviderFactory
+}
+
+export interface RuntimeAdapterContext extends ChatTransformContext {
+  provider: ProviderRuntimeInfo
+  model: ProviderModelInfo
+}
+
+export interface RuntimeAdapterState {
+  factory: RuntimeFactoryConfig
+  transport: RuntimeTransportConfig
+  cacheKeyParts: Record<string, unknown>
+}
+
+export interface RuntimeAdapterValidationState extends RuntimeAdapterState {
+  factoryOptions: Record<string, unknown>
+}
+
+export interface AuthLoaderResult {
+  requestOptions?: Record<string, unknown>
+  transport?: Partial<RuntimeTransportConfig>
+}
+
+export interface LoadedAuthOptions {
+  requestOptions: Record<string, unknown>
+  transport: Partial<RuntimeTransportConfig>
+}
+
 export interface HookResultMerge {
   strategy: "merge"
   value: Record<string, unknown>
+}
+
+function toHeaderRecord(value: unknown) {
+  if (!isObject(value)) return {}
+  const headers: Record<string, string> = {}
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item !== "string") continue
+    headers[key] = item
+  }
+  return headers
+}
+
+function toRecord(value: unknown) {
+  if (!isObject(value)) return {}
+  return value
+}
+
+function hasOwn<T extends object>(value: T, key: keyof T) {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
+function mergeTransportPatch(
+  base: Partial<RuntimeTransportConfig>,
+  patch: Partial<RuntimeTransportConfig>,
+): Partial<RuntimeTransportConfig> {
+  const next: Partial<RuntimeTransportConfig> = {
+    ...base,
+  }
+
+  if (hasOwn(patch, "baseURL")) {
+    next.baseURL = patch.baseURL
+  }
+
+  if (hasOwn(patch, "apiKey")) {
+    next.apiKey = patch.apiKey
+  }
+
+  if (hasOwn(patch, "authType")) {
+    next.authType = patch.authType
+  }
+
+  if (hasOwn(patch, "fetch")) {
+    next.fetch = patch.fetch
+  }
+
+  const patchHeaders = toHeaderRecord(patch.headers)
+  if (Object.keys(patchHeaders).length > 0) {
+    next.headers = {
+      ...(next.headers ?? {}),
+      ...patchHeaders,
+    }
+  }
+
+  const patchMetadata = toRecord(patch.metadata)
+  if (Object.keys(patchMetadata).length > 0) {
+    next.metadata = mergeRecord((next.metadata ?? {}) as Record<string, unknown>, patchMetadata)
+  }
+
+  return next
+}
+
+function mergeTransport(
+  base: RuntimeTransportConfig,
+  patch: Partial<RuntimeTransportConfig>,
+): RuntimeTransportConfig {
+  const next: RuntimeTransportConfig = {
+    ...base,
+    headers: {
+      ...base.headers,
+    },
+    metadata: mergeRecord({}, base.metadata),
+  }
+
+  if (hasOwn(patch, "baseURL")) {
+    next.baseURL = patch.baseURL
+  }
+
+  if (hasOwn(patch, "apiKey")) {
+    next.apiKey = patch.apiKey
+  }
+
+  if (hasOwn(patch, "authType")) {
+    next.authType = patch.authType
+  }
+
+  if (hasOwn(patch, "fetch")) {
+    next.fetch = patch.fetch
+  }
+
+  const patchHeaders = toHeaderRecord(patch.headers)
+  if (Object.keys(patchHeaders).length > 0) {
+    next.headers = {
+      ...next.headers,
+      ...patchHeaders,
+    }
+  }
+
+  const patchMetadata = toRecord(patch.metadata)
+  if (Object.keys(patchMetadata).length > 0) {
+    next.metadata = mergeRecord(next.metadata, patchMetadata)
+  }
+
+  return next
 }
 
 export interface PluginHooks {
@@ -127,7 +281,7 @@ export interface PluginHooks {
       auth: AuthRecord | undefined,
       provider: ProviderRuntimeInfo,
       ctx: AuthContext,
-    ) => Promise<Record<string, unknown>>
+    ) => Promise<AuthLoaderResult | void>
   }
   provider?: {
     patchProvider?: (ctx: ProviderPatchContext, provider: ProviderInfo) => Promise<ProviderInfo | void>
@@ -136,6 +290,26 @@ export interface PluginHooks {
       ctx: ChatTransformContext,
       options: Record<string, unknown>,
     ) => Promise<Record<string, unknown> | HookResultMerge | void>
+  }
+  adapter?: {
+    resolveFactory?: (
+      ctx: RuntimeAdapterContext,
+      currentFactory: RuntimeFactoryConfig,
+    ) => Promise<RuntimeFactoryConfig | void>
+    patchTransport?: (
+      ctx: RuntimeAdapterContext,
+      transport: RuntimeTransportConfig,
+    ) => Promise<Partial<RuntimeTransportConfig> | void>
+    patchFactoryOptions?: (
+      ctx: RuntimeAdapterContext,
+      options: Record<string, unknown>,
+    ) => Promise<Record<string, unknown> | void>
+    cacheKeyParts?: (
+      ctx: RuntimeAdapterContext,
+      currentParts: Record<string, unknown>,
+      state: RuntimeAdapterState,
+    ) => Promise<Record<string, unknown> | void>
+    validate?: (ctx: RuntimeAdapterContext, state: RuntimeAdapterValidationState) => Promise<void>
   }
   chat?: {
     params?: (
@@ -324,18 +498,108 @@ export class PluginManager {
     return result
   }
 
-  async loadAuthOptions(ctx: AuthContext) {
-    let options: Record<string, unknown> = {}
+  async loadAuthOptions(ctx: AuthContext): Promise<LoadedAuthOptions> {
+    let requestOptions: Record<string, unknown> = {}
+    let transport: Partial<RuntimeTransportConfig> = {
+      headers: {},
+      metadata: {},
+    }
+
     for (const plugin of this.providerPlugins(ctx.providerID)) {
       try {
         const result = await plugin.hooks.auth?.loader?.(ctx.auth, ctx.provider, ctx)
         if (!result) continue
-        options = mergeObjects(options, result)
+
+        if (result.requestOptions) {
+          requestOptions = mergeRecord(requestOptions, result.requestOptions)
+        }
+
+        if (result.transport) {
+          transport = mergeTransportPatch(transport, result.transport)
+        }
       } catch (error) {
         console.error(`[plugin:${plugin.id}] auth.loader failed`, error)
       }
     }
-    return options
+
+    return {
+      requestOptions,
+      transport,
+    }
+  }
+
+  async applyAdapterState(ctx: RuntimeAdapterContext, state: RuntimeAdapterState) {
+    const next: RuntimeAdapterState = {
+      factory: {
+        ...state.factory,
+      },
+      transport: {
+        ...state.transport,
+        headers: {
+          ...state.transport.headers,
+        },
+        metadata: mergeRecord({}, state.transport.metadata),
+      },
+      cacheKeyParts: mergeRecord({}, state.cacheKeyParts),
+    }
+
+    for (const plugin of this.providerPlugins(ctx.providerID)) {
+      try {
+        const resolved = await plugin.hooks.adapter?.resolveFactory?.(ctx, next.factory)
+        if (resolved) {
+          next.factory = resolved
+        }
+      } catch (error) {
+        console.error(`[plugin:${plugin.id}] adapter.resolveFactory failed`, error)
+      }
+
+      try {
+        const transportPatch = await plugin.hooks.adapter?.patchTransport?.(ctx, next.transport)
+        if (transportPatch) {
+          next.transport = mergeTransport(next.transport, transportPatch)
+        }
+      } catch (error) {
+        console.error(`[plugin:${plugin.id}] adapter.patchTransport failed`, error)
+      }
+
+      try {
+        const cachePatch = await plugin.hooks.adapter?.cacheKeyParts?.(ctx, next.cacheKeyParts, next)
+        if (cachePatch) {
+          next.cacheKeyParts = mergeRecord(next.cacheKeyParts, cachePatch)
+        }
+      } catch (error) {
+        console.error(`[plugin:${plugin.id}] adapter.cacheKeyParts failed`, error)
+      }
+    }
+
+    return next
+  }
+
+  async applyAdapterFactoryOptions(ctx: RuntimeAdapterContext, options: Record<string, unknown>) {
+    let next = mergeRecord({}, options)
+
+    for (const plugin of this.providerPlugins(ctx.providerID)) {
+      try {
+        const patch = await plugin.hooks.adapter?.patchFactoryOptions?.(ctx, next)
+        if (!patch) continue
+        next = mergeRecord(next, patch)
+      } catch (error) {
+        console.error(`[plugin:${plugin.id}] adapter.patchFactoryOptions failed`, error)
+      }
+    }
+
+    return next
+  }
+
+  async validateAdapterState(ctx: RuntimeAdapterContext, state: RuntimeAdapterValidationState) {
+    for (const plugin of this.providerPlugins(ctx.providerID)) {
+      try {
+        await plugin.hooks.adapter?.validate?.(ctx, state)
+      } catch (error) {
+        console.error(`[plugin:${plugin.id}] adapter.validate failed`, error)
+        throw error
+      }
+    }
   }
 
   async patchProvider(ctx: ProviderPatchContext, provider: ProviderInfo) {

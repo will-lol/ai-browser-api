@@ -211,9 +211,11 @@ export const gitlabAuthPlugin: RuntimePlugin = {
         const instanceUrl = auth.metadata?.instanceUrl || GITLAB_COM_URL;
         if (auth.type === "api") {
           return {
-            $baseURL: instanceUrl,
-            $apiKey: auth.key,
-            $authType: "bearer",
+            transport: {
+              baseURL: instanceUrl,
+              apiKey: auth.key,
+              authType: "bearer",
+            },
           };
         }
 
@@ -262,9 +264,11 @@ export const gitlabAuthPlugin: RuntimePlugin = {
         }
 
         return {
-          $baseURL: instanceUrl,
-          $apiKey: access,
-          $authType: "bearer",
+          transport: {
+            baseURL: instanceUrl,
+            apiKey: access,
+            authType: "bearer",
+          },
         };
       },
     },
