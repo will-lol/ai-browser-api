@@ -119,6 +119,8 @@ describe("gemini adapter hooks", () => {
         access: "oauth-access",
         refresh: "oauth-refresh",
         expiresAt: Date.now() + 5 * 60_000,
+        createdAt: Date.now() - 1_000,
+        updatedAt: Date.now() - 1_000,
         metadata: {
           authMode: "gemini_oauth",
           projectId: "configured-project",
@@ -167,6 +169,8 @@ describe("gemini adapter hooks", () => {
       auth: {
         type: "oauth",
         access: "oauth-access",
+        createdAt: Date.now() - 1_000,
+        updatedAt: Date.now() - 1_000,
         metadata: {
           authMode: "gemini_oauth",
         },

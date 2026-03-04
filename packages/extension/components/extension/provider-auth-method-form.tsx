@@ -9,7 +9,7 @@ function shouldRenderField(field: AuthField, values: Record<string, string>) {
 }
 
 interface ProviderAuthMethodFormProps {
-  fields: AuthField[]
+  fields: ReadonlyArray<AuthField>
   values: Record<string, string>
   errors?: Record<string, string>
   disabled?: boolean

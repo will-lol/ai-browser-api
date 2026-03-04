@@ -13,11 +13,7 @@ import { refreshProviderCatalogForProvider } from "@/lib/runtime/provider-regist
 
 export async function openRuntimeProviderAuthWindow(providerID: string) {
   const manager = getAuthFlowManager()
-  const result = await manager.openProviderAuthWindow(providerID)
-  return {
-    providerID,
-    result,
-  }
+  return manager.openProviderAuthWindow(providerID)
 }
 
 export async function getRuntimeProviderAuthFlow(providerID: string) {

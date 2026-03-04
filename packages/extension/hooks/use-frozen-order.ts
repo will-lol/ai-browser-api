@@ -5,7 +5,7 @@ interface UseFrozenOrderOptions<T> {
 }
 
 export function useFrozenOrder<T>(
-  items: T[],
+  items: ReadonlyArray<T>,
   getId: (item: T) => string,
   compareFn: (a: T, b: T) => number,
   options: UseFrozenOrderOptions<T> = {},

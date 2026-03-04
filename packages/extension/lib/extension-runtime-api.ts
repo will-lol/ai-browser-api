@@ -1,4 +1,5 @@
 import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
+import type { PermissionStatus } from "@llm-bridge/contracts"
 import type {
   RuntimeAuthFlowSnapshot,
   RuntimeModelSummary,
@@ -11,7 +12,6 @@ import type {
   RuntimeStartProviderAuthFlowResponse,
   RuntimeCancelProviderAuthFlowResponse,
 } from "@/lib/runtime/rpc/runtime-rpc-types"
-import type { PermissionStatus } from "@/lib/runtime/permissions"
 
 export type ExtensionProvider = RuntimeProviderSummary
 export type ModelPermission = RuntimePermissionEntry
@@ -184,6 +184,7 @@ export async function updateRuntimeModelPermission(input: {
 
   return runtime.updatePermission({
     origin,
+    mode: "model",
     modelId: input.modelId,
     status: input.status,
   })

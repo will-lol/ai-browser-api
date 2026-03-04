@@ -3,6 +3,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
+import type { PermissionStatus } from "@llm-bridge/contracts"
 import {
   cancelRuntimeProviderAuthFlow,
   currentOrigin,
@@ -21,7 +22,6 @@ import {
   updateRuntimeModelPermission,
 } from "@/lib/extension-runtime-api"
 import { extensionQueryKeys } from "@/lib/extension-query-keys"
-import type { PermissionStatus } from "@/lib/runtime/permissions"
 
 export function useProvidersQuery(origin = currentOrigin()) {
   return useQuery({

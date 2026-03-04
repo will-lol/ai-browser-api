@@ -9,6 +9,27 @@ export default defineConfig(
   {
     ignores: ["**/node_modules/**", "**/.wxt/**", "**/.output/**", "**/dist/**", "**/coverage/**"],
   },
+  {
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@llm-bridge/*/src/*",
+                "../client/src/*",
+                "../../client/src/*",
+                "../../../client/src/*",
+                "../../../../client/src/*",
+              ],
+              message: "Do not import internal src files from other workspace packages.",
+            },
+          ],
+        },
+      ],
+    },
+  },
   eslint.configs.recommended,
   tseslint.configs.recommended,
   autoImports,

@@ -1,318 +1,173 @@
-import { createLLMBridgeClient } from "@llm-bridge/client";
-import { generateText, type LanguageModel } from "ai";
+import { createLLMBridgeClient, type BridgeModelSummary } from "@llm-bridge/client"
 
-const DEFAULT_MODEL_ID = "google/gemini-3.1-pro-preview";
-const LOG_LIMIT = 250;
-const CALL_PENDING_WARNING_MS = 4_000;
-const CALL_TIMEOUT_MS = 40_000;
-
-type BridgeModelSummary = {
-  id: string;
-  name: string;
-  provider: string;
-  connected: boolean;
-};
+const DEFAULT_MODEL_ID = "google/gemini-3.1-pro-preview"
+const LOG_LIMIT = 250
 
 declare global {
   interface Window {
-    __LLM_BRIDGE_DEBUG__?: boolean;
-    llmBridge?: unknown;
+    __LLM_BRIDGE_DEBUG__?: boolean
     llmBridgeDebug?: {
-      refreshModels: () => Promise<void>;
-      generate: () => Promise<void>;
-    };
-  }
-}
-
-const debugLines: string[] = [];
-let callSeq = 0;
-
-window.__LLM_BRIDGE_DEBUG__ = true;
-
-function stringify(value: unknown) {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function serializeError(value: unknown, seen = new WeakSet<object>()): unknown {
-  if (value instanceof Error) {
-    return {
-      name: value.name,
-      message: value.message,
-      stack: value.stack,
-      cause: serializeError(value.cause, seen),
-    };
-  }
-
-  if (value == null) return value;
-  if (typeof value !== "object") return value;
-  if (seen.has(value)) return "[Circular]";
-
-  seen.add(value);
-
-  if (Array.isArray(value)) {
-    return value.map((item) => serializeError(item, seen));
-  }
-
-  return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [key, serializeError(item, seen)]),
-  );
-}
-
-function summary(value: unknown) {
-  if (Array.isArray(value)) {
-    return { kind: "array", length: value.length };
-  }
-  if (value && typeof value === "object") {
-    const asRecord = value as Record<string, unknown>;
-    const result: Record<string, unknown> = {
-      kind: "object",
-      keys: Object.keys(asRecord).slice(0, 12),
-    };
-    if (Array.isArray(asRecord.providers)) {
-      result.providersLength = asRecord.providers.length;
+      refreshModels: () => Promise<void>
+      generate: () => Promise<void>
     }
-    if (Array.isArray(asRecord.models)) {
-      result.modelsLength = asRecord.models.length;
-    }
-    return result;
   }
-  return { kind: typeof value, value };
 }
+
+const debugLines: string[] = []
+window.__LLM_BRIDGE_DEBUG__ = true
 
 const bridge = createLLMBridgeClient({
   debug: true,
-  pendingWarningMs: 3_000,
-});
+})
 
 function getRequiredNode<T extends HTMLElement>(id: string): T {
-  const node = document.getElementById(id);
+  const node = document.getElementById(id)
   if (!node) {
-    throw new Error(`Missing required node: #${id}`);
+    throw new Error(`Missing required node: #${id}`)
   }
-  return node as T;
+  return node as T
 }
 
-const refreshModelsButton = getRequiredNode<HTMLButtonElement>("refresh-models");
-const generateButton = getRequiredNode<HTMLButtonElement>("generate");
-const modelSelect = getRequiredNode<HTMLSelectElement>("model-select");
-const modelCount = getRequiredNode<HTMLSpanElement>("model-count");
-const promptInput = getRequiredNode<HTMLTextAreaElement>("prompt");
-const statusNode = getRequiredNode<HTMLSpanElement>("status");
-const resultNode = getRequiredNode<HTMLPreElement>("result");
-const debugNode = getRequiredNode<HTMLPreElement>("debug");
+const refreshModelsButton = getRequiredNode<HTMLButtonElement>("refresh-models")
+const generateButton = getRequiredNode<HTMLButtonElement>("generate")
+const modelSelect = getRequiredNode<HTMLSelectElement>("model-select")
+const modelCount = getRequiredNode<HTMLSpanElement>("model-count")
+const promptInput = getRequiredNode<HTMLTextAreaElement>("prompt")
+const statusNode = getRequiredNode<HTMLSpanElement>("status")
+const resultNode = getRequiredNode<HTMLPreElement>("result")
+const debugNode = getRequiredNode<HTMLPreElement>("debug")
 
-function renderLogs() {
-  debugNode.textContent = debugLines.join("\n");
+function stringify(value: unknown) {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
 }
 
 function appLog(event: string, meta?: unknown) {
-  const line = `[example-app] ${new Date().toISOString()} ${event} ${
-    meta === undefined ? "" : stringify(meta)
-  }`.trim();
-  debugLines.unshift(line);
+  const line = `[example-app] ${new Date().toISOString()} ${event} ${meta === undefined ? "" : stringify(meta)}`.trim()
+  debugLines.unshift(line)
   if (debugLines.length > LOG_LIMIT) {
-    debugLines.length = LOG_LIMIT;
+    debugLines.length = LOG_LIMIT
   }
-  renderLogs();
-  console.info(line);
+  debugNode.textContent = debugLines.join("\n")
+  console.info(line)
 }
 
 function appError(event: string, error: unknown) {
-  const payload = serializeError(error);
-  const line = `[example-app] ${new Date().toISOString()} ${event} ${stringify(payload)}`;
-  debugLines.unshift(line);
+  const message = error instanceof Error ? error.message : String(error)
+  const line = `[example-app] ${new Date().toISOString()} ${event} ${message}`
+  debugLines.unshift(line)
   if (debugLines.length > LOG_LIMIT) {
-    debugLines.length = LOG_LIMIT;
+    debugLines.length = LOG_LIMIT
   }
-  renderLogs();
-  console.error(line);
+  debugNode.textContent = debugLines.join("\n")
+  console.error(line)
 }
 
 function setStatus(text: string) {
-  statusNode.textContent = text;
-  appLog("status", { text });
+  statusNode.textContent = text
+  appLog("status", { text })
 }
 
 function setResult(value: string) {
-  resultNode.textContent = value;
-}
-
-async function traceCall<T>(name: string, run: () => Promise<T>): Promise<T> {
-  const callId = `call_${Date.now()}_${++callSeq}`;
-  const started = Date.now();
-  appLog("call.start", { callId, name });
-
-  const pendingWarning = setTimeout(() => {
-    appLog("call.pending", {
-      callId,
-      name,
-      elapsedMs: Date.now() - started,
-    });
-  }, CALL_PENDING_WARNING_MS);
-
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`${name} timed out after ${CALL_TIMEOUT_MS}ms`));
-    }, CALL_TIMEOUT_MS);
-  });
-
-  try {
-    const result = await Promise.race([run(), timeoutPromise]);
-    appLog("call.success", {
-      callId,
-      name,
-      elapsedMs: Date.now() - started,
-      result: summary(result),
-    });
-    return result;
-  } catch (error) {
-    appError("call.error", {
-      callId,
-      name,
-      elapsedMs: Date.now() - started,
-      error,
-    });
-    throw error;
-  } finally {
-    clearTimeout(pendingWarning);
-    if (timeoutId) clearTimeout(timeoutId);
-  }
+  resultNode.textContent = value
 }
 
 function selectedModelId() {
-  return modelSelect.value;
+  return modelSelect.value
 }
 
 async function refreshModels() {
-  setStatus("Loading models...");
+  setStatus("Loading models...")
+
   try {
-    const state = await traceCall("bridge.getState", () => bridge.getState());
-    appLog("bridge.getState.result", summary(state));
+    const models = await bridge.listModels()
+    const googleModels = models.filter((model: BridgeModelSummary) => model.provider === "google")
 
-    const models = (await traceCall("bridge.listModels", () =>
-      bridge.listModels())) as BridgeModelSummary[];
-    appLog("bridge.listModels.result", {
-      total: models.length,
-      providers: Array.from(new Set(models.map((model) => model.provider))),
-    });
-
-    const googleModels = models.filter((model) => model.provider === "google");
-    appLog("google.models.filtered", {
-      count: googleModels.length,
-      ids: googleModels.map((model) => model.id),
-    });
-
-    modelSelect.innerHTML = "";
+    modelSelect.innerHTML = ""
     for (const model of googleModels) {
-      const option = document.createElement("option");
-      option.value = model.id;
-      option.textContent = `${model.id} (${model.name})`;
-      modelSelect.append(option);
+      const option = document.createElement("option")
+      option.value = model.id
+      option.textContent = `${model.id} (${model.name})`
+      modelSelect.append(option)
     }
 
     if (googleModels.length === 0) {
-      setStatus("No connected Google models.");
-      modelCount.textContent = "0 models";
-      appLog("google.models.empty", {
-        hint: "No Google models returned. Verify extension injection + Gemini auth.",
-      });
-      return;
+      modelCount.textContent = "0 models"
+      setStatus("No connected Google models.")
+      return
     }
 
-    const preferred = googleModels.find((model) => model.id === DEFAULT_MODEL_ID);
+    const preferred = googleModels.find((model) => model.id === DEFAULT_MODEL_ID)
     if (preferred) {
-      modelSelect.value = preferred.id;
-    } else {
-      const fallback = googleModels.find((model) => /gemini-3\.1/i.test(model.id));
-      if (fallback) modelSelect.value = fallback.id;
+      modelSelect.value = preferred.id
     }
 
-    modelCount.textContent = `${googleModels.length} models`;
-    setStatus("Ready");
+    modelCount.textContent = `${googleModels.length} models`
+    setStatus("Ready")
   } catch (error) {
-    setStatus("Failed to load models");
-    appError("refreshModels.failed", error);
+    appError("refreshModels.failed", error)
+    setStatus("Failed to load models")
   }
 }
 
 async function generate() {
-  const modelId = selectedModelId();
-  const prompt = promptInput.value.trim();
-
-  appLog("generate.clicked", { modelId, promptLength: prompt.length });
+  const modelId = selectedModelId()
+  const prompt = promptInput.value.trim()
 
   if (!modelId) {
-    setStatus("Pick a model first");
-    return;
-  }
-  if (!prompt) {
-    setStatus("Enter a prompt first");
-    return;
+    setStatus("Pick a model first")
+    return
   }
 
-  setStatus("Requesting permission...");
-  setResult("");
-  generateButton.disabled = true;
+  if (!prompt) {
+    setStatus("Enter a prompt first")
+    return
+  }
+
+  setStatus("Generating...")
+  setResult("")
+  generateButton.disabled = true
 
   try {
-    await traceCall("bridge.requestPermission", () =>
-      bridge.requestPermission({
-        provider: "google",
-        modelId,
-        capabilities: ["text"],
-      }));
+    const model = await bridge.getModel(modelId)
+    const response = await model.doGenerate({
+      prompt: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: prompt,
+            },
+          ],
+        },
+      ],
+    })
 
-    setStatus("Resolving model...");
-    const model = await traceCall("bridge.getModel", () => bridge.getModel(modelId));
-
-    setStatus("Generating...");
-    const result = await traceCall("ai.generateText", () =>
-      generateText({
-        model: model as unknown as LanguageModel,
-        prompt,
-        maxOutputTokens: 512,
-      }));
-
-    setResult(result.text);
-    appLog("ai.generateText.result", {
-      textLength: result.text.length,
-      finishReason: result.finishReason,
-      warnings: result.warnings?.length ?? 0,
-      usage: result.usage,
-    });
-    setStatus("Done");
+    setResult(response.text)
+    setStatus(`Done (${response.finishReason})`)
   } catch (error) {
-    setStatus("Generation failed");
-    appError("generate.failed", error);
+    appError("generate.failed", error)
+    setStatus("Generation failed")
   } finally {
-    generateButton.disabled = false;
+    generateButton.disabled = false
   }
 }
 
 refreshModelsButton.addEventListener("click", () => {
-  appLog("refresh.button.click");
-  void refreshModels();
-});
-generateButton.addEventListener("click", () => {
-  void generate();
-});
+  void refreshModels()
+})
 
-window.llmBridge = bridge;
+generateButton.addEventListener("click", () => {
+  void generate()
+})
+
 window.llmBridgeDebug = {
   refreshModels,
   generate,
-};
+}
 
-appLog("boot", {
-  href: window.location.href,
-  origin: window.location.origin,
-  userAgent: navigator.userAgent,
-  bridgeDebugFlag: window.__LLM_BRIDGE_DEBUG__,
-});
-
-void refreshModels();
+void refreshModels()

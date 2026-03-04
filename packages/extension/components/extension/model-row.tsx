@@ -8,7 +8,7 @@ interface ModelRowProps {
   id: string
   name: string
   provider: string
-  capabilities: string[]
+  capabilities: ReadonlyArray<string>
   permission: PermissionStatus
   origin: string
   disabled?: boolean

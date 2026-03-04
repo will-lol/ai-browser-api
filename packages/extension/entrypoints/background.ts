@@ -1,44 +1,17 @@
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { RuntimeApplication, RuntimeApplicationLive } from "@llm-bridge/runtime-core"
 import { browser } from "@wxt-dev/browser"
-import { ChromePortIO, RPCChannel } from "kkrpc/chrome-extension"
 import { defineBackground } from "wxt/utils/define-background"
 import { MODELS_REFRESH_INTERVAL_MS, RUNTIME_STATE_KEY } from "@/lib/runtime/constants"
 import { getModelsDevUpdatedAt, refreshModelsDevData } from "@/lib/runtime/models-dev"
-import {
-  acquireRuntimeModel,
-  generateRuntimeModel,
-  streamRuntimeModel,
-} from "@/lib/runtime/service"
-import {
-  cancelRuntimeProviderAuthFlow,
-  getRuntimeProviderAuthFlow,
-  openRuntimeProviderAuthWindow,
-  startRuntimeProviderAuthFlow,
-  createRuntimePermissionRequest,
-  disconnectRuntimeProvider,
-  dismissRuntimePermissionRequest,
-  resolveRuntimePermissionRequest,
-  setRuntimeOriginEnabled,
-  updateRuntimePermission,
-} from "@/lib/runtime/mutation-service"
-import {
-  getOriginState,
-  listModels,
-  listPendingRequestsForOrigin,
-  listPermissionsForOrigin,
-  listProviders,
-} from "@/lib/runtime/query-service"
 import { ensureProviderCatalog, refreshProviderCatalog } from "@/lib/runtime/provider-registry"
 import { runtimeDb } from "@/lib/runtime/db/runtime-db"
 import { subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events"
 import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager"
-import {
-  RUNTIME_RPC_PORT_NAME,
-  type RuntimeAcquireModelInput,
-  type RuntimeAcquireModelResult,
-  type RuntimeModelCallInput,
-  type RuntimeRPCService,
-} from "@/lib/runtime/rpc/runtime-rpc-types"
-import { parseProviderModel } from "@/lib/runtime/util"
+import { makeRuntimeCoreInfrastructureLayer } from "@/lib/runtime-app/runtime-adapters"
+import { RuntimeRpcHandlersLive } from "@/lib/runtime-app/runtime-rpc-handlers"
+import { registerRuntimeRpcServer } from "@/lib/runtime-app/runtime-rpc-server"
 
 const BADGE_BG = "#d97706"
 const SOURCE_ICON_PATH = "/icon-dark-32x32.png"
@@ -57,12 +30,9 @@ const INACTIVE_ICON_COLORS = {
 
 type Rgb = { r: number; g: number; b: number }
 type IconState = "active" | "inactive"
-type ChromeRuntimePort = ConstructorParameters<typeof ChromePortIO>[0]
 
 let sourceIconPromise: Promise<ImageData> | null = null
 const iconImageCache: Partial<Record<IconState, Record<number, ImageData>>> = {}
-
-const activeRequestControllers = new Map<string, AbortController>()
 let modelsRefreshInFlight: Promise<void> | null = null
 
 async function refreshModelsSnapshot() {
@@ -208,221 +178,45 @@ async function updateActionStateSafe() {
   }
 }
 
-function getRequestOrigin(origin?: string) {
-  return origin ?? "https://unknown.invalid"
+function createRuntimeLayer() {
+  const infrastructureLayer = makeRuntimeCoreInfrastructureLayer({
+    refreshActionState: updateActionStateSafe,
+  })
+
+  const runtimeApplicationLayer = RuntimeApplicationLive.pipe(
+    Layer.provide(infrastructureLayer),
+  )
+
+  const runtimeRpcHandlersLayer = RuntimeRpcHandlersLive.pipe(
+    Layer.provide(runtimeApplicationLayer),
+  )
+
+  return Layer.merge(runtimeApplicationLayer, runtimeRpcHandlersLayer)
 }
 
-function cancelRequest(requestId: string) {
-  activeRequestControllers.get(requestId)?.abort()
-  activeRequestControllers.delete(requestId)
-}
+function startRuntimeCore(layer: ReturnType<typeof createRuntimeLayer>) {
+  void Effect.runPromise(
+    Effect.flatMap(RuntimeApplication, (app) => app.startup()).pipe(
+      Effect.provide(layer),
+    ),
+  ).catch((error) => {
+    console.warn("runtime startup failed", error)
+  })
 
-async function acquireModel(input: RuntimeAcquireModelInput): Promise<RuntimeAcquireModelResult> {
-  const requestId = input.requestId
-  try {
-    return await acquireRuntimeModel({
-      origin: getRequestOrigin(input.origin),
-      sessionID: input.sessionID ?? requestId,
-      requestID: requestId,
-      model: input.modelId,
-    })
-  } finally {
-    await updateActionStateSafe()
-  }
-}
-
-async function modelDoGenerate(input: RuntimeModelCallInput) {
-  const requestId = input.requestId
-  const controller = new AbortController()
-  activeRequestControllers.set(requestId, controller)
-  try {
-    return await generateRuntimeModel(
-      {
-        origin: getRequestOrigin(input.origin),
-        sessionID: input.sessionID ?? requestId,
-        requestID: requestId,
-        model: input.modelId,
-        options: input.options,
-      },
-      controller.signal,
-    )
-  } finally {
-    activeRequestControllers.delete(requestId)
-    await updateActionStateSafe()
-  }
-}
-
-async function* modelDoStream(input: RuntimeModelCallInput) {
-  const requestId = input.requestId
-  const controller = new AbortController()
-  activeRequestControllers.set(requestId, controller)
-
-  try {
-    const stream = await streamRuntimeModel(
-      {
-        origin: getRequestOrigin(input.origin),
-        sessionID: input.sessionID ?? requestId,
-        requestID: requestId,
-        model: input.modelId,
-        options: input.options,
-      },
-      controller.signal,
-    )
-
-    const reader = stream.getReader()
-
-    try {
-      while (true) {
-        const chunk = await reader.read()
-        if (chunk.done) break
-        if (!chunk.value) continue
-        yield chunk.value
-      }
-    } finally {
-      try {
-        await reader.cancel()
-      } catch {
-        // Ignore reader cancellation errors during stream teardown.
-      }
-    }
-  } finally {
-    controller.abort()
-    activeRequestControllers.delete(requestId)
-    await updateActionStateSafe()
-  }
-}
-
-const runtimeService: RuntimeRPCService = {
-  async listProviders() {
-    return listProviders()
-  },
-  async listModels(input) {
-    return listModels({
-      providerID: input.providerID,
-      connectedOnly: Boolean(input.connectedOnly),
-    })
-  },
-  async listConnectedModels(input) {
-    void input
-    return listModels({
-      connectedOnly: true,
-    })
-  },
-  async getOriginState(input) {
-    return getOriginState(getRequestOrigin(input.origin))
-  },
-  async listPermissions(input) {
-    return listPermissionsForOrigin(getRequestOrigin(input.origin))
-  },
-  async listPending(input) {
-    return listPendingRequestsForOrigin(getRequestOrigin(input.origin))
-  },
-  async openProviderAuthWindow(input) {
-    const response = await openRuntimeProviderAuthWindow(input.providerID)
-    return response
-  },
-  async getProviderAuthFlow(input) {
-    return getRuntimeProviderAuthFlow(input.providerID)
-  },
-  async startProviderAuthFlow(input) {
-    const response = await startRuntimeProviderAuthFlow({
-      providerID: input.providerID,
-      methodID: input.methodID,
-      values: input.values ?? {},
-    })
-    await updateActionState()
-    return response
-  },
-  async cancelProviderAuthFlow(input) {
-    const response = await cancelRuntimeProviderAuthFlow({
-      providerID: input.providerID,
-      reason: input.reason,
-    })
-    await updateActionState()
-    return response
-  },
-  async disconnectProvider(input) {
-    const response = await disconnectRuntimeProvider(input.providerID)
-    await updateActionState()
-    return response
-  },
-  async updatePermission(input) {
-    const origin = getRequestOrigin(input.origin)
-    const result = input.mode === "origin"
-      ? await setRuntimeOriginEnabled({
-          origin,
-          enabled: input.enabled,
-        })
-      : await updateRuntimePermission({
-          origin,
-          modelId: input.modelId,
-          status: input.status,
-          capabilities: input.capabilities,
-        })
-
-    await updateActionState()
-    return result
-  },
-  async requestPermission(input) {
-    const origin = getRequestOrigin(input.origin)
-    let result
-    if (input.action === "resolve") {
-      result = await resolveRuntimePermissionRequest({
-        requestId: input.requestId,
-        decision: input.decision,
-      })
-    } else if (input.action === "dismiss") {
-      result = await dismissRuntimePermissionRequest(input.requestId)
-    } else {
-      const modelId = input.modelId ?? "openai/gpt-4o-mini"
-      const parsed = parseProviderModel(modelId)
-      result = await createRuntimePermissionRequest({
-        origin,
-        modelId,
-        modelName: input.modelName ?? parsed.modelID,
-        provider: input.provider ?? parsed.providerID,
-        capabilities: input.capabilities,
-      })
-    }
-
-    await updateActionState()
-    return result
-  },
-  async acquireModel(input) {
-    return acquireModel(input)
-  },
-  async modelDoGenerate(input) {
-    return modelDoGenerate(input)
-  },
-  modelDoStream(input) {
-    return modelDoStream(input)
-  },
-  async abortModelCall(input) {
-    cancelRequest(input.requestId)
-  },
-}
-
-function registerRuntimeRPCHandlers() {
-  browser.runtime.onConnect.addListener((port) => {
-    if (port.name !== RUNTIME_RPC_PORT_NAME) return
-
-    const io = new ChromePortIO(port as unknown as ChromeRuntimePort)
-    const rpc = new RPCChannel<RuntimeRPCService, Record<string, never>>(io, {
-      expose: runtimeService,
-    })
-
-    port.onDisconnect.addListener(() => {
-      rpc.destroy()
-    })
+  void registerRuntimeRpcServer(layer).catch((error) => {
+    console.warn("runtime rpc server failed", error)
   })
 }
 
 export default defineBackground(() => {
+  const runtimeLayer = createRuntimeLayer()
+
   // Avoid eager network fetches on worker boot to keep popup open fast.
   // Models stay fresh through startup/install hooks and the periodic alarm.
   void scheduleModelsRefreshAlarm()
   void ensureProviderCatalog()
 
+  startRuntimeCore(runtimeLayer)
   void updateActionState()
 
   browser.runtime.onInstalled.addListener(() => {
@@ -447,8 +241,6 @@ export default defineBackground(() => {
   browser.windows?.onRemoved.addListener((windowId) => {
     void getAuthFlowManager().handleWindowClosed(windowId)
   })
-
-  registerRuntimeRPCHandlers()
 
   subscribeRuntimeEvents(() => {
     void updateActionState()

@@ -17,7 +17,7 @@ function shouldRenderField(field: AuthField, values: Record<string, string>) {
   return values[condition.key] === condition.equals
 }
 
-function normalizeFieldValues(fields: AuthField[], values: Record<string, string>) {
+function normalizeFieldValues(fields: ReadonlyArray<AuthField>, values: Record<string, string>) {
   const normalized: Record<string, string> = {}
   const errors: Record<string, string> = {}
 
@@ -63,7 +63,7 @@ function normalizeFieldValues(fields: AuthField[], values: Record<string, string
   }
 }
 
-function buildInitialValues(fields: AuthField[]) {
+function buildInitialValues(fields: ReadonlyArray<AuthField>) {
   const next: Record<string, string> = {}
   for (const field of fields) {
     if (field.defaultValue != null) {

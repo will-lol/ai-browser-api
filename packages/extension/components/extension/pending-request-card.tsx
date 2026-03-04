@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import { Check, X as XIcon } from "lucide-react"
-import type { PermissionRequest } from "@/lib/runtime/permissions"
+import type { RuntimePendingRequest } from "@llm-bridge/contracts"
 import { getProviderLabel } from "@/lib/provider-labels"
 import {
   usePermissionDecisionMutation,
@@ -8,7 +8,7 @@ import {
 } from "@/lib/extension-query-hooks"
 
 interface PendingRequestCardProps {
-  request: PermissionRequest
+  request: RuntimePendingRequest
   origin: string
   variant: "floating" | "inline"
   onClose?: () => void
