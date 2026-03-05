@@ -116,11 +116,22 @@ export const RuntimeAuthFlowStatusSchema = Schema.Literal(
 )
 export type RuntimeAuthFlowStatus = Schema.Schema.Type<typeof RuntimeAuthFlowStatusSchema>
 
+export const RuntimeAuthFlowInstructionSchema = Schema.Struct({
+  kind: Schema.Literal("device_code", "notice"),
+  title: Schema.String,
+  message: Schema.optional(Schema.String),
+  code: Schema.optional(Schema.String),
+  url: Schema.optional(Schema.String),
+  autoOpened: Schema.optional(Schema.Boolean),
+})
+export type RuntimeAuthFlowInstruction = Schema.Schema.Type<typeof RuntimeAuthFlowInstructionSchema>
+
 export const RuntimeAuthFlowSnapshotSchema = Schema.Struct({
   providerID: Schema.String,
   status: RuntimeAuthFlowStatusSchema,
   methods: Schema.Array(RuntimeAuthMethodSchema),
   runningMethodID: Schema.optional(Schema.String),
+  instruction: Schema.optional(RuntimeAuthFlowInstructionSchema),
   error: Schema.optional(Schema.String),
   updatedAt: Schema.Number,
   canCancel: Schema.Boolean,

@@ -90,6 +90,7 @@ export function ConnectProviderWindow({
 
   const flow = authFlowQuery.data
   const methods = flow?.methods ?? []
+  const instruction = flow?.instruction
 
   const [selectedMethodID, setSelectedMethodID] = useState<string | null>(null)
   const [values, setValues] = useState<Record<string, string>>({})
@@ -176,6 +177,19 @@ export function ConnectProviderWindow({
     window.close()
   }
 
+  async function handleCopyCode(code: string) {
+    try {
+      await navigator.clipboard.writeText(code)
+      toast.success("Code copied")
+    } catch (error) {
+      setFlowError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  function handleOpenUrl(url: string) {
+    window.open(url, "_blank", "noopener,noreferrer")
+  }
+
   const status = flow?.status ?? "idle"
   const isBusy = startAuthFlowMutation.isPending || cancelAuthFlowMutation.isPending
 
@@ -212,6 +226,52 @@ export function ConnectProviderWindow({
           {status === "authorizing" && (
             <div className="flex flex-col gap-3">
               <p className="text-xs text-muted-foreground">Finishing authentication...</p>
+
+              {instruction && (
+                <div className="flex flex-col gap-2 border border-border bg-secondary/20 px-3 py-2">
+                  <p className="text-xs font-medium text-foreground">{instruction.title}</p>
+                  {instruction.message && (
+                    <p className="text-xs text-muted-foreground">{instruction.message}</p>
+                  )}
+
+                  {instruction.code && (() => {
+                    const code = instruction.code
+                    return (
+                      <div className="flex items-center justify-between gap-2 border border-border bg-background px-2 py-1.5">
+                        <code className="text-xs text-foreground">{code}</code>
+                        <button
+                          onClick={() => {
+                            void handleCopyCode(code)
+                          }}
+                          disabled={isBusy}
+                          className="border border-border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Copy code
+                        </button>
+                      </div>
+                    )
+                  })()}
+
+                  {instruction.url && (() => {
+                    const url = instruction.url
+                    return (
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => handleOpenUrl(url)}
+                          disabled={isBusy}
+                          className="border border-border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Open verification page
+                        </button>
+                        {instruction.autoOpened && (
+                          <p className="text-[11px] text-muted-foreground">Opened automatically</p>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2">
                 <button
                   onClick={() => {

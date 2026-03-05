@@ -1,4 +1,5 @@
 import { browser } from "@wxt-dev/browser"
+import type { RuntimeAuthFlowInstruction } from "@llm-bridge/contracts"
 import type { RuntimeAuthMethod } from "@/lib/runtime/plugin-manager"
 import {
   listProviderAuthMethods,
@@ -24,6 +25,7 @@ export interface RuntimeAuthFlowSnapshot {
   status: RuntimeAuthFlowStatus
   methods: RuntimeAuthMethod[]
   runningMethodID?: string
+  instruction?: RuntimeAuthFlowInstruction
   error?: string
   updatedAt: number
   canCancel: boolean
@@ -40,6 +42,7 @@ type AuthFlowState = {
   status: RuntimeAuthFlowStatus
   methods: RuntimeAuthMethod[]
   runningMethodID?: string
+  instruction?: RuntimeAuthFlowInstruction
   error?: string
   updatedAt: number
   expiresAt: number
@@ -104,6 +107,7 @@ export class AuthFlowManager {
       status: flow.status,
       methods: flow.methods,
       runningMethodID: flow.runningMethodID,
+      instruction: flow.instruction,
       error: flow.error,
       updatedAt: flow.updatedAt,
       canCancel: canCancel(flow.status),
@@ -117,6 +121,7 @@ export class AuthFlowManager {
       providerID,
       status: "idle",
       methods,
+      instruction: undefined,
       updatedAt: now,
       canCancel: false,
     }
@@ -129,6 +134,7 @@ export class AuthFlowManager {
       providerID,
       status: "idle",
       methods,
+      instruction: undefined,
       updatedAt: now,
       expiresAt: now + AUTH_FLOW_TTL_MS,
     }
@@ -241,6 +247,7 @@ export class AuthFlowManager {
     this.clearExecution(flow)
     flow.status = "authorizing"
     flow.error = undefined
+    flow.instruction = undefined
     flow.runningMethodID = selected.id
     flow.controller = new AbortController()
     await this.setFlow(flow)
@@ -255,6 +262,15 @@ export class AuthFlowManager {
         methodID: selected.id,
         values: input.values ?? {},
         signal: flow.controller.signal,
+        onInstruction: async (instruction) => {
+          const latest = this.flows.get(input.providerID)
+          if (!latest) return
+          if (latest !== flow) return
+          if (latest.status !== "authorizing") return
+
+          latest.instruction = instruction
+          await this.setFlow(latest)
+        },
       })
       flow.task = task
 
@@ -284,6 +300,7 @@ export class AuthFlowManager {
 
       latest.status = "success"
       latest.error = undefined
+      latest.instruction = undefined
       this.clearExecution(latest)
       latest.methods = await listProviderAuthMethods(input.providerID)
       await this.setFlow(latest)
@@ -309,6 +326,7 @@ export class AuthFlowManager {
           error: latest.error,
         })
       }
+      latest.instruction = undefined
       this.clearExecution(latest)
       latest.methods = await listProviderAuthMethods(input.providerID)
       await this.setFlow(latest)
@@ -334,6 +352,7 @@ export class AuthFlowManager {
     flow.error = input.reason === "expired"
       ? "Authentication expired."
       : "Authentication canceled."
+    flow.instruction = undefined
     this.clearExecution(flow)
     await this.setFlow(flow)
     return this.snapshot(flow)

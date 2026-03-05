@@ -1,5 +1,6 @@
 import { getAuth, removeAuth, setAuth } from "@/lib/runtime/auth-store"
 import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store"
+import type { RuntimeAuthFlowInstruction } from "@llm-bridge/contracts"
 import type { AuthMethodType, RuntimeAuthMethod } from "@/lib/runtime/plugin-manager"
 import { getPluginManager } from "@/lib/runtime/plugins"
 import { getProvider } from "@/lib/runtime/provider-registry"
@@ -80,6 +81,7 @@ export async function startProviderAuth(input: {
   methodID: string
   values?: Record<string, string>
   signal?: AbortSignal
+  onInstruction?: (instruction: RuntimeAuthFlowInstruction) => void | Promise<void>
 }): Promise<StartProviderAuthResult> {
   const ctx = await resolveAuthContext(input.providerID)
   const pluginManager = getPluginManager()
@@ -93,6 +95,7 @@ export async function startProviderAuth(input: {
     resolved,
     input.values ?? {},
     input.signal,
+    input.onInstruction,
   )
 
   await persistAuth(input.providerID, resolved.method.type, result)

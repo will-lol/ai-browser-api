@@ -66,6 +66,21 @@ function extractAccountId(tokens: TokenResponse) {
   return undefined
 }
 
+function buildCodexDeviceInstruction(input: {
+  code: string
+  url: string
+  autoOpened: boolean
+}) {
+  return {
+    kind: "device_code" as const,
+    title: "Enter the device code to continue",
+    message: "Open the verification page and enter this code to finish signing in.",
+    code: input.code,
+    url: input.url,
+    autoOpened: input.autoOpened,
+  }
+}
+
 async function exchangeCodeForTokens(code: string, redirectUri: string, verifier: string) {
   const response = await fetch(`${ISSUER}/oauth/token`, {
     method: "POST",
@@ -180,11 +195,21 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
     interval: string
   }
 
+  const verificationUrl = `${ISSUER}/codex/device`
+  let autoOpened = false
   await browser.tabs.create({
-    url: `${ISSUER}/codex/device`,
+    url: verificationUrl,
+  }).then(() => {
+    autoOpened = true
   }).catch(() => {
     // Ignore tab creation errors and continue polling.
   })
+
+  await input.authFlow.publish(buildCodexDeviceInstruction({
+    code: data.user_code,
+    url: verificationUrl,
+    autoOpened,
+  }))
 
   const intervalMs = Math.max(parseInt(data.interval, 10) || 5, 1) * 1000
   const signal = input.signal
@@ -434,4 +459,8 @@ export const codexAuthPlugin: RuntimePlugin = {
       },
     },
   },
+}
+
+export const __codexAuthInternals = {
+  buildCodexDeviceInstruction,
 }

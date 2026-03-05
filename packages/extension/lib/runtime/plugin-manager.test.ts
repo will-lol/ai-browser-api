@@ -4,6 +4,7 @@ import { anthropicPlugin } from "@/lib/runtime/plugins/anthropic"
 import { googlePlugin } from "@/lib/runtime/plugins/google"
 import { openaiPlugin } from "@/lib/runtime/plugins/openai"
 import {
+  type AuthContext,
   type ChatTransformContext,
   PluginManager,
   type RuntimeAdapterContext,
@@ -115,6 +116,13 @@ function createChatContext(input: {
     origin: "https://example.test",
     sessionID: "session-1",
     requestID: "request-1",
+  }
+}
+
+function createAuthContext(providerID = "google"): AuthContext {
+  return {
+    providerID,
+    provider: createAdapterContext().provider,
   }
 }
 
@@ -369,5 +377,68 @@ describe("PluginManager request options", () => {
       await manager.applyRequestOptions(createChatContext({ providerID: "openai", modelID: "gpt-5" }), openaiOptions),
       openaiOptions,
     )
+  })
+})
+
+describe("PluginManager auth flow instructions", () => {
+  it("forwards authFlow.publish payloads through authorize callback", async () => {
+    const plugin: RuntimePlugin = {
+      id: "instruction-plugin",
+      name: "Instruction Plugin",
+      supportedProviders: ["google"],
+      hooks: {
+        auth: {
+          provider: "google",
+          async methods() {
+            return [
+              {
+                id: "oauth-device",
+                type: "oauth",
+                label: "OAuth Device",
+                async authorize(ctx) {
+                  await ctx.authFlow.publish({
+                    kind: "device_code",
+                    title: "Use this code",
+                    code: "ABCD-1234",
+                    url: "https://example.test/device",
+                    autoOpened: true,
+                  })
+
+                  return {
+                    type: "oauth",
+                    access: "access-token",
+                    refresh: "refresh-token",
+                  }
+                },
+              },
+            ]
+          },
+        },
+      },
+    }
+
+    const manager = new PluginManager([plugin])
+    const authContext = createAuthContext("google")
+    const resolved = await manager.resolveAuthMethod(authContext, "instruction-plugin:oauth-device")
+    assert.ok(resolved)
+
+    let publishedInstruction: Record<string, unknown> | undefined
+    await manager.authorize(
+      authContext,
+      resolved,
+      {},
+      undefined,
+      async (instruction) => {
+        publishedInstruction = instruction
+      },
+    )
+
+    assert.deepEqual(publishedInstruction, {
+      kind: "device_code",
+      title: "Use this code",
+      code: "ABCD-1234",
+      url: "https://example.test/device",
+      autoOpened: true,
+    })
   })
 })

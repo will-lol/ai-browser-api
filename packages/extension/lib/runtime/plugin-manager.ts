@@ -1,4 +1,5 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider"
+import type { RuntimeAuthFlowInstruction } from "@llm-bridge/contracts"
 import { browser } from "@wxt-dev/browser"
 import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store"
 import type { RuntimeConfig } from "@/lib/runtime/config-store"
@@ -65,6 +66,9 @@ export interface PluginAuthorizeContext {
       error?: string
       errorDescription?: string
     }
+  }
+  authFlow: {
+    publish: (instruction: RuntimeAuthFlowInstruction) => Promise<void>
   }
   runtime: {
     now: () => number
@@ -456,6 +460,7 @@ export class PluginManager {
     resolved: ResolvedAuthMethod,
     values: Record<string, string>,
     signal?: AbortSignal,
+    onInstruction?: (instruction: RuntimeAuthFlowInstruction) => void | Promise<void>,
   ) {
     const result = await resolved.pluginMethod.authorize({
       providerID: ctx.providerID,
@@ -488,6 +493,12 @@ export class PluginManager {
         },
         parseCallback(url: string) {
           return parseOAuthCallbackUrl(url)
+        },
+      },
+      authFlow: {
+        async publish(instruction) {
+          if (!onInstruction) return
+          await onInstruction(instruction)
         },
       },
       runtime: {
