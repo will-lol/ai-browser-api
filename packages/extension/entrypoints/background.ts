@@ -29,18 +29,18 @@ import {
 } from "@/lib/runtime/toolbar-icon-state";
 
 const BADGE_BG = "#d97706";
-const SOURCE_ICON_PATH = "/icon-dark-32x32.png";
+const SOURCE_ICON_PATH = "/icon-32x32.png";
 const ICON_SIZES = [16, 32] as const;
 const MODELS_REFRESH_ALARM = "models-dev-refresh";
 
 const ACTIVE_ICON_COLORS = {
-  dark: { r: 20, g: 83, b: 45 },
-  light: { r: 134, g: 239, b: 172 },
+  dark: { r: 0, g: 198, b: 109 },
+  light: { r: 0, g: 198, b: 109 },
 };
 
 const INACTIVE_ICON_COLORS = {
-  dark: { r: 71, g: 85, b: 105 },
-  light: { r: 203, g: 213, b: 225 },
+  dark: { r: 115, g: 134, b: 120 },
+  light: { r: 115, g: 134, b: 120 },
 };
 
 type Rgb = { r: number; g: number; b: number };
@@ -86,6 +86,12 @@ async function scheduleModelsRefreshAlarm() {
   await browser.alarms.create(MODELS_REFRESH_ALARM, {
     periodInMinutes,
   });
+}
+
+function iconColors(
+  iconState: IconState,
+): { dark: Rgb; light: Rgb } {
+  return iconState === "active" ? ACTIVE_ICON_COLORS : INACTIVE_ICON_COLORS;
 }
 
 async function getSourceIconData(): Promise<ImageData> {
@@ -148,8 +154,7 @@ async function getIconImageData(
   if (cached) return cached;
 
   const sourceIcon = await getSourceIconData();
-  const colors =
-    iconState === "active" ? ACTIVE_ICON_COLORS : INACTIVE_ICON_COLORS;
+  const colors = iconColors(iconState);
   const nextIcons = ICON_SIZES.reduce<Record<number, ImageData>>(
     (acc, size) => {
       acc[size] = tintImageData(sourceIcon, colors.dark, colors.light, size);
@@ -174,11 +179,12 @@ async function updateToolbarIcon(isActive: boolean) {
   try {
     const imageData = await getIconImageData(iconState);
     await browser.action.setIcon({ imageData });
-  } catch {
+  } catch (error) {
+    console.warn("toolbar icon update failed", error);
     await browser.action.setIcon({
       path: {
-        16: "/icon-dark-32x32.png",
-        32: "/icon-dark-32x32.png",
+        16: SOURCE_ICON_PATH,
+        32: SOURCE_ICON_PATH,
       },
     });
   }

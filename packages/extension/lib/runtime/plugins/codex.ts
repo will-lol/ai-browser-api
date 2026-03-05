@@ -512,9 +512,18 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
 }
 
 function buildCodexOAuthProvider(provider: ProviderInfo) {
+  const allowedModels = new Set([
+    "gpt-5.1-codex-max",
+    "gpt-5.1-codex-mini",
+    "gpt-5.2",
+    "gpt-5.2-codex",
+    "gpt-5.3-codex",
+    "gpt-5.1-codex",
+  ]);
+
   const models: Record<string, ProviderModelInfo> = {};
   for (const [modelID, model] of Object.entries(provider.models)) {
-    if (!modelID.includes("codex")) continue;
+    if (!modelID.includes("codex") && !allowedModels.has(modelID)) continue;
     models[modelID] = {
       ...model,
       api: {
@@ -530,6 +539,58 @@ function buildCodexOAuthProvider(provider: ProviderInfo) {
           write: 0,
         },
       },
+    };
+  }
+
+  if (!models["gpt-5.3-codex"]) {
+    models["gpt-5.3-codex"] = {
+      id: "gpt-5.3-codex",
+      providerID: "openai",
+      name: "GPT-5.3 Codex",
+      family: "gpt-codex",
+      status: "active",
+      release_date: "2026-02-05",
+      api: {
+        id: "gpt-5.3-codex",
+        url: CODEX_API_BASE,
+        npm: "@ai-sdk/openai",
+      },
+      cost: {
+        input: 0,
+        output: 0,
+        cache: {
+          read: 0,
+          write: 0,
+        },
+      },
+      limit: {
+        context: 400_000,
+        input: 272_000,
+        output: 128_000,
+      },
+      options: {},
+      headers: {},
+      capabilities: {
+        temperature: false,
+        reasoning: true,
+        attachment: true,
+        toolcall: true,
+        input: {
+          text: true,
+          audio: false,
+          image: true,
+          video: false,
+          pdf: false,
+        },
+        output: {
+          text: true,
+          audio: false,
+          image: false,
+          video: false,
+          pdf: false,
+        },
+      },
+      variants: {},
     };
   }
 
