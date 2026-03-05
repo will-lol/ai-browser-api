@@ -405,9 +405,3 @@ export const copilotAuthPlugin: RuntimePlugin = {
     },
   },
 }
-
-export const __copilotAuthInternals = {
-  inspectCopilotRequest,
-  buildVerificationUrl,
-  shouldRefreshCopilotAccessToken,
-}
