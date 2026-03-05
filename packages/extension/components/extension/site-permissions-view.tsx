@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ModelRow } from "@/components/extension/model-row";
 import { PendingRequestCard } from "@/components/extension/pending-request-card";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Blocks } from "lucide-react";
@@ -182,14 +183,14 @@ export function SitePermissionsView({
             models.
           </p>
         </div>
-        <button
+        <Button
           onClick={() => {
             void navigate({ to: "/providers" });
           }}
-          className="bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          size="lg"
         >
           Connect a provider
-        </button>
+        </Button>
       </div>
     );
   }

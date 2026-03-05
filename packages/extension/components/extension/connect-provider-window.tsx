@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { ProviderAuthMethodForm } from "@/components/extension/provider-auth-method-form"
+import { Button } from "@/components/ui/button"
 import type { ExtensionAuthMethod } from "@/lib/extension-runtime-api"
 import {
   useProviderAuthFlowQuery,
@@ -239,15 +240,16 @@ export function ConnectProviderWindow({
                     return (
                       <div className="flex items-center justify-between gap-2 border border-border bg-background px-2 py-1.5">
                         <code className="text-xs text-foreground">{code}</code>
-                        <button
+                        <Button
                           onClick={() => {
                             void handleCopyCode(code)
                           }}
                           disabled={isBusy}
-                          className="border border-border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                          variant="outline"
+                          size="sm"
                         >
                           Copy code
-                        </button>
+                        </Button>
                       </div>
                     )
                   })()}
@@ -256,13 +258,14 @@ export function ConnectProviderWindow({
                     const url = instruction.url
                     return (
                       <div className="flex items-center justify-between gap-2">
-                        <button
+                        <Button
                           onClick={() => handleOpenUrl(url)}
                           disabled={isBusy}
-                          className="border border-border px-2 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                          variant="outline"
+                          size="sm"
                         >
                           Open verification page
-                        </button>
+                        </Button>
                         {instruction.autoOpened && (
                           <p className="text-[11px] text-muted-foreground">Opened automatically</p>
                         )}
@@ -273,17 +276,17 @@ export function ConnectProviderWindow({
               )}
 
               <div className="flex items-center justify-end gap-2">
-                <button
+                <Button
                   onClick={() => {
                     void handleCancel().catch((error) => {
                       setFlowError(error instanceof Error ? error.message : String(error))
                     })
                   }}
                   disabled={isBusy}
-                  className="border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                  variant="outline"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -301,7 +304,7 @@ export function ConnectProviderWindow({
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-2">
                 {methods.map((method) => (
-                  <button
+                  <Button
                     key={method.id}
                     onClick={() => {
                       setSelectedMethodID(method.id)
@@ -309,13 +312,14 @@ export function ConnectProviderWindow({
                       setFieldErrors({})
                       setFlowError(null)
                     }}
-                    className="flex items-center justify-between border border-border px-3 py-2 text-left transition-colors hover:bg-secondary/40"
+                    variant="outline"
+                    className="w-full justify-between px-3 py-2 text-left hover:bg-secondary/40"
                   >
                     <span className="text-xs font-medium text-foreground">{method.label}</span>
                     <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
                       {method.type}
                     </span>
-                  </button>
+                  </Button>
                 ))}
               </div>
 
@@ -343,7 +347,7 @@ export function ConnectProviderWindow({
                   )}
 
                   <div className="mt-1 flex items-center justify-end gap-2">
-                    <button
+                    <Button
                       onClick={() => {
                         setSelectedMethodID(null)
                         setValues({})
@@ -351,37 +355,36 @@ export function ConnectProviderWindow({
                         setFlowError(null)
                       }}
                       disabled={isBusy}
-                      className="border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                      variant="outline"
                     >
                       Back
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={() => {
                         void handleStart().catch((error) => {
                           setFlowError(error instanceof Error ? error.message : String(error))
                         })
                       }}
                       disabled={isBusy}
-                      className="bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {startAuthFlowMutation.isPending ? "Starting..." : "Continue"}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
 
               <div className="flex items-center justify-end">
-                <button
+                <Button
                   onClick={() => {
                     void handleCancel().catch((error) => {
                       setFlowError(error instanceof Error ? error.message : String(error))
                     })
                   }}
                   disabled={isBusy}
-                  className="border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                  variant="outline"
                 >
                   Close
-                </button>
+                </Button>
               </div>
 
               {displayError && (

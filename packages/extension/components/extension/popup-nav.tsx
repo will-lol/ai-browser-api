@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Blocks } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
@@ -36,13 +37,15 @@ export function PopupNav({
         {showManageProvidersButton ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
+              <Button
                 onClick={onManageProviders}
-                className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground"
                 aria-label="Manage providers"
               >
                 <Blocks className="size-3.5" />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">Manage providers</TooltipContent>
           </Tooltip>

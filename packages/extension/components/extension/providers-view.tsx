@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Unplug, Plug } from "lucide-react"
 import { SearchInput } from "@/components/extension/search-input"
@@ -101,7 +102,7 @@ export function ProvidersView() {
                   </span>
                 </div>
 
-                <button
+                <Button
                   onClick={() => {
                     if (provider.connected) {
                       disconnectProviderMutation.mutate({ providerID: provider.id })
@@ -110,11 +111,9 @@ export function ProvidersView() {
                     openProviderAuthWindowMutation.mutate({ providerID: provider.id })
                   }}
                   disabled={controlsDisabled || connectPending}
-                  className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    provider.connected
-                      ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      : "bg-primary text-primary-foreground hover:bg-primary/90"
-                  }`}
+                  variant={provider.connected ? "destructiveGhost" : "default"}
+                  size="sm"
+                  className="gap-1.5 text-[10px] disabled:opacity-50"
                 >
                   {provider.connected ? (
                     <>
@@ -128,7 +127,7 @@ export function ProvidersView() {
                       {connectPending ? "Opening..." : "Connect"}
                     </>
                   )}
-                </button>
+                </Button>
               </div>
             )
           })}

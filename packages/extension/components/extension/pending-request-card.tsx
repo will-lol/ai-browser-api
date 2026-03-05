@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Check, X as XIcon } from "lucide-react"
 import type { RuntimePendingRequest } from "@llm-bridge/contracts"
 import { getProviderLabel } from "@/lib/provider-labels"
@@ -41,7 +42,7 @@ function FloatingPendingRequestCard({
             <span className="text-[9px] text-muted-foreground">
               {request.origin} wants access to
             </span>
-            <button
+            <Button
               onClick={() => {
                 if (onDismissRequest) {
                   onDismissRequest(request.id)
@@ -49,11 +50,13 @@ function FloatingPendingRequestCard({
                 onClose?.()
               }}
               disabled={actionsDisabled}
-              className="-mr-0.5 -mt-0.5 flex items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              variant="ghost"
+              size="icon-sm"
+              className="-mr-0.5 -mt-0.5 text-muted-foreground disabled:opacity-40"
               aria-label="Dismiss"
             >
               <XIcon className="size-3" />
-            </button>
+            </Button>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="font-mono text-[13px] font-semibold leading-none text-foreground">
@@ -100,7 +103,7 @@ function InlinePendingRequestCard({
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <button
+        <Button
           onClick={() => {
             decisionMutation.mutate({
               requestId: request.id,
@@ -108,12 +111,14 @@ function InlinePendingRequestCard({
             })
           }}
           disabled={controlsDisabled}
-          className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-success/10 hover:text-success disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          variant="successGhost"
+          size="icon"
+          className="disabled:opacity-40"
           aria-label={`Allow ${request.modelName}`}
         >
           <Check className="size-3.5" />
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={() => {
             decisionMutation.mutate({
               requestId: request.id,
@@ -121,11 +126,13 @@ function InlinePendingRequestCard({
             })
           }}
           disabled={controlsDisabled}
-          className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          variant="destructiveGhost"
+          size="icon"
+          className="disabled:opacity-40"
           aria-label={`Deny ${request.modelName}`}
         >
           <XIcon className="size-3.5" />
-        </button>
+        </Button>
       </div>
     </div>
   )

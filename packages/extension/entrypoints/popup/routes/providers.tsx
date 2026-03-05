@@ -1,6 +1,7 @@
 import { ArrowLeft } from "lucide-react"
 import { Outlet, createFileRoute, useRouter } from "@tanstack/react-router"
 import { PopupNav } from "@/components/extension/popup-nav"
+import { Button } from "@/components/ui/button"
 
 export const Route = createFileRoute("/providers")({
   staticData: {
@@ -18,15 +19,17 @@ function ProvidersRoute() {
       <PopupNav
         title={<span className="text-[13px] font-semibold text-foreground">{title}</span>}
         leftSlot={(
-          <button
+          <Button
             onClick={() => {
               void router.history.back()
             }}
-            className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground"
             aria-label="Back"
           >
             <ArrowLeft className="size-4" />
-          </button>
+          </Button>
         )}
       />
       <Outlet />
