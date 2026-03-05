@@ -1,16 +1,10 @@
 import {
   RuntimeRpcGroup,
-  RuntimeValidationError,
+  toRuntimeRpcError,
 } from "@llm-bridge/contracts"
 import { RuntimeApplication } from "@llm-bridge/runtime-core"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
-
-function toValidationError(error: unknown) {
-  return new RuntimeValidationError({
-    message: error instanceof Error ? error.message : String(error),
-  })
-}
 
 export const RuntimeRpcHandlersLive = RuntimeRpcGroup.toLayer(
   Effect.gen(function*() {
@@ -69,7 +63,7 @@ export const RuntimeRpcHandlersLive = RuntimeRpcGroup.toLayer(
               modelID: modelId,
               options,
             }),
-            (stream) => Stream.fromReadableStream(() => stream, toValidationError),
+            (stream) => Stream.fromReadableStream(() => stream, toRuntimeRpcError),
           ),
         ),
       abortModelCall: ({ requestId }) => app.abortModelCall(requestId),

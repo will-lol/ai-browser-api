@@ -1,16 +1,11 @@
 import {
-  AuthFlowExpiredError,
-  ModelNotFoundError,
   PAGE_BRIDGE_INIT_MESSAGE,
   PAGE_BRIDGE_PORT_CONTROL_MESSAGE,
   PAGE_BRIDGE_READY_EVENT,
-  PermissionDeniedError,
   PageBridgeRpcGroup,
-  ProviderNotConnectedError,
   RuntimeValidationError,
-  TransportProtocolError,
   isPageBridgePortControlMessage,
-  type RuntimeRpcError,
+  toRuntimeRpcError,
   type BridgeModelCallRequest,
   type PageBridgePortControlMessage,
 } from "@llm-bridge/contracts"
@@ -82,23 +77,6 @@ function summarizeValue(value: unknown) {
   }
 
   return { type: typeof value, value }
-}
-
-function toRuntimeRpcError(error: unknown): RuntimeRpcError {
-  if (
-    error instanceof PermissionDeniedError
-    || error instanceof ModelNotFoundError
-    || error instanceof ProviderNotConnectedError
-    || error instanceof AuthFlowExpiredError
-    || error instanceof TransportProtocolError
-    || error instanceof RuntimeValidationError
-  ) {
-    return error
-  }
-
-  return new RuntimeValidationError({
-    message: error instanceof Error ? error.message : String(error),
-  })
 }
 
 function fromPromise<A>(operation: string, run: () => Promise<A>) {

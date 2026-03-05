@@ -1,17 +1,13 @@
 import {
-  AuthFlowExpiredError,
-  ModelNotFoundError,
   PAGE_BRIDGE_INIT_MESSAGE,
   PAGE_BRIDGE_PORT_CONTROL_MESSAGE,
   PAGE_BRIDGE_READY_EVENT,
-  PermissionDeniedError,
   PageBridgeRpcGroup,
-  ProviderNotConnectedError,
   RuntimeValidationError,
-  TransportProtocolError,
   decodeRuntimeWireValue,
   decodeSupportedUrls,
   encodeRuntimeWireValue,
+  toRuntimeRpcError,
   type BridgePermissionRequest,
   type BridgeModelDescriptorResponse,
   type BridgeStateResponse,
@@ -50,8 +46,11 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import { makeResettableConnectionLifecycle } from "./bridge-connection-lifecycle";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const CONNECTION_INVALIDATED_MESSAGE =
+  "Bridge connection was destroyed while connecting";
 let nextBridgeConnectionId = 0;
 
 type PageBridgeClient = Effect.Effect.Success<
@@ -135,23 +134,6 @@ function createAbortError() {
   const error = new Error("The operation was aborted");
   error.name = "AbortError";
   return error;
-}
-
-function toRuntimeRpcError(error: unknown): RuntimeRpcError {
-  if (
-    error instanceof PermissionDeniedError ||
-    error instanceof ModelNotFoundError ||
-    error instanceof ProviderNotConnectedError ||
-    error instanceof AuthFlowExpiredError ||
-    error instanceof TransportProtocolError ||
-    error instanceof RuntimeValidationError
-  ) {
-    return error;
-  }
-
-  return new RuntimeValidationError({
-    message: error instanceof Error ? error.message : String(error),
-  });
 }
 
 function log(
@@ -953,6 +935,71 @@ function decodeStreamPart(part: RuntimeStreamPart): LanguageModelV3StreamPart {
   }
 }
 
+type CloseConnectionReason = "destroy" | "stale";
+
+function closeConnection(
+  connection: BridgeConnection,
+  options: {
+    reason: CloseConnectionReason;
+    debug: boolean;
+    logger: typeof console.info;
+  },
+): Effect.Effect<void, never> {
+  const { reason, debug, logger } = options;
+  const disconnectReason =
+    reason === "destroy" ? "client-destroy" : "stale-connection";
+
+  return Effect.tryPromise({
+    try: async () => {
+      log(debug, logger, "rpc.destroy.start", {
+        connectionId: connection.connectionId,
+        reason,
+      });
+
+      const disconnectMessage: PageBridgePortControlMessage = {
+        _tag: PAGE_BRIDGE_PORT_CONTROL_MESSAGE,
+        type: "disconnect",
+        reason: disconnectReason,
+        connectionId: connection.connectionId,
+      };
+
+      try {
+        connection.port.postMessage(disconnectMessage);
+        log(debug, logger, "rpc.control.disconnect.sent", {
+          connectionId: connection.connectionId,
+          reason,
+        });
+      } catch (error) {
+        log(debug, logger, "rpc.control.disconnect.failed", {
+          connectionId: connection.connectionId,
+          reason,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      try {
+        await Effect.runPromise(
+          Scope.close(connection.scope, Exit.succeed(undefined)),
+        );
+      } catch {
+        // ignored
+      }
+
+      try {
+        connection.port.close();
+      } catch {
+        // ignored
+      }
+
+      log(debug, logger, "rpc.destroyed", {
+        connectionId: connection.connectionId,
+        reason,
+      });
+    },
+    catch: () => undefined,
+  }).pipe(Effect.orElseSucceed(() => undefined));
+}
+
 function createConnection(
   options: BridgeClientOptions,
 ): Effect.Effect<BridgeConnection, RuntimeRpcError> {
@@ -963,118 +1010,149 @@ function createConnection(
 
   return Effect.tryPromise({
     try: async () => {
-      log(debug, logger, "rpc.connect.start", {
-        connectionId,
-        timeoutMs,
-        bridgeReady:
-          typeof document !== "undefined"
-            ? document.documentElement.dataset.llmBridgeReady
-            : undefined,
-      });
-      await waitForBridgeReady(timeoutMs);
-      log(debug, logger, "rpc.connect.ready", {
-        connectionId,
-      });
+      let scope: Scope.CloseableScope | null = null;
+      let port: MessagePort | null = null;
 
-      const scope = await Effect.runPromise(Scope.make());
-      const messageChannel = new MessageChannel();
-      const port = messageChannel.port1;
+      try {
+        log(debug, logger, "rpc.connect.start", {
+          connectionId,
+          timeoutMs,
+          bridgeReady:
+            typeof document !== "undefined"
+              ? document.documentElement.dataset.llmBridgeReady
+              : undefined,
+        });
+        await waitForBridgeReady(timeoutMs);
+        log(debug, logger, "rpc.connect.ready", {
+          connectionId,
+        });
 
-      const protocol = await Effect.runPromise(
-        RpcClient.Protocol.make((writeResponse) =>
-          Effect.gen(function* () {
-            const onMessage = (event: MessageEvent<FromServerEncoded>) => {
-              log(debug, logger, "rpc.port.inbound", {
-                connectionId,
-                message: summarizeRpcMessage(event.data),
-              });
-              void Effect.runPromise(writeResponse(event.data)).catch((error) => {
-                log(
-                  debug,
-                  logger,
-                  "rpc.writeError",
-                  {
-                    connectionId,
-                    message: error instanceof Error ? error.message : String(error),
-                    inbound: summarizeRpcMessage(event.data),
+        const runtimeScope = await Effect.runPromise(Scope.make());
+        scope = runtimeScope;
+
+        const messageChannel = new MessageChannel();
+        const runtimePort = messageChannel.port1;
+        port = runtimePort;
+
+        const protocol = await Effect.runPromise(
+          RpcClient.Protocol.make((writeResponse) =>
+            Effect.gen(function* () {
+              const onMessage = (event: MessageEvent<FromServerEncoded>) => {
+                log(debug, logger, "rpc.port.inbound", {
+                  connectionId,
+                  message: summarizeRpcMessage(event.data),
+                });
+                void Effect.runPromise(writeResponse(event.data)).catch(
+                  (error) => {
+                    log(
+                      debug,
+                      logger,
+                      "rpc.writeError",
+                      {
+                        connectionId,
+                        message:
+                          error instanceof Error ? error.message : String(error),
+                        inbound: summarizeRpcMessage(event.data),
+                      },
+                    );
                   },
                 );
-              });
-            };
+              };
 
-            const onMessageError = (event: MessageEvent<unknown>) => {
-              log(debug, logger, "rpc.messageError", {
-                connectionId,
-                data: summarizeRpcMessage(event.data),
-              });
-            };
+              const onMessageError = (event: MessageEvent<unknown>) => {
+                log(debug, logger, "rpc.messageError", {
+                  connectionId,
+                  data: summarizeRpcMessage(event.data),
+                });
+              };
 
-            port.addEventListener("message", onMessage);
-            port.addEventListener("messageerror", onMessageError);
-            port.start();
+              runtimePort.addEventListener("message", onMessage);
+              runtimePort.addEventListener("messageerror", onMessageError);
+              runtimePort.start();
 
-            yield* Effect.addFinalizer(() =>
-              Effect.sync(() => {
-                port.removeEventListener("message", onMessage);
-                port.removeEventListener("messageerror", onMessageError);
-              }),
-            );
-
-            return {
-              send: (message: FromClientEncoded) =>
-                Effect.try({
-                  try: () => {
-                    log(debug, logger, "rpc.port.outbound", {
-                      connectionId,
-                      message: summarizeRpcMessage(message),
-                    });
-                    port.postMessage(message);
-                  },
-                  catch: (cause) =>
-                    new RpcClientError({
-                      reason: "Protocol",
-                      message: "Failed to post page bridge RPC message",
-                      cause,
-                    }),
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  runtimePort.removeEventListener("message", onMessage);
+                  runtimePort.removeEventListener("messageerror", onMessageError);
                 }),
-              supportsAck: true,
-              supportsTransferables: false,
-            } as const;
-          }),
-        ).pipe(Scope.extend(scope)),
-      );
+              );
 
-      const client = await Effect.runPromise(
-        RpcClient.make(PageBridgeRpcGroup, {
-          disableTracing: true,
-        }).pipe(
-          Effect.provideService(RpcClient.Protocol, protocol),
-          Scope.extend(scope),
-        ),
-      );
+              return {
+                send: (message: FromClientEncoded) =>
+                  Effect.try({
+                    try: () => {
+                      log(debug, logger, "rpc.port.outbound", {
+                        connectionId,
+                        message: summarizeRpcMessage(message),
+                      });
+                      runtimePort.postMessage(message);
+                    },
+                    catch: (cause) =>
+                      new RpcClientError({
+                        reason: "Protocol",
+                        message: "Failed to post page bridge RPC message",
+                        cause,
+                      }),
+                  }),
+                supportsAck: true,
+                supportsTransferables: false,
+              } as const;
+            }),
+          ).pipe(Scope.extend(runtimeScope)),
+        );
 
-      log(debug, logger, "rpc.handshake.postMessage", {
-        connectionId,
-        type: PAGE_BRIDGE_INIT_MESSAGE,
-      });
-      window.postMessage({ type: PAGE_BRIDGE_INIT_MESSAGE }, "*", [
-        messageChannel.port2,
-      ]);
+        const client = await Effect.runPromise(
+          RpcClient.make(PageBridgeRpcGroup, {
+            disableTracing: true,
+          }).pipe(
+            Effect.provideService(RpcClient.Protocol, protocol),
+            Scope.extend(runtimeScope),
+          ),
+        );
 
-      log(debug, logger, "rpc.connected", {
-        connectionId,
-        bridgeReady:
-          typeof document !== "undefined"
-            ? document.documentElement.dataset.llmBridgeReady
-            : undefined,
-      });
+        log(debug, logger, "rpc.handshake.postMessage", {
+          connectionId,
+          type: PAGE_BRIDGE_INIT_MESSAGE,
+        });
+        window.postMessage({ type: PAGE_BRIDGE_INIT_MESSAGE }, "*", [
+          messageChannel.port2,
+        ]);
 
-      return {
-        connectionId,
-        scope,
-        port,
-        client,
-      };
+        log(debug, logger, "rpc.connected", {
+          connectionId,
+          bridgeReady:
+            typeof document !== "undefined"
+              ? document.documentElement.dataset.llmBridgeReady
+              : undefined,
+        });
+
+        return {
+          connectionId,
+          scope: runtimeScope,
+          port: runtimePort,
+          client,
+        };
+      } catch (error) {
+        if (scope) {
+          try {
+            await Effect.runPromise(
+              Scope.close(scope, Exit.succeed(undefined)),
+            );
+          } catch {
+            // ignored
+          }
+        }
+
+        if (port) {
+          try {
+            port.close();
+          } catch {
+            // ignored
+          }
+        }
+
+        throw error;
+      }
     },
     catch: toRuntimeRpcError,
   });
@@ -1092,32 +1170,36 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
     BridgeClient,
     Effect.gen(function* () {
       let sequence = 0;
-      let connection: BridgeConnection | null = null;
-      let connectionPromise: Promise<BridgeConnection> | null = null;
-
-      const ensureConnection = Effect.tryPromise({
-        try: async () => {
-          if (connection) {
+      const lifecycle = yield* makeResettableConnectionLifecycle<
+        BridgeConnection,
+        RuntimeRpcError
+      >({
+        create: createConnection(options),
+        close: (connection, reason) =>
+          closeConnection(connection, {
+            reason,
+            debug,
+            logger,
+          }),
+        invalidatedError: () =>
+          new RuntimeValidationError({
+            message: CONNECTION_INVALIDATED_MESSAGE,
+          }),
+        onCreate: Effect.sync(() => {
+          log(debug, logger, "rpc.connection.create");
+        }),
+        onAwait: Effect.sync(() => {
+          log(debug, logger, "rpc.connection.await");
+        }),
+        onReuse: (current) =>
+          Effect.sync(() => {
             log(debug, logger, "rpc.connection.reuse", {
-              connectionId: connection.connectionId,
+              connectionId: current.connectionId,
             });
-            return connection;
-          }
-          if (!connectionPromise) {
-            log(debug, logger, "rpc.connection.create");
-            connectionPromise = Effect.runPromise(
-              createConnection(options),
-            ).then((value) => {
-              connection = value;
-              return value;
-            });
-          } else {
-            log(debug, logger, "rpc.connection.await");
-          }
-          return connectionPromise;
-        },
-        catch: toRuntimeRpcError,
+          }),
       });
+
+      const ensureConnection = lifecycle.ensure;
 
       const normalizeRpcError = <A, R>(
         effect: Effect.Effect<A, RuntimeRpcError | RpcClientError, R>,
@@ -1137,56 +1219,9 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
           Effect.asVoid,
         );
 
-      const destroy = Effect.tryPromise({
-        try: async () => {
-          connectionPromise = null;
-          if (!connection) return;
-
-          const current = connection;
-          connection = null;
-          log(debug, logger, "rpc.destroy.start", {
-            connectionId: current.connectionId,
-          });
-
-          const disconnectMessage: PageBridgePortControlMessage = {
-            _tag: PAGE_BRIDGE_PORT_CONTROL_MESSAGE,
-            type: "disconnect",
-            reason: "client-destroy",
-            connectionId: current.connectionId,
-          };
-
-          try {
-            current.port.postMessage(disconnectMessage);
-            log(debug, logger, "rpc.control.disconnect.sent", {
-              connectionId: current.connectionId,
-            });
-          } catch (error) {
-            log(debug, logger, "rpc.control.disconnect.failed", {
-              connectionId: current.connectionId,
-              message: error instanceof Error ? error.message : String(error),
-            });
-          }
-
-          try {
-            await Effect.runPromise(
-              Scope.close(current.scope, Exit.succeed(undefined)),
-            );
-          } catch {
-            // ignored
-          }
-
-          try {
-            current.port.close();
-          } catch {
-            // ignored
-          }
-
-          log(debug, logger, "rpc.destroyed", {
-            connectionId: current.connectionId,
-          });
-        },
-        catch: toRuntimeRpcError,
-      }).pipe(Effect.catchAll(() => Effect.void));
+      const destroy = lifecycle.destroy.pipe(
+        Effect.catchAll(() => Effect.void),
+      );
 
       yield* Effect.addFinalizer(() => destroy);
 

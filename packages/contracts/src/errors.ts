@@ -51,3 +51,22 @@ export const RuntimeRpcErrorSchema = Schema.Union(
 )
 
 export type RuntimeRpcError = Schema.Schema.Type<typeof RuntimeRpcErrorSchema>
+
+export function isRuntimeRpcError(error: unknown): error is RuntimeRpcError {
+  return (
+    error instanceof PermissionDeniedError
+    || error instanceof ModelNotFoundError
+    || error instanceof ProviderNotConnectedError
+    || error instanceof AuthFlowExpiredError
+    || error instanceof TransportProtocolError
+    || error instanceof RuntimeValidationError
+  )
+}
+
+export function toRuntimeRpcError(error: unknown): RuntimeRpcError {
+  if (isRuntimeRpcError(error)) return error
+
+  return new RuntimeValidationError({
+    message: error instanceof Error ? error.message : String(error),
+  })
+}

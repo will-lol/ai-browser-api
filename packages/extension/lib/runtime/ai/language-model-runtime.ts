@@ -20,6 +20,11 @@ import * as perplexityModule from "@ai-sdk/perplexity"
 import * as togetherAIModule from "@ai-sdk/togetherai"
 import * as vercelModule from "@ai-sdk/vercel"
 import * as xaiModule from "@ai-sdk/xai"
+import {
+  ModelNotFoundError,
+  ProviderNotConnectedError,
+  RuntimeValidationError,
+} from "@llm-bridge/contracts"
 import * as openRouterModule from "@openrouter/ai-sdk-provider"
 import { getAuth } from "@/lib/runtime/auth-store"
 import type { AuthRecord } from "@/lib/runtime/auth-store"
@@ -309,7 +314,11 @@ function toCallOptions(
 
 async function resolveModelRuntimeContext(modelID: string): Promise<ModelRuntimeContext> {
   const parsed = parseProviderModel(modelID)
-  if (!parsed.providerID || !parsed.modelID) throw new Error(`Invalid model: ${modelID}`)
+  if (!parsed.providerID || !parsed.modelID) {
+    throw new RuntimeValidationError({
+      message: `Invalid model: ${modelID}`,
+    })
+  }
 
   const [provider, model, auth] = await Promise.all([
     getProvider(parsed.providerID),
@@ -318,11 +327,17 @@ async function resolveModelRuntimeContext(modelID: string): Promise<ModelRuntime
   ])
 
   if (!provider || !model) {
-    throw new Error(`Model not found: ${modelID}`)
+    throw new ModelNotFoundError({
+      modelId: modelID,
+      message: `Model not found: ${modelID}`,
+    })
   }
 
   if (!auth) {
-    throw new Error(`Provider ${parsed.providerID} is not connected`)
+    throw new ProviderNotConnectedError({
+      providerID: parsed.providerID,
+      message: `Provider ${parsed.providerID} is not connected`,
+    })
   }
 
   return {

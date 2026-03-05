@@ -3,10 +3,12 @@ import {
   encodeRuntimeWireValue,
   encodeSupportedUrls,
   RuntimeValidationError,
+  toRuntimeRpcError,
   type JsonValue,
   type RuntimeGenerateResponse,
   type RuntimeModelCallOptions,
   type RuntimePromptMessage,
+  type RuntimeRpcError,
   type RuntimeStreamPart,
   type RuntimeTool,
   type RuntimeUsage,
@@ -83,19 +85,10 @@ type ProviderAssistantPart = Extract<ProviderPromptMessage, { role: "assistant" 
 type ProviderToolPart = Extract<ProviderPromptMessage, { role: "tool" }>["content"][number]
 type ProviderToolResultOutput = Extract<ProviderAssistantPart, { type: "tool-result" }>["output"]
 
-function unknownToValidationError(error: unknown) {
-  if (error instanceof RuntimeValidationError) return error
-
-  const message = error instanceof Error ? error.message : String(error)
-  return new RuntimeValidationError({
-    message,
-  })
-}
-
-function toEffect<T>(run: () => Promise<T>): Effect.Effect<T, RuntimeValidationError> {
+function toEffect<T>(run: () => Promise<T>): Effect.Effect<T, RuntimeRpcError> {
   return Effect.tryPromise({
     try: run,
-    catch: (error) => unknownToValidationError(error),
+    catch: toRuntimeRpcError,
   })
 }
 

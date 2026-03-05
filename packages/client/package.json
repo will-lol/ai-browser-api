@@ -27,6 +27,7 @@
     "effect": "^3.18.4"
   },
   "devDependencies": {
+    "@types/node": "^22.19.13",
     "tsdown": "^0.20.3",
     "typescript": "5.9.3"
   }
