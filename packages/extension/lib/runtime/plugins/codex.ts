@@ -3,7 +3,6 @@ import { setAuth } from "@/lib/runtime/auth-store"
 import type { AuthRecord } from "@/lib/runtime/auth-store"
 import type { PluginAuthorizeContext, RuntimePlugin } from "@/lib/runtime/plugin-manager"
 import {
-  buildExtensionRedirectPath,
   generatePKCE,
   generateState,
   sleep,
@@ -13,6 +12,9 @@ import type { ProviderInfo, ProviderModelInfo } from "@/lib/runtime/provider-reg
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const ISSUER = "https://auth.openai.com"
 const CODEX_API_BASE = "https://chatgpt.com/backend-api/codex"
+const CODEX_REDIRECT_URI = "http://localhost:1455/auth/callback"
+const CODEX_REDIRECT_URL_PATTERN = `${CODEX_REDIRECT_URI}*`
+const CODEX_CALLBACK_TIMEOUT_MS = 90_000
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3_000
 
 type TokenResponse = {
@@ -22,10 +24,17 @@ type TokenResponse = {
   expires_in?: number
 }
 
+type WebRequestOnBeforeRequest = NonNullable<NonNullable<typeof browser.webRequest>["onBeforeRequest"]>
+
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
     throw new Error("Authentication canceled")
   }
+}
+
+function toErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  return String(error)
 }
 
 function decodeJwtPayload(token: string) {
@@ -81,6 +90,103 @@ function buildCodexDeviceInstruction(input: {
   }
 }
 
+function buildCodexBrowserInstruction(input: {
+  url: string
+  autoOpened: boolean
+}) {
+  return {
+    kind: "notice" as const,
+    title: "Complete OpenAI sign in",
+    message: input.autoOpened
+      ? "Finish the sign-in flow in the opened browser tab. We'll continue automatically."
+      : "Open the sign-in URL to continue. We'll continue automatically after the callback is captured.",
+    url: input.url,
+    autoOpened: input.autoOpened,
+  }
+}
+
+function buildCodexAuthorizationURL(input: {
+  codeChallenge: string
+  state: string
+}) {
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    redirect_uri: CODEX_REDIRECT_URI,
+    scope: "openid profile email offline_access",
+    code_challenge: input.codeChallenge,
+    code_challenge_method: "S256",
+    id_token_add_organizations: "true",
+    codex_cli_simplified_flow: "true",
+    state: input.state,
+    originator: "codex_cli_rs",
+  })
+  return `${ISSUER}/oauth/authorize?${params.toString()}`
+}
+
+function isCodexOAuthCallbackURL(url: string) {
+  return url.startsWith(CODEX_REDIRECT_URI)
+}
+
+async function waitForCodexOAuthCallback(
+  signal?: AbortSignal,
+  onBeforeRequest: WebRequestOnBeforeRequest | undefined = browser?.webRequest?.onBeforeRequest,
+) {
+  if (!onBeforeRequest) {
+    throw new Error(
+      "Codex browser OAuth is unavailable: webRequest callback interception is not supported in this browser. Use ChatGPT Pro/Plus (headless) device auth instead.",
+    )
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    let settled = false
+    const timeoutId = setTimeout(() => {
+      finalize(() => reject(new Error("Timed out waiting for Codex OAuth callback on http://localhost:1455/auth/callback.")))
+    }, CODEX_CALLBACK_TIMEOUT_MS)
+
+    const listener: Parameters<WebRequestOnBeforeRequest["addListener"]>[0] = (details) => {
+      if (details.type !== "main_frame") return undefined
+      if (!isCodexOAuthCallbackURL(details.url)) return undefined
+      finalize(() => resolve(details.url))
+      return undefined
+    }
+
+    const onAbort = () => {
+      finalize(() => reject(new Error("Authentication canceled")))
+    }
+
+    const finalize = (action: () => void) => {
+      if (settled) return
+      settled = true
+
+      clearTimeout(timeoutId)
+      try {
+        onBeforeRequest.removeListener(listener)
+      } catch {
+        // Ignore teardown errors while auth is ending.
+      }
+      signal?.removeEventListener("abort", onAbort)
+      action()
+    }
+
+    try {
+      onBeforeRequest.addListener(listener, {
+        urls: [CODEX_REDIRECT_URL_PATTERN],
+        types: ["main_frame"],
+      })
+    } catch (error) {
+      finalize(() => reject(new Error(`Failed to register Codex OAuth callback listener: ${toErrorMessage(error)}`)))
+      return
+    }
+
+    if (signal?.aborted) {
+      onAbort()
+      return
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
 async function exchangeCodeForTokens(code: string, redirectUri: string, verifier: string) {
   const response = await fetch(`${ISSUER}/oauth/token`, {
     method: "POST",
@@ -126,37 +232,53 @@ async function refreshAccessToken(refreshToken: string) {
 }
 
 async function authorizeBrowser(input: PluginAuthorizeContext) {
-  const redirectUri = input.oauth.getRedirectURL(
-    buildExtensionRedirectPath(input.providerID, "oauth-browser"),
-  )
+  throwIfAborted(input.signal)
   const pkce = await generatePKCE()
   const state = generateState()
-
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: CLIENT_ID,
-    redirect_uri: redirectUri,
-    scope: "openid profile email offline_access",
-    code_challenge: pkce.challenge,
-    code_challenge_method: "S256",
-    id_token_add_organizations: "true",
-    codex_cli_simplified_flow: "true",
+  const authorizationURL = buildCodexAuthorizationURL({
+    codeChallenge: pkce.challenge,
     state,
-    originator: "llm-bridge",
   })
 
-  const callbackUrl = await input.oauth.launchWebAuthFlow(`${ISSUER}/oauth/authorize?${params.toString()}`)
+  let authTabID: number | undefined
+  let autoOpened = false
+  await browser.tabs.create({
+    url: authorizationURL,
+    active: true,
+  }).then((tab) => {
+    authTabID = tab.id
+    autoOpened = true
+  }).catch(() => {
+    // Surface the auth URL in popup instructions when tab opening fails.
+  })
+
+  await input.authFlow.publish(buildCodexBrowserInstruction({
+    url: authorizationURL,
+    autoOpened,
+  }))
+
+  let callbackUrl = ""
+  try {
+    callbackUrl = await waitForCodexOAuthCallback(input.signal)
+  } finally {
+    if (typeof authTabID === "number") {
+      await browser.tabs.remove(authTabID).catch(() => {
+        // Ignore tab cleanup errors once callback handling has ended.
+      })
+    }
+  }
+
   const parsed = input.oauth.parseCallback(callbackUrl)
 
   if (parsed.error) {
     throw new Error(`Codex OAuth failed: ${parsed.errorDescription ?? parsed.error}`)
   }
   if (!parsed.code) throw new Error("Missing authorization code")
-  if (parsed.state && parsed.state !== state) {
+  if (parsed.state !== state) {
     throw new Error("OAuth state mismatch")
   }
 
-  const tokens = await exchangeCodeForTokens(parsed.code, redirectUri, pkce.verifier)
+  const tokens = await exchangeCodeForTokens(parsed.code, CODEX_REDIRECT_URI, pkce.verifier)
   const accountId = extractAccountId(tokens)
 
   return {
@@ -374,6 +496,16 @@ function isCodexOAuth(auth?: AuthRecord): auth is Extract<AuthRecord, { type: "o
   return auth?.type === "oauth" && auth.metadata?.authMode === "codex_oauth"
 }
 
+function buildCodexChatHeaders(headers: Record<string, string>, sessionID: string): Record<string, string> {
+  return {
+    ...headers,
+    originator: "codex_cli_rs",
+    "OpenAI-Beta": "responses=experimental",
+    session_id: sessionID,
+    "User-Agent": "llm-bridge",
+  }
+}
+
 export const codexAuthPlugin: RuntimePlugin = {
   id: "builtin-codex-auth",
   name: "Builtin Codex Auth",
@@ -432,7 +564,7 @@ export const codexAuthPlugin: RuntimePlugin = {
             apiKey: access,
             authType: "bearer",
             headers: {
-              ...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
+              ...(accountId ? { "chatgpt-account-id": accountId } : {}),
             },
           },
         }
@@ -446,15 +578,10 @@ export const codexAuthPlugin: RuntimePlugin = {
     },
     chat: {
       async headers(ctx, headers) {
-        if (ctx.providerID !== "openai") return undefined
+        if (ctx.providerID !== "openai" || !isCodexOAuth(ctx.auth)) return undefined
         return {
           strategy: "merge",
-          value: {
-            ...headers,
-            originator: "llm-bridge",
-            session_id: ctx.sessionID,
-            "User-Agent": "llm-bridge",
-          },
+          value: buildCodexChatHeaders(headers, ctx.sessionID),
         }
       },
     },
@@ -462,5 +589,10 @@ export const codexAuthPlugin: RuntimePlugin = {
 }
 
 export const __codexAuthInternals = {
+  buildCodexAuthorizationURL,
+  buildCodexBrowserInstruction,
+  buildCodexChatHeaders,
   buildCodexDeviceInstruction,
+  isCodexOAuthCallbackURL,
+  waitForCodexOAuthCallback,
 }
