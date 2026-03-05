@@ -648,16 +648,12 @@ export const codexAuthPlugin: RuntimePlugin = {
         let access = auth.access;
         let refresh = auth.refresh;
         let expiresAt = auth.expiresAt;
-        const accountId = auth.accountId ?? auth.metadata?.accountId;
-        if (!accountId) {
-          console.warn(
-            "[builtin-codex-auth] oauth accountId is missing; Codex requests may fail until token claims include chatgpt_account_id.",
-          );
-        }
+        let effectiveAccountId = auth.accountId ?? auth.metadata?.accountId;
 
         if (refresh && (!expiresAt || expiresAt <= Date.now() + 60_000)) {
           const refreshed = await refreshAccessToken(refresh);
-          const nextAccountId = extractAccountId(refreshed) ?? accountId;
+          effectiveAccountId =
+            extractAccountId(refreshed) ?? effectiveAccountId;
           access = refreshed.access_token;
           refresh = refreshed.refresh_token;
           expiresAt = Date.now() + (refreshed.expires_in ?? 3600) * 1000;
@@ -667,13 +663,21 @@ export const codexAuthPlugin: RuntimePlugin = {
             access,
             refresh,
             expiresAt,
-            accountId: nextAccountId,
+            accountId: effectiveAccountId,
             metadata: {
               ...(auth.metadata ?? {}),
               authMode: "codex_oauth",
-              ...(nextAccountId ? { accountId: nextAccountId } : {}),
+              ...(effectiveAccountId
+                ? { accountId: effectiveAccountId }
+                : {}),
             },
           });
+        }
+
+        if (!effectiveAccountId) {
+          console.warn(
+            "[builtin-codex-auth] oauth accountId is missing; Codex requests may fail until token claims include chatgpt_account_id.",
+          );
         }
 
         return {
@@ -683,7 +687,9 @@ export const codexAuthPlugin: RuntimePlugin = {
             authType: "bearer",
             fetch: createCodexDebugFetch(),
             headers: {
-              ...(accountId ? { "chatgpt-account-id": accountId } : {}),
+              ...(effectiveAccountId
+                ? { "chatgpt-account-id": effectiveAccountId }
+                : {}),
             },
           },
         };
