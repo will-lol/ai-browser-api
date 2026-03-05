@@ -4,6 +4,7 @@ import {
   createGeminiCodeAssistFetch,
   GEMINI_CODE_ASSIST_HEADERS,
 } from "@/lib/runtime/plugins/gemini-code-assist-transport";
+import { waitForOAuthCallback } from "@/lib/runtime/plugins/oauth-browser-callback-util";
 import { generatePKCE, generateState } from "@/lib/runtime/plugins/oauth-util";
 import type { RuntimePlugin } from "@/lib/runtime/plugin-manager";
 
@@ -221,79 +222,27 @@ function buildPersistedMetadata(input: {
 }
 
 async function waitForGeminiOAuthCallback(signal?: AbortSignal) {
-  if (!browser.webRequest?.onBeforeRequest) {
-    throw new Error(
+  return await waitForOAuthCallback({
+    signal,
+    urlPattern: GEMINI_REDIRECT_URL_PATTERN,
+    matchesUrl: (url) => url.startsWith(GEMINI_REDIRECT_URI),
+    timeoutMs: GEMINI_CALLBACK_TIMEOUT_MS,
+    unsupportedErrorMessage:
       "Gemini OAuth callback interception is unavailable: webRequest is not supported in this browser.",
-    );
-  }
-
-  return new Promise<string>((resolve, reject) => {
-    let settled = false;
-    const timeoutId = setTimeout(() => {
-      finalize(() =>
-        reject(
-          new Error(
-            "Timed out waiting for Gemini OAuth callback on http://localhost:8085/oauth2callback.",
-          ),
-        ),
-      );
-    }, GEMINI_CALLBACK_TIMEOUT_MS);
-
-    const listener: Parameters<
-      typeof browser.webRequest.onBeforeRequest.addListener
-    >[0] = (details) => {
-      if (details.type !== "main_frame") return undefined;
-      if (!details.url.startsWith(GEMINI_REDIRECT_URI)) return undefined;
-
-      console.info("[builtin-gemini-auth] oauth callback intercepted", {
-        hasQuery: details.url.includes("?"),
-      });
-      finalize(() => resolve(details.url));
-      return undefined;
-    };
-
-    const onAbort = () => {
-      finalize(() => reject(new Error("Authentication canceled")));
-    };
-
-    const finalize = (action: () => void) => {
-      if (settled) return;
-      settled = true;
-
-      clearTimeout(timeoutId);
-      try {
-        browser.webRequest.onBeforeRequest.removeListener(listener);
-      } catch {
-        // Ignore listener teardown errors while auth is ending.
-      }
-      signal?.removeEventListener("abort", onAbort);
-      action();
-    };
-
-    try {
-      browser.webRequest.onBeforeRequest.addListener(listener, {
-        urls: [GEMINI_REDIRECT_URL_PATTERN],
-        types: ["main_frame"],
-      });
+    timeoutErrorMessage:
+      "Timed out waiting for Gemini OAuth callback on http://localhost:8085/oauth2callback.",
+    registerListenerErrorPrefix:
+      "Failed to register Gemini OAuth callback listener",
+    onListenerArmed: () => {
       console.info("[builtin-gemini-auth] oauth callback listener armed", {
         pattern: GEMINI_REDIRECT_URL_PATTERN,
       });
-    } catch (error) {
-      finalize(() =>
-        reject(
-          new Error(
-            `Failed to register Gemini OAuth callback listener: ${toErrorMessage(error)}`,
-          ),
-        ),
-      );
-      return;
-    }
-
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
-    signal?.addEventListener("abort", onAbort, { once: true });
+    },
+    onIntercepted: (url) => {
+      console.info("[builtin-gemini-auth] oauth callback intercepted", {
+        hasQuery: url.includes("?"),
+      });
+    },
   });
 }
 

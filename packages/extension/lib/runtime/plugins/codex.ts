@@ -7,6 +7,10 @@ import {
   generateState,
   sleep,
 } from "@/lib/runtime/plugins/oauth-util"
+import {
+  type OAuthWebRequestOnBeforeRequest,
+  waitForOAuthCallback,
+} from "@/lib/runtime/plugins/oauth-browser-callback-util"
 import type { ProviderInfo, ProviderModelInfo } from "@/lib/runtime/provider-registry"
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -24,17 +28,10 @@ type TokenResponse = {
   expires_in?: number
 }
 
-type WebRequestOnBeforeRequest = NonNullable<NonNullable<typeof browser.webRequest>["onBeforeRequest"]>
-
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
     throw new Error("Authentication canceled")
   }
-}
-
-function toErrorMessage(error: unknown) {
-  if (error instanceof Error && error.message) return error.message
-  return String(error)
 }
 
 function decodeJwtPayload(token: string) {
@@ -130,60 +127,19 @@ function isCodexOAuthCallbackURL(url: string) {
 
 async function waitForCodexOAuthCallback(
   signal?: AbortSignal,
-  onBeforeRequest: WebRequestOnBeforeRequest | undefined = browser?.webRequest?.onBeforeRequest,
+  onBeforeRequest: OAuthWebRequestOnBeforeRequest | undefined = browser?.webRequest?.onBeforeRequest,
 ) {
-  if (!onBeforeRequest) {
-    throw new Error(
+  return await waitForOAuthCallback({
+    signal,
+    onBeforeRequest,
+    urlPattern: CODEX_REDIRECT_URL_PATTERN,
+    matchesUrl: isCodexOAuthCallbackURL,
+    timeoutMs: CODEX_CALLBACK_TIMEOUT_MS,
+    unsupportedErrorMessage:
       "Codex browser OAuth is unavailable: webRequest callback interception is not supported in this browser. Use ChatGPT Pro/Plus (headless) device auth instead.",
-    )
-  }
-
-  return new Promise<string>((resolve, reject) => {
-    let settled = false
-    const timeoutId = setTimeout(() => {
-      finalize(() => reject(new Error("Timed out waiting for Codex OAuth callback on http://localhost:1455/auth/callback.")))
-    }, CODEX_CALLBACK_TIMEOUT_MS)
-
-    const listener: Parameters<WebRequestOnBeforeRequest["addListener"]>[0] = (details) => {
-      if (details.type !== "main_frame") return undefined
-      if (!isCodexOAuthCallbackURL(details.url)) return undefined
-      finalize(() => resolve(details.url))
-      return undefined
-    }
-
-    const onAbort = () => {
-      finalize(() => reject(new Error("Authentication canceled")))
-    }
-
-    const finalize = (action: () => void) => {
-      if (settled) return
-      settled = true
-
-      clearTimeout(timeoutId)
-      try {
-        onBeforeRequest.removeListener(listener)
-      } catch {
-        // Ignore teardown errors while auth is ending.
-      }
-      signal?.removeEventListener("abort", onAbort)
-      action()
-    }
-
-    try {
-      onBeforeRequest.addListener(listener, {
-        urls: [CODEX_REDIRECT_URL_PATTERN],
-        types: ["main_frame"],
-      })
-    } catch (error) {
-      finalize(() => reject(new Error(`Failed to register Codex OAuth callback listener: ${toErrorMessage(error)}`)))
-      return
-    }
-
-    if (signal?.aborted) {
-      onAbort()
-      return
-    }
-    signal?.addEventListener("abort", onAbort, { once: true })
+    timeoutErrorMessage:
+      "Timed out waiting for Codex OAuth callback on http://localhost:1455/auth/callback.",
+    registerListenerErrorPrefix: "Failed to register Codex OAuth callback listener",
   })
 }
 
