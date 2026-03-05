@@ -9,6 +9,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react"
 
@@ -38,6 +39,8 @@ export function App() {
   const [result, setResult] = useState("")
   const [busy, setBusy] = useState<"generate" | "stream" | null>(null)
   const [debugLines, setDebugLines] = useState<ReadonlyArray<string>>([])
+  const refreshInFlightRef = useRef<Promise<void> | null>(null)
+  const startupRefreshTriggeredRef = useRef(false)
 
   const pushLog = useCallback((event: string, meta?: unknown) => {
     const line = `[example-app] ${new Date().toISOString()} ${event} ${meta === undefined ? "" : stringify(meta)}`.trim()
@@ -61,37 +64,50 @@ export function App() {
   )
 
   const refreshModels = useCallback(async () => {
+    if (refreshInFlightRef.current) {
+      pushLog("refreshModels.coalesced")
+      return refreshInFlightRef.current
+    }
+
     setStatus("Loading models...")
 
-    try {
-      const googleModels = await runBridge(
-        Effect.gen(function*() {
-          const client = yield* BridgeClient
-          const allModels = yield* client.listModels
-          return allModels.filter((model) => model.provider === "google")
-        }),
-      )
+    const refreshTask = (async () => {
+      try {
+        const googleModels = await runBridge(
+          Effect.gen(function*() {
+            const client = yield* BridgeClient
+            const allModels = yield* client.listModels
+            return allModels.filter((model) => model.provider === "google")
+          }),
+        )
 
-      setModels(googleModels)
+        setModels(googleModels)
 
-      if (googleModels.length === 0) {
-        setSelectedModelId("")
-        setStatus("No connected Google models.")
-        return
+        if (googleModels.length === 0) {
+          setSelectedModelId("")
+          setStatus("No connected Google models.")
+          return
+        }
+
+        const preferred = googleModels.find((model) => model.id === DEFAULT_MODEL_ID)
+        setSelectedModelId((current) => {
+          if (googleModels.some((model) => model.id === current)) return current
+          return preferred?.id ?? googleModels[0]?.id ?? ""
+        })
+
+        setStatus("Ready")
+        pushLog("refreshModels.success", { count: googleModels.length })
+      } catch (error) {
+        pushError("refreshModels.failed", error)
+        setStatus("Failed to load models")
       }
+    })()
 
-      const preferred = googleModels.find((model) => model.id === DEFAULT_MODEL_ID)
-      setSelectedModelId((current) => {
-        if (googleModels.some((model) => model.id === current)) return current
-        return preferred?.id ?? googleModels[0]?.id ?? ""
-      })
+    refreshInFlightRef.current = refreshTask.finally(() => {
+      refreshInFlightRef.current = null
+    })
 
-      setStatus("Ready")
-      pushLog("refreshModels.success", { count: googleModels.length })
-    } catch (error) {
-      pushError("refreshModels.failed", error)
-      setStatus("Failed to load models")
-    }
+    return refreshInFlightRef.current
   }, [pushError, pushLog, runBridge])
 
   const loadModel = useCallback(
@@ -180,8 +196,14 @@ export function App() {
   }, [loadModel, prompt, pushError, pushLog, selectedModelId])
 
   useEffect(() => {
+    if (startupRefreshTriggeredRef.current) {
+      pushLog("refreshModels.startup.skipped")
+      return
+    }
+
+    startupRefreshTriggeredRef.current = true
     void refreshModels()
-  }, [refreshModels])
+  }, [pushLog, refreshModels])
 
   return (
     <main className="container">

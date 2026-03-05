@@ -3,23 +3,25 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "bun run --filter @llm-bridge/client build",
     "dev": "vite --host 127.0.0.1 --port 4174",
-    "typecheck": "node ../../node_modules/.bun/typescript@*/node_modules/typescript/bin/tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "build": "vite build",
+    "lint": "eslint .",
     "preview": "vite preview --host 127.0.0.1 --port 4174"
   },
   "dependencies": {
-    "effect": "^3.18.4",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "ai": "^6.0.105",
+    "effect": "^3.19.19",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "ai": "^6.0.112",
     "@llm-bridge/client": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
-    "@types/node": "^22.19.12",
+    "@types/node": "^22.19.13",
     "typescript": "5.9.3",
     "vite": "^7.3.1"
   }

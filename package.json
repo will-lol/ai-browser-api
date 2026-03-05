@@ -5,11 +5,17 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "bun run --filter @llm-bridge/extension dev",
-    "build": "bun run --filter @llm-bridge/extension build",
+    "dev": "bun run --workspaces --parallel dev",
+    "build": "bun run --filter @llm-bridge/contracts build && bun run --filter @llm-bridge/runtime-core build && bun run --filter @llm-bridge/client build && bun run --filter @llm-bridge/extension build && bun run --filter @llm-bridge/example-app build",
     "zip": "bun run --filter @llm-bridge/extension zip",
-    "build:client": "bun run --filter @llm-bridge/client build",
-    "typecheck": "bun run --filter @llm-bridge/client typecheck",
-    "lint": "bun run --filter @llm-bridge/extension lint && bun run --filter @llm-bridge/client typecheck"
+    "typecheck": "bun run --filter @llm-bridge/client build && bun run --workspaces --sequential typecheck",
+    "lint": "bun run --workspaces --parallel lint"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "typescript-eslint": "^8.56.1"
   }
 }

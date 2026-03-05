@@ -15,7 +15,9 @@
     "src"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsdown --watch",
+    "build": "tsdown",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -24,6 +26,7 @@
     "effect": "^3.18.4"
   },
   "devDependencies": {
+    "tsdown": "^0.20.3",
     "typescript": "5.9.3"
   }
 }
