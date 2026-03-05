@@ -86,6 +86,7 @@
         "@hookform/resolvers": "^5.2.2",
         "@llm-bridge/contracts": "workspace:*",
         "@llm-bridge/runtime-core": "workspace:*",
+        "@llm-bridge/runtime-events": "workspace:*",
         "@openrouter/ai-sdk-provider": "^1.5.4",
         "@radix-ui/react-accordion": "1.2.12",
         "@radix-ui/react-alert-dialog": "1.1.15",
@@ -164,6 +165,19 @@
         "effect": "^3.18.4",
       },
       "devDependencies": {
+        "tsdown": "^0.20.3",
+        "typescript": "5.9.3",
+      },
+    },
+    "packages/runtime-events": {
+      "name": "@llm-bridge/runtime-events",
+      "version": "0.1.0",
+      "dependencies": {
+        "@llm-bridge/contracts": "workspace:*",
+        "effect": "^3.18.4",
+      },
+      "devDependencies": {
+        "@types/node": "^22.19.13",
         "tsdown": "^0.20.3",
         "typescript": "5.9.3",
       },
@@ -399,6 +413,8 @@
     "@llm-bridge/extension": ["@llm-bridge/extension@workspace:packages/extension"],
 
     "@llm-bridge/runtime-core": ["@llm-bridge/runtime-core@workspace:packages/runtime-core"],
+
+    "@llm-bridge/runtime-events": ["@llm-bridge/runtime-events@workspace:packages/runtime-events"],
 
     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3", "", { "os": "darwin", "cpu": "arm64" }, "sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw=="],
 

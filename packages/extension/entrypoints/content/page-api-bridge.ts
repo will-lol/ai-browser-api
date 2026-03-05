@@ -11,7 +11,6 @@ import {
   TransportProtocolError,
   isPageBridgePortControlMessage,
   type RuntimeRpcError,
-  type PageBridgeRpc,
   type BridgeModelCallRequest,
   type PageBridgePortControlMessage,
 } from "@llm-bridge/contracts"
@@ -24,6 +23,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
+import { streamRuntimeEvents } from "@/lib/runtime/events/runtime-events"
 const PAGE_BRIDGE_LOG_PREFIX = '[page-bridge-content]'
 
 function toLogString(meta: unknown) {
@@ -220,8 +220,7 @@ function createPageBridgeHandlers() {
       fromPromise('requestPermission', async () => {
         const modelId = input.modelId ?? "openai/gpt-4o-mini"
         const parsed = parseProviderModel(modelId)
-
-        return runtime.requestPermission({
+        const result = await runtime.requestPermission({
           action: "create",
           origin: window.location.origin,
           modelId,
@@ -229,7 +228,17 @@ function createPageBridgeHandlers() {
           provider: input.provider ?? parsed.providerID,
           capabilities: input.capabilities,
         })
+
+        if (!("status" in result)) {
+          throw new RuntimeValidationError({
+            message: "Unexpected permission response shape",
+          })
+        }
+
+        return result
       }),
+
+    watchRuntimeEvents: () => streamRuntimeEvents(),
 
     abort: (input) =>
       fromPromise('abort', async () => {

@@ -1,9 +1,12 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import js from "@eslint/js";
 import reactPlugin from "eslint-plugin-react";
 import reactHooksPlugin from "eslint-plugin-react-hooks";
 import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
 
+const repoRootDir = path.dirname(fileURLToPath(import.meta.url));
 const autoImportsModule = await import("./packages/extension/.wxt/eslint-auto-imports.mjs").catch(() => null);
 const autoImports = autoImportsModule?.default ?? {};
 
@@ -13,6 +16,25 @@ export default defineConfig(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    files: [
+      "packages/client/src/**/*.{ts,tsx,mts,cts}",
+      "packages/contracts/src/**/*.{ts,tsx,mts,cts}",
+      "packages/runtime-core/src/**/*.{ts,tsx,mts,cts}",
+      "packages/example-app/src/**/*.{ts,tsx,mts,cts}",
+      "packages/extension/entrypoints/**/*.{ts,tsx,mts,cts}",
+      "packages/extension/components/**/*.{ts,tsx,mts,cts}",
+      "packages/extension/lib/**/*.{ts,tsx,mts,cts}",
+      "packages/extension/hooks/**/*.{ts,tsx,mts,cts}",
+      "packages/extension/wxt.config.ts",
+    ],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: repoRootDir,
+      },
+    },
+  },
   {
     files: ["**/*.{ts,tsx}"],
     rules: {

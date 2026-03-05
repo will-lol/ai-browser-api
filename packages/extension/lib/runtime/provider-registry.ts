@@ -384,16 +384,16 @@ export async function refreshProviderCatalog() {
     })
     await setCatalogInitialized(updatedAt)
 
-    afterCommit(() => {
-      publishRuntimeEvent({
+    afterCommit(async () => {
+      await publishRuntimeEvent({
         type: "runtime.catalog.refreshed",
         payload: { updatedAt },
       })
-      publishRuntimeEvent({
+      await publishRuntimeEvent({
         type: "runtime.providers.changed",
         payload: { providerIDs: providerRows.map((row) => row.id) },
       })
-      publishRuntimeEvent({
+      await publishRuntimeEvent({
         type: "runtime.models.changed",
         payload: { providerIDs: providerRows.map((row) => row.id) },
       })
@@ -452,12 +452,12 @@ export async function refreshProviderCatalogForProvider(providerID: string) {
     })
     await setCatalogInitialized(updatedAt)
 
-    afterCommit(() => {
-      publishRuntimeEvent({
+    afterCommit(async () => {
+      await publishRuntimeEvent({
         type: "runtime.providers.changed",
         payload: { providerIDs: [providerID] },
       })
-      publishRuntimeEvent({
+      await publishRuntimeEvent({
         type: "runtime.models.changed",
         payload: { providerIDs: [providerID] },
       })

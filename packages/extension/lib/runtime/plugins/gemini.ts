@@ -1,10 +1,10 @@
 import { browser } from "@wxt-dev/browser";
 import { setAuth } from "@/lib/runtime/auth-store";
-import { createGeminiCodeAssistFetch, GEMINI_CODE_ASSIST_HEADERS } from "@/lib/runtime/plugins/gemini-code-assist-transport";
 import {
-  generatePKCE,
-  generateState,
-} from "@/lib/runtime/plugins/oauth-util";
+  createGeminiCodeAssistFetch,
+  GEMINI_CODE_ASSIST_HEADERS,
+} from "@/lib/runtime/plugins/gemini-code-assist-transport";
+import { generatePKCE, generateState } from "@/lib/runtime/plugins/oauth-util";
 import type { RuntimePlugin } from "@/lib/runtime/plugin-manager";
 
 const GEMINI_CLIENT_ID =
@@ -112,7 +112,10 @@ function normalizeProjectId(value: unknown): string | undefined {
   return undefined;
 }
 
-function buildCodeAssistMetadata(projectId?: string, includeDuetProject = true) {
+function buildCodeAssistMetadata(
+  projectId?: string,
+  includeDuetProject = true,
+) {
   return {
     ideType: "IDE_UNSPECIFIED",
     platform: "PLATFORM_UNSPECIFIED",
@@ -375,15 +378,18 @@ async function loadCodeAssist(
   }
 
   try {
-    const response = await fetch(`${GEMINI_CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        ...GEMINI_CODE_ASSIST_HEADERS,
+    const response = await fetch(
+      `${GEMINI_CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          ...GEMINI_CODE_ASSIST_HEADERS,
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-    });
+    );
 
     if (!response.ok) {
       return null;
@@ -502,7 +508,9 @@ export async function resolveGeminiProjectContext(
     throw new Error(GEMINI_PROJECT_REQUIRED_MESSAGE);
   }
 
-  const discoveredProjectId = normalizeProjectId(loaded.cloudaicompanionProject);
+  const discoveredProjectId = normalizeProjectId(
+    loaded.cloudaicompanionProject,
+  );
   if (discoveredProjectId) {
     return {
       projectId: discoveredProjectId,
@@ -691,12 +699,9 @@ export const geminiOAuthPlugin: RuntimePlugin = {
                   hasRefreshToken: Boolean(tokens.refresh_token),
                 });
               } catch (error) {
-                console.error(
-                  "[builtin-gemini-auth] token exchange failed",
-                  {
-                    error: toErrorMessage(error),
-                  },
-                );
+                console.error("[builtin-gemini-auth] token exchange failed", {
+                  error: toErrorMessage(error),
+                });
                 throw error;
               }
               if (!tokens.refresh_token) {
@@ -766,10 +771,15 @@ export const geminiOAuthPlugin: RuntimePlugin = {
 
         if (!effectiveProjectId) {
           try {
-            const resolved = await resolveGeminiProjectContext(access, metadata);
+            const resolved = await resolveGeminiProjectContext(
+              access,
+              metadata,
+            );
             effectiveProjectId = resolved.projectId;
             managedProjectId =
-              resolved.managedProjectId ?? managedProjectId ?? effectiveProjectId;
+              resolved.managedProjectId ??
+              managedProjectId ??
+              effectiveProjectId;
           } catch (error) {
             projectResolutionError = toErrorMessage(error);
             console.warn("[builtin-gemini-auth] project resolution failed", {
@@ -964,12 +974,4 @@ export const geminiOAuthPlugin: RuntimePlugin = {
       },
     },
   },
-};
-
-export const __geminiOAuthInternals = {
-  buildProjectResolutionError,
-  buildIneligibleTierMessage,
-  normalizeProjectId,
-  pickAllowedTier,
-  readMetadataValue,
 };

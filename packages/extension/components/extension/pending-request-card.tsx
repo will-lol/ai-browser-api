@@ -2,10 +2,7 @@ import { Badge } from "@/components/ui/badge"
 import { Check, X as XIcon } from "lucide-react"
 import type { RuntimePendingRequest } from "@llm-bridge/contracts"
 import { getProviderLabel } from "@/lib/provider-labels"
-import {
-  usePermissionDecisionMutation,
-  usePermissionDismissMutation,
-} from "@/lib/extension-query-hooks"
+import { usePermissionDecisionMutation } from "@/lib/extension-query-hooks"
 
 interface PendingRequestCardProps {
   request: RuntimePendingRequest
@@ -14,7 +11,6 @@ interface PendingRequestCardProps {
   onClose?: () => void
   actionsDisabled?: boolean
   onDismissRequest?: (requestId: string) => void
-  isDismissPending?: boolean
 }
 
 function timeAgo(timestamp: number): string {
@@ -26,74 +22,71 @@ function timeAgo(timestamp: number): string {
   return `${hours}h ago`
 }
 
-export function PendingRequestCard({
+function FloatingPendingRequestCard({
   request,
-  origin,
-  variant,
   onClose,
-  actionsDisabled = false,
   onDismissRequest,
-  isDismissPending = false,
-}: PendingRequestCardProps) {
-  const decisionMutation = usePermissionDecisionMutation(origin)
-  const dismissMutation = usePermissionDismissMutation(origin)
-
-  const dismissPending = isDismissPending || dismissMutation.isPending
-  const controlsDisabled =
-    actionsDisabled || dismissPending || decisionMutation.isPending
-
-  if (variant === "floating") {
-    return (
-      <div className="w-[304px] max-w-[calc(100vw-32px)] overflow-hidden rounded-none border border-border bg-card font-sans shadow-[0_10px_24px_rgba(0,0,0,0.24)] [&_*]:rounded-none">
-        <div className="flex flex-col gap-2 p-2.5">
-          <div className="flex flex-col gap-0.5">
-            <div className="flex items-start justify-between">
-              <span className="text-[9px] text-muted-foreground">
-                {request.origin} wants access to
-              </span>
-              <button
-                onClick={() => {
-                  if (onDismissRequest) {
-                    onDismissRequest(request.id)
-                    return
-                  }
-
-                  dismissMutation.mutate(
-                    { requestId: request.id },
-                    {
-                      onSuccess: () => {
-                        onClose?.()
-                      },
-                    },
-                  )
-                }}
-                disabled={controlsDisabled}
-                className="-mr-0.5 -mt-0.5 flex items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                aria-label="Dismiss"
-              >
-                <XIcon className="size-3" />
-              </button>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-mono text-[13px] font-semibold leading-none text-foreground">
-                {request.modelName}
-              </span>
-              <Badge
-                variant="outline"
-                className="h-4 border-border px-1.5 text-[9px] font-normal text-muted-foreground"
-              >
-                {getProviderLabel(request.provider)}
-              </Badge>
-            </div>
+  actionsDisabled = false,
+}: {
+  request: RuntimePendingRequest
+  onClose?: () => void
+  onDismissRequest?: (requestId: string) => void
+  actionsDisabled?: boolean
+}) {
+  return (
+    <div className="w-[304px] max-w-[calc(100vw-32px)] overflow-hidden rounded-none border border-border bg-card font-sans shadow-[0_10px_24px_rgba(0,0,0,0.24)] [&_*]:rounded-none">
+      <div className="flex flex-col gap-2 p-2.5">
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-start justify-between">
+            <span className="text-[9px] text-muted-foreground">
+              {request.origin} wants access to
+            </span>
+            <button
+              onClick={() => {
+                if (onDismissRequest) {
+                  onDismissRequest(request.id)
+                }
+                onClose?.()
+              }}
+              disabled={actionsDisabled}
+              className="-mr-0.5 -mt-0.5 flex items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Dismiss"
+            >
+              <XIcon className="size-3" />
+            </button>
           </div>
-
-          <div className="text-[10px] leading-4 text-muted-foreground">
-            Open the extension popup to allow or deny this request.
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-[13px] font-semibold leading-none text-foreground">
+              {request.modelName}
+            </span>
+            <Badge
+              variant="outline"
+              className="h-4 border-border px-1.5 text-[9px] font-normal text-muted-foreground"
+            >
+              {getProviderLabel(request.provider)}
+            </Badge>
           </div>
         </div>
+
+        <div className="text-[10px] leading-4 text-muted-foreground">
+          Open the extension popup to allow or deny this request.
+        </div>
       </div>
-    )
-  }
+    </div>
+  )
+}
+
+function InlinePendingRequestCard({
+  request,
+  origin,
+  actionsDisabled = false,
+}: {
+  request: RuntimePendingRequest
+  origin: string
+  actionsDisabled?: boolean
+}) {
+  const decisionMutation = usePermissionDecisionMutation(origin)
+  const controlsDisabled = actionsDisabled || decisionMutation.isPending
 
   return (
     <div className="flex items-center gap-2.5 border-b border-border bg-warning/5 px-3 py-2 font-sans">
@@ -135,5 +128,33 @@ export function PendingRequestCard({
         </button>
       </div>
     </div>
+  )
+}
+
+export function PendingRequestCard({
+  request,
+  origin,
+  variant,
+  onClose,
+  actionsDisabled = false,
+  onDismissRequest,
+}: PendingRequestCardProps) {
+  if (variant === "floating") {
+    return (
+      <FloatingPendingRequestCard
+        request={request}
+        onClose={onClose}
+        onDismissRequest={onDismissRequest}
+        actionsDisabled={actionsDisabled}
+      />
+    )
+  }
+
+  return (
+    <InlinePendingRequestCard
+      request={request}
+      origin={origin}
+      actionsDisabled={actionsDisabled}
+    />
   )
 }

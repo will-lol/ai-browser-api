@@ -67,6 +67,7 @@
     "@tanstack/react-query-persist-client": "^5.90.23",
     "@tanstack/react-router": "^1.132.24",
     "@llm-bridge/contracts": "workspace:*",
+    "@llm-bridge/runtime-events": "workspace:*",
     "@llm-bridge/runtime-core": "workspace:*",
     "@wxt-dev/browser": "^0.1.37",
     "ai": "^6.0.105",

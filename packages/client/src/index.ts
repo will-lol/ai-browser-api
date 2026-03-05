@@ -18,12 +18,11 @@ import {
   type JsonValue,
   type PageBridgeRpc,
   type RuntimeCreatePermissionRequestResponse,
-  type RuntimeDismissPermissionRequestResponse,
   type RuntimeGenerateResponse,
   type RuntimeModelCallOptions,
   type RuntimeModelSummary,
+  type RuntimeEvent,
   type RuntimeRpcError,
-  type RuntimeResolvePermissionRequestResponse,
   type RuntimeStreamPart,
   type RuntimeTool,
   type RuntimeWireDate,
@@ -110,12 +109,10 @@ export type BridgeClientOptions = {
 };
 
 export type BridgeModelSummary = RuntimeModelSummary;
-export type BridgePermissionResult =
-  | RuntimeCreatePermissionRequestResponse
-  | RuntimeDismissPermissionRequestResponse
-  | RuntimeResolvePermissionRequestResponse;
+export type BridgePermissionResult = RuntimeCreatePermissionRequestResponse;
 
 export interface BridgeClientApi {
+  readonly events: Stream.Stream<RuntimeEvent, RuntimeRpcError>;
   readonly listModels: Effect.Effect<
     ReadonlyArray<BridgeModelSummary>,
     RuntimeRpcError
@@ -1320,6 +1317,16 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
           ),
         );
 
+      const events = Stream.unwrap(
+        ensureConnection.pipe(
+          Effect.map((current) =>
+            normalizeRpcStreamError(
+              current.client.watchRuntimeEvents({}),
+            ),
+          ),
+        ),
+      );
+
       const getModel = (modelId: string) =>
         Effect.gen(function* () {
           sequence += 1;
@@ -1337,6 +1344,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
         });
 
       return {
+        events,
         listModels,
         getModel,
         getState,

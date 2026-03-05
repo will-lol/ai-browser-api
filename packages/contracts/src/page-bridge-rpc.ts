@@ -10,11 +10,10 @@ import {
   BridgePermissionRequestSchema,
   BridgeStateResponseSchema,
   RuntimeCreatePermissionRequestResponseSchema,
-  RuntimeDismissPermissionRequestResponseSchema,
   RuntimeGenerateResponseSchema,
-  RuntimeResolvePermissionRequestResponseSchema,
   RuntimeStreamPartSchema,
 } from "./entities"
+import { RuntimeEventSchema } from "./events"
 import { RuntimeRpcErrorSchema } from "./errors"
 
 export const PAGE_BRIDGE_READY_EVENT = "llm-bridge-ready"
@@ -80,11 +79,13 @@ export const PageBridgeRpcGroup = RpcGroup.make(
   }),
   Rpc.make("requestPermission", {
     payload: BridgePermissionRequestSchema,
-    success: Schema.Union(
-      RuntimeCreatePermissionRequestResponseSchema,
-      RuntimeResolvePermissionRequestResponseSchema,
-      RuntimeDismissPermissionRequestResponseSchema,
-    ),
+    success: RuntimeCreatePermissionRequestResponseSchema,
+    error: RuntimeRpcErrorSchema,
+  }),
+  Rpc.make("watchRuntimeEvents", {
+    payload: {},
+    success: RuntimeEventSchema,
+    stream: true,
     error: RuntimeRpcErrorSchema,
   }),
   Rpc.make("abort", {

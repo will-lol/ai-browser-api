@@ -1,6 +1,10 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
+import { anthropicPlugin } from "@/lib/runtime/plugins/anthropic"
+import { googlePlugin } from "@/lib/runtime/plugins/google"
+import { openaiPlugin } from "@/lib/runtime/plugins/openai"
 import {
+  type ChatTransformContext,
   PluginManager,
   type RuntimeAdapterContext,
   type RuntimeAdapterState,
@@ -98,6 +102,19 @@ function createAdapterState(): RuntimeAdapterState {
         fromBase: true,
       },
     },
+  }
+}
+
+function createChatContext(input: {
+  providerID: string
+  modelID: string
+}): ChatTransformContext {
+  return {
+    providerID: input.providerID,
+    modelID: input.modelID,
+    origin: "https://example.test",
+    sessionID: "session-1",
+    requestID: "request-1",
   }
 }
 
@@ -280,6 +297,77 @@ describe("PluginManager adapter hooks", () => {
     await assert.rejects(
       () => manager.validateAdapterState(createAdapterContext(), state),
       /adapter validation failed/,
+    )
+  })
+})
+
+describe("PluginManager request options", () => {
+  it("does not inject implicit provider defaults for google, anthropic, or openai", async () => {
+    const manager = new PluginManager([googlePlugin, anthropicPlugin, openaiPlugin])
+
+    const googleOptions = {
+      model: "gemini-2.0-flash",
+    }
+    const anthropicOptions = {
+      model: "claude-3-5-sonnet-20241022",
+    }
+    const openaiOptions = {
+      model: "gpt-5",
+    }
+
+    assert.deepEqual(
+      await manager.applyRequestOptions(createChatContext({ providerID: "google", modelID: "gemini-2.0-flash" }), googleOptions),
+      googleOptions,
+    )
+    assert.deepEqual(
+      await manager.applyRequestOptions(
+        createChatContext({ providerID: "anthropic", modelID: "claude-3-5-sonnet-20241022" }),
+        anthropicOptions,
+      ),
+      anthropicOptions,
+    )
+    assert.deepEqual(
+      await manager.applyRequestOptions(createChatContext({ providerID: "openai", modelID: "gpt-5" }), openaiOptions),
+      openaiOptions,
+    )
+  })
+
+  it("preserves explicit caller request options", async () => {
+    const manager = new PluginManager([googlePlugin, anthropicPlugin, openaiPlugin])
+    const googleOptions = {
+      model: "gemini-2.0-flash",
+      thinkingConfig: {
+        includeThoughts: false,
+      },
+    }
+    const anthropicOptions = {
+      model: "claude-3-5-sonnet-20241022",
+      thinking: {
+        type: "disabled",
+      },
+    }
+    const openaiOptions = {
+      model: "gpt-5",
+      store: true,
+      reasoning: {
+        effort: "high",
+      },
+    }
+
+    assert.deepEqual(
+      await manager.applyRequestOptions(createChatContext({ providerID: "google", modelID: "gemini-2.0-flash" }), googleOptions),
+      googleOptions,
+    )
+    assert.deepEqual(
+      await manager.applyRequestOptions(
+        createChatContext({ providerID: "anthropic", modelID: "claude-3-5-sonnet-20241022" }),
+        anthropicOptions,
+      ),
+      anthropicOptions,
+    )
+    assert.deepEqual(
+      await manager.applyRequestOptions(createChatContext({ providerID: "openai", modelID: "gpt-5" }), openaiOptions),
+      openaiOptions,
     )
   })
 })

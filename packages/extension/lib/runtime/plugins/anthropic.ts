@@ -15,20 +15,5 @@ export const anthropicPlugin: RuntimePlugin = {
         }
       },
     },
-    provider: {
-      async requestOptions(_ctx, options) {
-        const model = typeof options.model === "string" ? options.model : ""
-        if (!model.includes("claude")) return undefined
-        return {
-          strategy: "merge",
-          value: {
-            thinking: {
-              type: "enabled",
-              budgetTokens: 16000,
-            },
-          },
-        }
-      },
-    },
   },
 }

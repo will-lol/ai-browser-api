@@ -83,12 +83,12 @@ export async function setAuth(providerID: string, value: AuthResult) {
       })
     }
 
-    afterCommit(() => {
-      publishRuntimeEvent({
+    afterCommit(async () => {
+      await publishRuntimeEvent({
         type: "runtime.auth.changed",
         payload: { providerID },
       })
-      publishRuntimeEvent({
+      await publishRuntimeEvent({
         type: "runtime.providers.changed",
         payload: { providerIDs: [providerID] },
       })
@@ -111,12 +111,12 @@ export async function removeAuth(providerID: string) {
       })
     }
 
-    afterCommit(() => {
-      publishRuntimeEvent({
+    afterCommit(async () => {
+      await publishRuntimeEvent({
         type: "runtime.auth.changed",
         payload: { providerID },
       })
-      publishRuntimeEvent({
+      await publishRuntimeEvent({
         type: "runtime.providers.changed",
         payload: { providerIDs: [providerID] },
       })

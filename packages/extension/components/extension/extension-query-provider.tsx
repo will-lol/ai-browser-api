@@ -3,9 +3,7 @@ import {
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query"
-import { browser } from "wxt/browser"
 import { extensionQueryKeys } from "@/lib/extension-query-keys"
-import { RUNTIME_STATE_KEY } from "@/lib/runtime/constants"
 import { subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events"
 
 function createQueryClient() {
@@ -100,34 +98,8 @@ export function ExtensionQueryProvider({
       }
     })
 
-    const storageListener: Parameters<
-      typeof browser.storage.onChanged.addListener
-    >[0] = (changes, area) => {
-      if (area !== "local") return
-      if (!changes[RUNTIME_STATE_KEY]) return
-
-      queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.providersRoot,
-      })
-      queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.modelsRoot,
-      })
-      queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.originStateRoot,
-      })
-      queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.permissionsRoot,
-      })
-      queryClient.invalidateQueries({
-        queryKey: extensionQueryKeys.pendingRequestsRoot,
-      })
-    }
-
-    browser.storage.onChanged.addListener(storageListener)
-
     return () => {
       unsubscribeRuntimeEvents()
-      browser.storage.onChanged.removeListener(storageListener)
     }
   }, [queryClient])
 

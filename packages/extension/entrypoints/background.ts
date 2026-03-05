@@ -8,7 +8,6 @@ import { browser } from "@wxt-dev/browser";
 import { defineBackground } from "wxt/utils/define-background";
 import {
   MODELS_REFRESH_INTERVAL_MS,
-  RUNTIME_STATE_KEY,
 } from "@/lib/runtime/constants";
 import {
   getModelsDevUpdatedAt,
@@ -265,12 +264,6 @@ export default defineBackground(() => {
   });
 
   subscribeRuntimeEvents(() => {
-    void updateActionState();
-  });
-
-  browser.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local") return;
-    if (!changes[RUNTIME_STATE_KEY]) return;
     void updateActionState();
   });
 });

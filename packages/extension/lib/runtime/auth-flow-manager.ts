@@ -87,8 +87,8 @@ export class AuthFlowManager {
     flow.expiresAt = now + AUTH_FLOW_TTL_MS
   }
 
-  private emitFlowChanged(flow: AuthFlowState) {
-    publishRuntimeEvent({
+  private async emitFlowChanged(flow: AuthFlowState) {
+    await publishRuntimeEvent({
       type: "runtime.authFlow.changed",
       payload: {
         providerID: flow.providerID,
@@ -134,10 +134,10 @@ export class AuthFlowManager {
     }
   }
 
-  private setFlow(flow: AuthFlowState) {
+  private async setFlow(flow: AuthFlowState) {
     this.markUpdated(flow)
     this.flows.set(flow.providerID, flow)
-    this.emitFlowChanged(flow)
+    await this.emitFlowChanged(flow)
   }
 
   private clearExecution(flow: AuthFlowState) {
@@ -166,7 +166,7 @@ export class AuthFlowManager {
     let flow = this.flows.get(providerID)
     if (!flow || isTerminalStatus(flow.status)) {
       flow = await this.buildIdleFlow(providerID)
-      this.setFlow(flow)
+      await this.setFlow(flow)
     }
 
     if (typeof flow.windowId === "number") {
@@ -203,7 +203,7 @@ export class AuthFlowManager {
     flow.windowId = windowRef.id
     this.providerWindows.set(providerID, windowRef.id)
     this.windowProviders.set(windowRef.id, providerID)
-    this.setFlow(flow)
+    await this.setFlow(flow)
 
     return {
       providerID,
@@ -225,7 +225,7 @@ export class AuthFlowManager {
     let flow = this.flows.get(input.providerID)
     if (!flow || isTerminalStatus(flow.status)) {
       flow = await this.buildIdleFlow(input.providerID)
-      this.setFlow(flow)
+      await this.setFlow(flow)
     }
 
     if (flow.status === "authorizing") {
@@ -243,7 +243,7 @@ export class AuthFlowManager {
     flow.error = undefined
     flow.runningMethodID = selected.id
     flow.controller = new AbortController()
-    this.setFlow(flow)
+    await this.setFlow(flow)
 
     try {
       console.info("[auth-flow] invoking provider auth", {
@@ -286,7 +286,7 @@ export class AuthFlowManager {
       latest.error = undefined
       this.clearExecution(latest)
       latest.methods = await listProviderAuthMethods(input.providerID)
-      this.setFlow(latest)
+      await this.setFlow(latest)
       return this.snapshot(latest)
     } catch (error) {
       const latest = this.flows.get(input.providerID)
@@ -311,7 +311,7 @@ export class AuthFlowManager {
       }
       this.clearExecution(latest)
       latest.methods = await listProviderAuthMethods(input.providerID)
-      this.setFlow(latest)
+      await this.setFlow(latest)
       return this.snapshot(latest)
     }
   }
@@ -335,7 +335,7 @@ export class AuthFlowManager {
       ? "Authentication expired."
       : "Authentication canceled."
     this.clearExecution(flow)
-    this.setFlow(flow)
+    await this.setFlow(flow)
     return this.snapshot(flow)
   }
 

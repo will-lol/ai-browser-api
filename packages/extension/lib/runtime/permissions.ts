@@ -62,8 +62,8 @@ export async function setOriginEnabled(origin: string, enabled: boolean) {
       updatedAt: now(),
     })
 
-    afterCommit(() => {
-      publishRuntimeEvent({
+    afterCommit(async () => {
+      await publishRuntimeEvent({
         type: "runtime.origin.changed",
         payload: { origin },
       })
@@ -90,8 +90,8 @@ export async function setModelPermission(
       updatedAt,
     })
 
-    afterCommit(() => {
-      publishRuntimeEvent({
+    afterCommit(async () => {
+      await publishRuntimeEvent({
         type: "runtime.permissions.changed",
         payload: {
           origin,
@@ -173,15 +173,15 @@ export async function createPermissionRequest(input: {
       }
     }
 
-    afterCommit(() => {
-      publishRuntimeEvent({
+    afterCommit(async () => {
+      await publishRuntimeEvent({
         type: "runtime.pending.changed",
         payload: {
           origin: input.origin,
           requestIds: [request.id],
         },
       })
-      publishRuntimeEvent({
+      await publishRuntimeEvent({
         type: "runtime.permissions.changed",
         payload: {
           origin: input.origin,
@@ -213,15 +213,15 @@ export async function dismissPermissionRequest(requestId: string) {
 
     await runtimeDb.pendingRequests.delete(requestId)
 
-    afterCommit(() => {
-      publishRuntimeEvent({
+    afterCommit(async () => {
+      await publishRuntimeEvent({
         type: "runtime.pending.changed",
         payload: {
           origin: match.origin,
           requestIds: [requestId],
         },
       })
-      publishRuntimeEvent({
+      await publishRuntimeEvent({
         type: "runtime.permissions.changed",
         payload: {
           origin: match.origin,
@@ -248,15 +248,15 @@ export async function resolvePermissionRequest(requestId: string, decision: "all
 
     await runtimeDb.pendingRequests.delete(requestId)
 
-    afterCommit(() => {
-      publishRuntimeEvent({
+    afterCommit(async () => {
+      await publishRuntimeEvent({
         type: "runtime.pending.changed",
         payload: {
           origin: match.origin,
           requestIds: [requestId],
         },
       })
-      publishRuntimeEvent({
+      await publishRuntimeEvent({
         type: "runtime.permissions.changed",
         payload: {
           origin: match.origin,
