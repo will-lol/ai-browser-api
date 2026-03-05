@@ -113,3 +113,51 @@ describe("codex chat header patch", () => {
     assert.equal(headers.accept, "application/json")
   })
 })
+
+describe("codex request options patch", () => {
+  it("forces store=false and derives instructions from system message when missing", () => {
+    const patch = __codexAuthInternals.buildCodexRequestOptions({
+      messages: [
+        { role: "system", content: "Use safe defaults." },
+        { role: "user", content: "hello" },
+      ],
+    })
+
+    assert.equal(patch.store, false)
+    assert.equal(patch.instructions, "Use safe defaults.")
+  })
+
+  it("forces store=false without overriding explicit top-level instructions", () => {
+    const patch = __codexAuthInternals.buildCodexRequestOptions({
+      instructions: "Explicit instructions",
+      messages: [{ role: "system", content: "System should not override explicit instructions." }],
+    })
+
+    assert.deepEqual(patch, {
+      store: false,
+    })
+  })
+
+  it("forces store=false without overriding explicit providerOptions instructions", () => {
+    const patch = __codexAuthInternals.buildCodexRequestOptions({
+      providerOptions: {
+        openai: {
+          instructions: "Provider instructions",
+        },
+      },
+    })
+
+    assert.deepEqual(patch, {
+      store: false,
+    })
+  })
+
+  it("falls back to a generic default instruction when no system instruction exists", () => {
+    const patch = __codexAuthInternals.buildCodexRequestOptions({
+      messages: [{ role: "user", content: "hello" }],
+    })
+
+    assert.equal(patch.store, false)
+    assert.equal(patch.instructions, "Follow the user's instructions.")
+  })
+})

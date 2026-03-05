@@ -1,62 +1,60 @@
-import { useMemo, useState } from "react"
-import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Unplug, Plug } from "lucide-react"
-import { SearchInput } from "@/components/extension/search-input"
-import { useFrozenOrder } from "@/hooks/use-frozen-order"
+import { useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { SearchInput } from "@/components/extension/search-input";
+import { useFrozenOrder } from "@/hooks/use-frozen-order";
 import {
   useProviderDisconnectMutation,
   useProviderOpenAuthWindowMutation,
   useProvidersQuery,
-} from "@/lib/extension-query-hooks"
+} from "@/lib/extension-query-hooks";
 
 export function ProvidersView() {
-  const [search, setSearch] = useState("")
-  const providersQuery = useProvidersQuery()
-  const disconnectProviderMutation = useProviderDisconnectMutation()
-  const openProviderAuthWindowMutation = useProviderOpenAuthWindowMutation()
+  const [search, setSearch] = useState("");
+  const providersQuery = useProvidersQuery();
+  const disconnectProviderMutation = useProviderDisconnectMutation();
+  const openProviderAuthWindowMutation = useProviderOpenAuthWindowMutation();
 
-  const providers = providersQuery.data ?? []
+  const providers = providersQuery.data ?? [];
 
   const frozenOrder = useFrozenOrder(
     providers,
     (provider) => provider.id,
     (a, b) => {
-      if (a.connected && !b.connected) return -1
-      if (!a.connected && b.connected) return 1
-      return a.name.localeCompare(b.name)
+      if (a.connected && !b.connected) return -1;
+      if (!a.connected && b.connected) return 1;
+      return a.name.localeCompare(b.name);
     },
     {
       groupBy: (provider) => (provider.connected ? 0 : 1),
     },
-  )
+  );
 
   const sorted = useMemo(() => {
     const providersById = new Map(
       providers.map((provider) => [provider.id, provider]),
-    )
+    );
     const ordered = frozenOrder
       .map((id) => providersById.get(id))
       .filter(
-        (provider): provider is NonNullable<typeof provider> => provider != null,
-      )
+        (provider): provider is NonNullable<typeof provider> =>
+          provider != null,
+      );
 
-    if (!search) return ordered
+    if (!search) return ordered;
 
-    const query = search.toLowerCase()
+    const query = search.toLowerCase();
     return ordered.filter((provider) =>
       provider.name.toLowerCase().includes(query),
-    )
-  }, [frozenOrder, providers, search])
+    );
+  }, [frozenOrder, providers, search]);
 
   if (providersQuery.isError) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
-        <p className="text-xs text-destructive">
-          Failed to load providers.
-        </p>
+        <p className="text-xs text-destructive">Failed to load providers.</p>
       </div>
-    )
+    );
   }
 
   if (providersQuery.isPending) {
@@ -64,7 +62,7 @@ export function ProvidersView() {
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
         <p className="text-xs text-muted-foreground">Loading providers...</p>
       </div>
-    )
+    );
   }
 
   return (
@@ -81,10 +79,11 @@ export function ProvidersView() {
           {sorted.map((provider) => {
             const controlsDisabled =
               disconnectProviderMutation.isPending &&
-              disconnectProviderMutation.variables?.providerID === provider.id
+              disconnectProviderMutation.variables?.providerID === provider.id;
             const connectPending =
-              openProviderAuthWindowMutation.isPending
-              && openProviderAuthWindowMutation.variables?.providerID === provider.id
+              openProviderAuthWindowMutation.isPending &&
+              openProviderAuthWindowMutation.variables?.providerID ===
+                provider.id;
 
             return (
               <div
@@ -105,10 +104,14 @@ export function ProvidersView() {
                 <Button
                   onClick={() => {
                     if (provider.connected) {
-                      disconnectProviderMutation.mutate({ providerID: provider.id })
-                      return
+                      disconnectProviderMutation.mutate({
+                        providerID: provider.id,
+                      });
+                      return;
                     }
-                    openProviderAuthWindowMutation.mutate({ providerID: provider.id })
+                    openProviderAuthWindowMutation.mutate({
+                      providerID: provider.id,
+                    });
                   }}
                   disabled={controlsDisabled || connectPending}
                   variant={provider.connected ? "destructiveGhost" : "default"}
@@ -117,19 +120,19 @@ export function ProvidersView() {
                 >
                   {provider.connected ? (
                     <>
-                      <Unplug className="size-3" />
-                      <span className="hidden group-hover:inline">Disconnect</span>
-                      <span className="inline group-hover:hidden">Connected</span>
+                      <span className="hidden group-hover:inline">
+                        Disconnect
+                      </span>
+                      <span className="inline group-hover:hidden">
+                        Connected
+                      </span>
                     </>
                   ) : (
-                    <>
-                      <Plug className="size-3" />
-                      {connectPending ? "Opening..." : "Connect"}
-                    </>
+                    <>{connectPending ? "Opening..." : "Connect"}</>
                   )}
                 </Button>
               </div>
-            )
+            );
           })}
 
           {sorted.length === 0 && search && (
@@ -142,5 +145,5 @@ export function ProvidersView() {
         </div>
       </ScrollArea>
     </div>
-  )
+  );
 }

@@ -1,26 +1,20 @@
-import { generateText, streamText } from "ai"
+import { generateText, streamText } from "ai";
 import {
   BridgeClient,
   type BridgeModelSummary,
   withBridgeClient,
-} from "@llm-bridge/client"
-import * as Effect from "effect/Effect"
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+} from "@llm-bridge/client";
+import * as Effect from "effect/Effect";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const DEFAULT_MODEL_ID = "google/gemini-3.1-pro-preview"
-const LOG_LIMIT = 250
+const DEFAULT_MODEL_ID = "google/gemini-3.1-pro-preview";
+const LOG_LIMIT = 250;
 
 function stringify(value: unknown) {
   try {
-    return JSON.stringify(value)
+    return JSON.stringify(value);
   } catch {
-    return String(value)
+    return String(value);
   }
 }
 
@@ -30,194 +24,214 @@ export function App() {
       debug: true,
     }),
     [],
-  )
+  );
 
-  const [models, setModels] = useState<ReadonlyArray<BridgeModelSummary>>([])
-  const [selectedModelId, setSelectedModelId] = useState("")
-  const [prompt, setPrompt] = useState("Write a short haiku about OAuth debugging.")
-  const [status, setStatus] = useState("Idle")
-  const [result, setResult] = useState("")
-  const [busy, setBusy] = useState<"generate" | "stream" | null>(null)
-  const [debugLines, setDebugLines] = useState<ReadonlyArray<string>>([])
-  const refreshInFlightRef = useRef<Promise<void> | null>(null)
-  const startupRefreshTriggeredRef = useRef(false)
+  const [models, setModels] = useState<ReadonlyArray<BridgeModelSummary>>([]);
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [prompt, setPrompt] = useState(
+    "Write a short haiku about OAuth debugging.",
+  );
+  const [status, setStatus] = useState("Idle");
+  const [result, setResult] = useState("");
+  const [busy, setBusy] = useState<"generate" | "stream" | null>(null);
+  const [debugLines, setDebugLines] = useState<ReadonlyArray<string>>([]);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const startupRefreshTriggeredRef = useRef(false);
 
   const pushLog = useCallback((event: string, meta?: unknown) => {
-    const line = `[example-app] ${new Date().toISOString()} ${event} ${meta === undefined ? "" : stringify(meta)}`.trim()
+    const line =
+      `[example-app] ${new Date().toISOString()} ${event} ${meta === undefined ? "" : stringify(meta)}`.trim();
 
-    setDebugLines((prev) => [line, ...prev].slice(0, LOG_LIMIT))
-    console.info(line)
-  }, [])
+    setDebugLines((prev) => [line, ...prev].slice(0, LOG_LIMIT));
+    console.info(line);
+  }, []);
 
   const pushError = useCallback((event: string, error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error)
-    const line = `[example-app] ${new Date().toISOString()} ${event} ${message}`
+    const message = error instanceof Error ? error.message : String(error);
+    const line = `[example-app] ${new Date().toISOString()} ${event} ${message}`;
 
-    setDebugLines((prev) => [line, ...prev].slice(0, LOG_LIMIT))
-    console.error(line)
-  }, [])
+    setDebugLines((prev) => [line, ...prev].slice(0, LOG_LIMIT));
+    console.error(line);
+  }, []);
 
   const runBridge = useCallback(
     <A,>(program: Effect.Effect<A, unknown, BridgeClient>) =>
       Effect.runPromise(withBridgeClient(program, bridgeOptions)),
     [bridgeOptions],
-  )
+  );
 
   const refreshModels = useCallback(async () => {
     if (refreshInFlightRef.current) {
-      pushLog("refreshModels.coalesced")
-      return refreshInFlightRef.current
+      pushLog("refreshModels.coalesced");
+      return refreshInFlightRef.current;
     }
 
-    setStatus("Loading models...")
+    setStatus("Loading models...");
 
     const refreshTask = (async () => {
       try {
         const googleModels = await runBridge(
-          Effect.gen(function*() {
-            const client = yield* BridgeClient
-            const allModels = yield* client.listModels
-            return allModels.filter((model) => model.provider === "google")
+          Effect.gen(function* () {
+            const client = yield* BridgeClient;
+            const allModels = yield* client.listModels;
+            return allModels;
           }),
-        )
+        );
 
-        setModels(googleModels)
+        setModels(googleModels);
 
         if (googleModels.length === 0) {
-          setSelectedModelId("")
-          setStatus("No connected Google models.")
-          return
+          setSelectedModelId("");
+          setStatus("No connected Google models.");
+          return;
         }
 
-        const preferred = googleModels.find((model) => model.id === DEFAULT_MODEL_ID)
+        const preferred = googleModels.find(
+          (model) => model.id === DEFAULT_MODEL_ID,
+        );
         setSelectedModelId((current) => {
-          if (googleModels.some((model) => model.id === current)) return current
-          return preferred?.id ?? googleModels[0]?.id ?? ""
-        })
+          if (googleModels.some((model) => model.id === current))
+            return current;
+          return preferred?.id ?? googleModels[0]?.id ?? "";
+        });
 
-        setStatus("Ready")
-        pushLog("refreshModels.success", { count: googleModels.length })
+        setStatus("Ready");
+        pushLog("refreshModels.success", { count: googleModels.length });
       } catch (error) {
-        pushError("refreshModels.failed", error)
-        setStatus("Failed to load models")
+        pushError("refreshModels.failed", error);
+        setStatus("Failed to load models");
       }
-    })()
+    })();
 
     refreshInFlightRef.current = refreshTask.finally(() => {
-      refreshInFlightRef.current = null
-    })
+      refreshInFlightRef.current = null;
+    });
 
-    return refreshInFlightRef.current
-  }, [pushError, pushLog, runBridge])
+    return refreshInFlightRef.current;
+  }, [pushError, pushLog, runBridge]);
 
   const loadModel = useCallback(
     (modelId: string) =>
       runBridge(
-        Effect.gen(function*() {
-          const client = yield* BridgeClient
-          return yield* client.getModel(modelId)
+        Effect.gen(function* () {
+          const client = yield* BridgeClient;
+          return yield* client.getModel(modelId);
         }),
       ),
     [runBridge],
-  )
+  );
 
   const runGenerate = useCallback(async () => {
     if (!selectedModelId) {
-      setStatus("Pick a model first")
-      return
+      setStatus("Pick a model first");
+      return;
     }
 
-    const trimmedPrompt = prompt.trim()
+    const trimmedPrompt = prompt.trim();
     if (!trimmedPrompt) {
-      setStatus("Enter a prompt first")
-      return
+      setStatus("Enter a prompt first");
+      return;
     }
 
-    setBusy("generate")
-    setResult("")
-    setStatus("Generating...")
+    setBusy("generate");
+    setResult("");
+    setStatus("Generating...");
 
     try {
-      const model = await loadModel(selectedModelId)
+      const model = await loadModel(selectedModelId);
       const generated = await generateText({
         model,
         prompt: trimmedPrompt,
-      })
+        providerOptions: {
+          openai: { instructions: "You are a helpful assistant" },
+        },
+      });
 
-      setResult(generated.text)
-      setStatus(`Done (${generated.finishReason})`)
+      setResult(generated.text);
+      setStatus(`Done (${generated.finishReason})`);
       pushLog("generate.success", {
         finishReason: generated.finishReason,
-      })
+      });
     } catch (error) {
-      pushError("generate.failed", error)
-      setStatus("Generation failed")
+      pushError("generate.failed", error);
+      setStatus("Generation failed");
     } finally {
-      setBusy(null)
+      setBusy(null);
     }
-  }, [loadModel, prompt, pushError, pushLog, selectedModelId])
+  }, [loadModel, prompt, pushError, pushLog, selectedModelId]);
 
   const runStream = useCallback(async () => {
     if (!selectedModelId) {
-      setStatus("Pick a model first")
-      return
+      setStatus("Pick a model first");
+      return;
     }
 
-    const trimmedPrompt = prompt.trim()
+    const trimmedPrompt = prompt.trim();
     if (!trimmedPrompt) {
-      setStatus("Enter a prompt first")
-      return
+      setStatus("Enter a prompt first");
+      return;
     }
 
-    setBusy("stream")
-    setResult("")
-    setStatus("Streaming...")
+    setBusy("stream");
+    setResult("");
+    setStatus("Streaming...");
 
     try {
-      const model = await loadModel(selectedModelId)
+      const model = await loadModel(selectedModelId);
       const streamResult = streamText({
         model,
         prompt: trimmedPrompt,
-      })
+        providerOptions: {
+          openai: { instructions: "You are a helpful assistant" },
+        },
+      });
 
       for await (const chunk of streamResult.textStream) {
-        setResult((prev) => prev + chunk)
+        setResult((prev) => prev + chunk);
       }
 
-      const finishReason = await streamResult.finishReason
-      setStatus(`Done (${finishReason})`)
-      pushLog("stream.success", { finishReason })
+      const finishReason = await streamResult.finishReason;
+      setStatus(`Done (${finishReason})`);
+      pushLog("stream.success", { finishReason });
     } catch (error) {
-      pushError("stream.failed", error)
-      setStatus("Streaming failed")
+      pushError("stream.failed", error);
+      setStatus("Streaming failed");
     } finally {
-      setBusy(null)
+      setBusy(null);
     }
-  }, [loadModel, prompt, pushError, pushLog, selectedModelId])
+  }, [loadModel, prompt, pushError, pushLog, selectedModelId]);
 
   useEffect(() => {
     if (startupRefreshTriggeredRef.current) {
-      pushLog("refreshModels.startup.skipped")
-      return
+      pushLog("refreshModels.startup.skipped");
+      return;
     }
 
-    startupRefreshTriggeredRef.current = true
-    void refreshModels()
-  }, [pushLog, refreshModels])
+    startupRefreshTriggeredRef.current = true;
+    void refreshModels();
+  }, [pushLog, refreshModels]);
 
   return (
     <main className="container">
       <h1>LLM Bridge Example</h1>
       <p className="muted">
-        Lists connected models and runs prompts through AI SDK using the bridge model.
+        Lists connected models and runs prompts through AI SDK using the bridge
+        model.
       </p>
 
       <section className="card">
         <div className="row">
-          <button id="refresh-models" type="button" onClick={() => void refreshModels()} disabled={busy !== null}>
+          <button
+            id="refresh-models"
+            type="button"
+            onClick={() => void refreshModels()}
+            disabled={busy !== null}
+          >
             Refresh Models
           </button>
-          <span id="model-count" className="muted">{models.length} models</span>
+          <span id="model-count" className="muted">
+            {models.length} models
+          </span>
         </div>
         <label htmlFor="model-select">Model</label>
         <select
@@ -242,13 +256,23 @@ export function App() {
           onChange={(event) => setPrompt(event.target.value)}
         />
         <div className="row">
-          <button type="button" onClick={() => void runGenerate()} disabled={busy !== null}>
+          <button
+            type="button"
+            onClick={() => void runGenerate()}
+            disabled={busy !== null}
+          >
             Generate
           </button>
-          <button type="button" onClick={() => void runStream()} disabled={busy !== null}>
+          <button
+            type="button"
+            onClick={() => void runStream()}
+            disabled={busy !== null}
+          >
             Stream
           </button>
-          <span id="status" className="muted">{status}</span>
+          <span id="status" className="muted">
+            {status}
+          </span>
         </div>
       </section>
 
@@ -262,5 +286,5 @@ export function App() {
         <pre id="debug">{debugLines.join("\n")}</pre>
       </section>
     </main>
-  )
+  );
 }
