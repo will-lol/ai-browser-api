@@ -23,6 +23,10 @@ import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager";
 import { makeRuntimeCoreInfrastructureLayer } from "@/lib/runtime-app/runtime-adapters";
 import { RuntimeRpcHandlersLive } from "@/lib/runtime-app/runtime-rpc-handlers";
 import { registerRuntimeRpcServer } from "@/lib/runtime-app/runtime-rpc-server";
+import {
+  hasEnabledConnectedModel,
+  tabUrlOrigin,
+} from "@/lib/runtime/toolbar-icon-state";
 
 const BADGE_BG = "#d97706";
 const SOURCE_ICON_PATH = "/icon-dark-32x32.png";
@@ -46,6 +50,7 @@ let sourceIconPromise: Promise<ImageData> | null = null;
 const iconImageCache: Partial<Record<IconState, Record<number, ImageData>>> =
   {};
 let modelsRefreshInFlight: Promise<void> | null = null;
+let actionStateRevision = 0;
 
 async function refreshModelsSnapshot() {
   try {
@@ -179,25 +184,70 @@ async function updateToolbarIcon(isActive: boolean) {
   }
 }
 
+async function getActiveTabOrigin() {
+  if (!browser.tabs?.query) return null;
+
+  try {
+    const [activeTab] = await browser.tabs.query({
+      active: true,
+      lastFocusedWindow: true,
+    });
+    return tabUrlOrigin(activeTab?.url);
+  } catch {
+    return null;
+  }
+}
+
+async function hasEnabledModelForOrigin(origin: string) {
+  const originState = await runtimeDb.origins.get(origin);
+  const originEnabled = originState?.enabled ?? true;
+  if (!originEnabled) return false;
+
+  const allowedRules = await runtimeDb.permissions
+    .where("origin")
+    .equals(origin)
+    .filter((rule) => rule.status === "allowed")
+    .toArray();
+
+  const allowedModelIds = allowedRules.map((rule) => rule.modelId);
+  if (allowedModelIds.length === 0) return false;
+
+  const connectedProviderIds = await runtimeDb.providers
+    .toArray()
+    .then((rows) => rows.filter((row) => row.connected).map((row) => row.id));
+  if (connectedProviderIds.length === 0) return false;
+
+  const connectedModels = await runtimeDb.models
+    .where("providerID")
+    .anyOf(connectedProviderIds)
+    .toArray();
+
+  return hasEnabledConnectedModel({
+    originEnabled,
+    allowedModelIds,
+    connectedModelIds: new Set(connectedModels.map((model) => model.id)),
+  });
+}
+
 async function updateActionState() {
-  const [pending, origins, allowed] = await Promise.all([
+  const revision = ++actionStateRevision;
+  const [pending, activeOrigin] = await Promise.all([
     runtimeDb.pendingRequests
       .where("status")
       .equals("pending")
       .filter((item) => !item.dismissed)
       .count(),
-    runtimeDb.origins.toArray(),
-    runtimeDb.permissions.where("status").equals("allowed").toArray(),
+    getActiveTabOrigin(),
   ]);
+
+  const active =
+    activeOrigin == null ? false : await hasEnabledModelForOrigin(activeOrigin);
+
+  if (revision !== actionStateRevision) return;
 
   await updateBadgeCount(pending);
 
-  const originEnabledMap = new Map(
-    origins.map((origin) => [origin.origin, origin.enabled] as const),
-  );
-  const active = allowed.some(
-    (rule) => originEnabledMap.get(rule.origin) !== false,
-  );
+  if (revision !== actionStateRevision) return;
   await updateToolbarIcon(active);
 }
 
@@ -251,6 +301,20 @@ export default defineBackground(() => {
     void refreshModelsSnapshotOnce();
     void refreshProviderCatalog();
     void scheduleModelsRefreshAlarm();
+    void updateActionState();
+  });
+
+  browser.tabs?.onActivated.addListener(() => {
+    void updateActionState();
+  });
+
+  browser.tabs?.onUpdated.addListener((_tabId, changeInfo, tabInfo) => {
+    if (!tabInfo.active) return;
+    if (changeInfo.url == null && changeInfo.status == null) return;
+    void updateActionState();
+  });
+
+  browser.windows?.onFocusChanged.addListener(() => {
     void updateActionState();
   });
 
