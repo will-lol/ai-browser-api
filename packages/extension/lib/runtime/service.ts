@@ -16,7 +16,7 @@ import {
 } from "@/lib/runtime/ai/language-model-runtime"
 import { parseProviderModel } from "@/lib/runtime/util"
 
-async function ensureRequestAllowed(origin: string, model: string) {
+async function ensureRequestAllowed(origin: string, model: string, signal?: AbortSignal) {
   const permission = await getModelPermission(origin, model)
   if (permission === "allowed") return
 
@@ -30,9 +30,12 @@ async function ensureRequestAllowed(origin: string, model: string) {
   if (requestResult.status === "alreadyAllowed") return
 
   const request = requestResult.request
-  const decision = await waitForPermissionDecision(request.id)
+  const decision = await waitForPermissionDecision(request.id, undefined, signal)
   if (decision === "timeout") {
     throw new Error("Permission request timed out")
+  }
+  if (decision === "aborted") {
+    throw new Error("Request canceled")
   }
   const updated = await getModelPermission(origin, model)
   if (updated !== "allowed") {
@@ -74,7 +77,7 @@ export async function generateRuntimeModel(
   signal?: AbortSignal,
 ): Promise<LanguageModelV3GenerateResult> {
   await ensureOriginEnabled(input.origin)
-  await ensureRequestAllowed(input.origin, input.model)
+  await ensureRequestAllowed(input.origin, input.model, signal)
 
   return runLanguageModelGenerate(
     {
@@ -93,7 +96,7 @@ export async function streamRuntimeModel(
   signal?: AbortSignal,
 ): Promise<ReadableStream<LanguageModelV3StreamPart>> {
   await ensureOriginEnabled(input.origin)
-  await ensureRequestAllowed(input.origin, input.model)
+  await ensureRequestAllowed(input.origin, input.model, signal)
 
   return runLanguageModelStream(
     {

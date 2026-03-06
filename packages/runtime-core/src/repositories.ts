@@ -94,7 +94,11 @@ export interface PermissionsRepositoryApi {
     decision: RuntimePermissionDecision
   }) => AppEffect<RuntimeResolvePermissionRequestResponse>
   dismissPermissionRequest: (requestId: string) => AppEffect<RuntimeDismissPermissionRequestResponse>
-  waitForPermissionDecision: (requestId: string, timeoutMs?: number) => AppEffect<"resolved" | "timeout">
+  waitForPermissionDecision: (
+    requestId: string,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ) => AppEffect<"resolved" | "timeout" | "aborted">
 }
 
 export class PermissionsRepository extends Context.Tag("@llm-bridge/runtime-core/PermissionsRepository")<

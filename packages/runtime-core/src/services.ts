@@ -145,7 +145,7 @@ export const AuthFlowServiceLive = Layer.effect(
 
 export interface PermissionServiceApi {
   ensureOriginEnabled: (origin: string) => AppEffect<void>
-  ensureRequestAllowed: (origin: string, modelID: string) => AppEffect<void>
+  ensureRequestAllowed: (origin: string, modelID: string, signal?: AbortSignal) => AppEffect<void>
   setOriginEnabled: (origin: string, enabled: boolean) => AppEffect<RuntimeSetOriginEnabledResponse>
   updatePermission: (input: {
     origin: string
@@ -180,7 +180,7 @@ export const PermissionServiceLive = Layer.effect(
         })
       })
 
-    const ensureRequestAllowed = (origin: string, modelID: string) =>
+    const ensureRequestAllowed = (origin: string, modelID: string, signal?: AbortSignal) =>
       Effect.gen(function*() {
         const permission = yield* permissions.getModelPermission(origin, modelID)
         if (permission === "allowed") return
@@ -197,11 +197,16 @@ export const PermissionServiceLive = Layer.effect(
           return
         }
 
-        const waitResult = yield* permissions.waitForPermissionDecision(result.request.id)
+        const waitResult = yield* permissions.waitForPermissionDecision(result.request.id, undefined, signal)
         if (waitResult === "timeout") {
           return yield* new AuthFlowExpiredError({
             providerID: parsed.providerID,
             message: "Permission request timed out",
+          })
+        }
+        if (waitResult === "aborted") {
+          return yield* new RuntimeValidationError({
+            message: "Request canceled",
           })
         }
 
@@ -314,20 +319,27 @@ export const ModelExecutionServiceLive = Layer.effect(
     const models = yield* ModelExecutionRepository
     const permissions = yield* PermissionService
     const controllers = new Map<string, AbortController>()
+    const pendingAbortKeys = new Set<string>()
 
     const toControllerKey = (input: { origin: string; sessionID: string; requestID: string }) =>
       `${input.origin}::${input.sessionID}::${input.requestID}`
 
     const registerController = (input: { origin: string; sessionID: string; requestID: string }) =>
       Effect.sync(() => {
+        const key = toControllerKey(input)
         const controller = new AbortController()
-        controllers.set(toControllerKey(input), controller)
+        controllers.set(key, controller)
+        if (pendingAbortKeys.delete(key)) {
+          controller.abort()
+        }
         return controller
       })
 
     const unregisterController = (input: { origin: string; sessionID: string; requestID: string }) =>
       Effect.sync(() => {
-        controllers.delete(toControllerKey(input))
+        const key = toControllerKey(input)
+        controllers.delete(key)
+        pendingAbortKeys.delete(key)
       })
 
     return {
@@ -339,16 +351,25 @@ export const ModelExecutionServiceLive = Layer.effect(
         }),
       generateModel: (input) =>
         Effect.gen(function*() {
-          yield* permissions.ensureOriginEnabled(input.origin)
-          yield* permissions.ensureRequestAllowed(input.origin, input.modelID)
-          const controller = yield* registerController({
+          const controllerInput = {
             origin: input.origin,
             sessionID: input.sessionID,
             requestID: input.requestID,
-          })
-          return yield* models.generateModel({
-            ...input,
-            signal: controller.signal,
+          }
+
+          return yield* Effect.gen(function*() {
+            const controller = yield* registerController(controllerInput)
+            yield* permissions.ensureOriginEnabled(input.origin)
+            yield* permissions.ensureRequestAllowed(input.origin, input.modelID, controller.signal)
+            if (controller.signal.aborted) {
+              return yield* new RuntimeValidationError({
+                message: "Request canceled",
+              })
+            }
+            return yield* models.generateModel({
+              ...input,
+              signal: controller.signal,
+            })
           }).pipe(
             Effect.ensuring(unregisterController({
               origin: input.origin,
@@ -359,25 +380,38 @@ export const ModelExecutionServiceLive = Layer.effect(
         }),
       streamModel: (input) =>
         Effect.gen(function*() {
-          yield* permissions.ensureOriginEnabled(input.origin)
-          yield* permissions.ensureRequestAllowed(input.origin, input.modelID)
-          const controller = yield* registerController({
+          const controllerInput = {
             origin: input.origin,
             sessionID: input.sessionID,
             requestID: input.requestID,
-          })
-          const stream = yield* models.streamModel({
-            ...input,
-            signal: controller.signal,
-          })
+          }
+
+          const controller = yield* registerController(controllerInput)
+          const stream = yield* Effect.gen(function*() {
+            yield* permissions.ensureOriginEnabled(input.origin)
+            yield* permissions.ensureRequestAllowed(input.origin, input.modelID, controller.signal)
+            if (controller.signal.aborted) {
+              return yield* new RuntimeValidationError({
+                message: "Request canceled",
+              })
+            }
+            return yield* models.streamModel({
+              ...input,
+              signal: controller.signal,
+            })
+          }).pipe(
+            Effect.tapError(() =>
+              unregisterController({
+                origin: input.origin,
+                sessionID: input.sessionID,
+                requestID: input.requestID,
+              })),
+          )
 
           return withStreamCleanup(stream, () => {
             controller.abort()
-            controllers.delete(toControllerKey({
-              origin: input.origin,
-              sessionID: input.sessionID,
-              requestID: input.requestID,
-            }))
+            controllers.delete(toControllerKey(controllerInput))
+            pendingAbortKeys.delete(toControllerKey(controllerInput))
           })
         }),
       abortModelCall: (input) =>
@@ -387,7 +421,12 @@ export const ModelExecutionServiceLive = Layer.effect(
             sessionID: input.sessionID,
             requestID: input.requestID,
           })
-          controllers.get(key)?.abort()
+          const controller = controllers.get(key)
+          if (!controller) {
+            pendingAbortKeys.add(key)
+            return
+          }
+          controller.abort()
           controllers.delete(key)
         }),
     } satisfies ModelExecutionServiceApi

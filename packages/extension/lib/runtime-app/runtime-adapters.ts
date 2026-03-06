@@ -795,8 +795,8 @@ export function makeRuntimeCoreInfrastructureLayer() {
     resolvePermissionRequest: (input: { requestId: string; decision: "allowed" | "denied" }) =>
       toEffect(() => resolveRuntimePermissionRequest(input)),
     dismissPermissionRequest: (requestId: string) => toEffect(() => dismissRuntimePermissionRequest(requestId)),
-    waitForPermissionDecision: (requestId: string, timeoutMs?: number) =>
-      toEffect(() => waitForPermissionDecision(requestId, timeoutMs)),
+    waitForPermissionDecision: (requestId: string, timeoutMs?: number, signal?: AbortSignal) =>
+      toEffect(() => waitForPermissionDecision(requestId, timeoutMs, signal)),
   })
 
   const PendingRequestsRepoLive = Layer.succeed(PendingRequestsRepository, {

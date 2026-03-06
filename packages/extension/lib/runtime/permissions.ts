@@ -2,7 +2,12 @@ import { MAX_PENDING_REQUESTS, PENDING_REQUEST_TIMEOUT_MS } from "@/lib/runtime/
 import { runtimeDb } from "@/lib/runtime/db/runtime-db"
 import { runtimePermissionKey } from "@/lib/runtime/db/runtime-db-types"
 import { afterCommit, runTx } from "@/lib/runtime/db/runtime-db-tx"
-import { publishRuntimeEvent } from "@/lib/runtime/events/runtime-events"
+import { publishRuntimeEvent, subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events"
+import {
+  mergePendingChangedRequestIds,
+  waitForPermissionDecisionEventDriven,
+  type PermissionDecisionWaitResult,
+} from "@/lib/runtime/permission-wait"
 import { getModelCapabilities, now, randomId } from "@/lib/runtime/util"
 
 export type PermissionStatus = "allowed" | "denied" | "pending"
@@ -27,6 +32,11 @@ export type CreatePermissionRequestResult =
       status: "requested"
       request: PermissionRequest
     }
+
+async function isPermissionRequestPending(requestId: string) {
+  const pending = await runtimeDb.pendingRequests.get(requestId)
+  return pending?.status === "pending"
+}
 
 export async function listPermissions(origin: string) {
   const rows = await runtimeDb.permissions.where("origin").equals(origin).toArray()
@@ -152,6 +162,8 @@ export async function createPermissionRequest(input: {
     status: "pending",
   }
 
+  let staleRequestIds: string[] = []
+
   await runTx([runtimeDb.pendingRequests, runtimeDb.permissions], async () => {
     await runtimeDb.permissions.put({
       id: runtimePermissionKey(input.origin, input.modelId),
@@ -167,9 +179,9 @@ export async function createPermissionRequest(input: {
     const all = await runtimeDb.pendingRequests.orderBy("requestedAt").toArray()
     const overflow = all.length - MAX_PENDING_REQUESTS
     if (overflow > 0) {
-      const stale = all.slice(0, overflow).map((item) => item.id)
-      if (stale.length > 0) {
-        await runtimeDb.pendingRequests.bulkDelete(stale)
+      staleRequestIds = all.slice(0, overflow).map((item) => item.id)
+      if (staleRequestIds.length > 0) {
+        await runtimeDb.pendingRequests.bulkDelete(staleRequestIds)
       }
     }
 
@@ -178,7 +190,7 @@ export async function createPermissionRequest(input: {
         type: "runtime.pending.changed",
         payload: {
           origin: input.origin,
-          requestIds: [request.id],
+          requestIds: mergePendingChangedRequestIds(request.id, staleRequestIds),
         },
       })
       await publishRuntimeEvent({
@@ -281,14 +293,16 @@ export async function listPendingRequests(origin?: string) {
   return rows
 }
 
-export async function waitForPermissionDecision(requestId: string, timeoutMs = PENDING_REQUEST_TIMEOUT_MS) {
-  const start = now()
-  while (now() - start < timeoutMs) {
-    const pending = await runtimeDb.pendingRequests.get(requestId)
-    if (!pending || pending.status !== "pending") {
-      return "resolved"
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  return "timeout"
+export async function waitForPermissionDecision(
+  requestId: string,
+  timeoutMs = PENDING_REQUEST_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<PermissionDecisionWaitResult> {
+  return await waitForPermissionDecisionEventDriven({
+    requestId,
+    timeoutMs,
+    signal,
+    isPending: isPermissionRequestPending,
+    subscribe: subscribeRuntimeEvents,
+  })
 }
