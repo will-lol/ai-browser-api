@@ -17,8 +17,7 @@ import * as Mailbox from "effect/Mailbox"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
-import { streamRuntimeEvents } from "@/lib/runtime/events/runtime-events"
+import { getRuntimePublicRPC } from "@/lib/runtime/rpc/runtime-public-rpc-client"
 const PAGE_BRIDGE_LOG_PREFIX = '[page-bridge-content]'
 
 function toLogString(meta: unknown) {
@@ -121,52 +120,9 @@ function normalizeModelCallInput(input: BridgeModelCallRequest) {
 }
 
 function createPageBridgeHandlers() {
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimePublicRPC()
 
   return PageBridgeRpcGroup.of({
-    getState: () =>
-      fromPromise('getState', async () => {
-        const currentOrigin = window.location.origin
-
-        const [providersData, modelsData, permissionsData, pendingData, originData] = await Promise.all([
-          runtime.listProviders({ origin: currentOrigin }),
-          runtime.listModels({ origin: currentOrigin }),
-          runtime.listPermissions({ origin: currentOrigin }),
-          runtime.listPending({ origin: currentOrigin }),
-          runtime.getOriginState({ origin: currentOrigin }),
-        ])
-
-        const modelsByProvider = new Map<
-          string,
-          Array<{ id: string; name: string; capabilities: ReadonlyArray<string> }>
-        >()
-
-        for (const model of modelsData) {
-          const existing = modelsByProvider.get(model.provider) ?? []
-          existing.push({
-            id: model.id,
-            name: model.name,
-            capabilities: model.capabilities,
-          })
-          modelsByProvider.set(model.provider, existing)
-        }
-
-        return {
-          providers: providersData.map((provider) => ({
-            id: provider.id,
-            name: provider.name,
-            connected: provider.connected,
-            env: provider.env,
-            authMethods: [],
-            models: modelsByProvider.get(provider.id) ?? [],
-          })),
-          permissions: permissionsData,
-          pendingRequests: pendingData,
-          originEnabled: originData.enabled,
-          currentOrigin,
-        }
-      }),
-
     listModels: () =>
       fromPromise('listModels', async () => {
         const models = await runtime.listModels({
@@ -216,15 +172,17 @@ function createPageBridgeHandlers() {
         return result
       }),
 
-    watchRuntimeEvents: () => streamRuntimeEvents(),
-
     abort: (input) =>
       fromPromise('abort', async () => {
         if (!input.requestId) {
           return { ok: true }
         }
 
+        const sessionID = input.sessionID ?? input.requestId
+
         await runtime.abortModelCall({
+          origin: window.location.origin,
+          sessionID,
           requestId: input.requestId,
         })
 
@@ -495,6 +453,7 @@ export function setupPageApiBridge() {
       })
     }
 
+    // `event.source` is only used as a local filter; authorization is enforced in background RPC.
     if (event.source !== window || event.data?.type !== PAGE_BRIDGE_INIT_MESSAGE || !event.ports[0]) {
       return
     }

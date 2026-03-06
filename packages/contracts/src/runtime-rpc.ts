@@ -6,6 +6,7 @@ import {
   RuntimeAcquireModelInputSchema,
   RuntimeAuthFlowSnapshotSchema,
   RuntimeCancelProviderAuthFlowResponseSchema,
+  RuntimeCreatePermissionRequestInputSchema,
   RuntimeCreatePermissionRequestResponseSchema,
   RuntimeDismissPermissionRequestResponseSchema,
   RuntimeDisconnectProviderResponseSchema,
@@ -28,9 +29,67 @@ import {
 } from "./entities"
 import { RuntimeRpcErrorSchema } from "./errors"
 
-export const RUNTIME_RPC_PORT_NAME = "llm-bridge-runtime-rpc-v2"
+export const RUNTIME_PUBLIC_RPC_PORT_NAME = "llm-bridge-runtime-public-rpc-v1"
+export const RUNTIME_ADMIN_RPC_PORT_NAME = "llm-bridge-runtime-admin-rpc-v1"
 
-export const RuntimeRpcGroup = RpcGroup.make(
+// Backward compatibility for callers that have not switched to explicit role-based clients.
+export const RUNTIME_RPC_PORT_NAME = RUNTIME_ADMIN_RPC_PORT_NAME
+
+export const RuntimePublicRpcGroup = RpcGroup.make(
+  Rpc.make("listModels", {
+    payload: {
+      origin: Schema.String,
+      connectedOnly: Schema.optional(Schema.Boolean),
+      providerID: Schema.optional(Schema.String),
+    },
+    success: Schema.Array(RuntimeModelSummarySchema),
+    error: RuntimeRpcErrorSchema,
+  }),
+  Rpc.make("getOriginState", {
+    payload: {
+      origin: Schema.String,
+    },
+    success: RuntimeOriginStateSchema,
+    error: RuntimeRpcErrorSchema,
+  }),
+  Rpc.make("listPending", {
+    payload: {
+      origin: Schema.String,
+    },
+    success: Schema.Array(RuntimePendingRequestSchema),
+    error: RuntimeRpcErrorSchema,
+  }),
+  Rpc.make("requestPermission", {
+    payload: RuntimeCreatePermissionRequestInputSchema,
+    success: RuntimeCreatePermissionRequestResponseSchema,
+    error: RuntimeRpcErrorSchema,
+  }),
+  Rpc.make("acquireModel", {
+    payload: RuntimeAcquireModelInputSchema,
+    success: RuntimeModelDescriptorSchema,
+    error: RuntimeRpcErrorSchema,
+  }),
+  Rpc.make("modelDoGenerate", {
+    payload: RuntimeModelCallInputSchema,
+    success: RuntimeGenerateResponseSchema,
+    error: RuntimeRpcErrorSchema,
+  }),
+  Rpc.make("modelDoStream", {
+    payload: RuntimeModelCallInputSchema,
+    success: RuntimeStreamPartSchema,
+    stream: true,
+    error: RuntimeRpcErrorSchema,
+  }),
+  Rpc.make("abortModelCall", {
+    payload: RuntimeAbortModelCallInputSchema,
+    success: Schema.Void,
+    error: RuntimeRpcErrorSchema,
+  }),
+)
+
+export type RuntimePublicRpc = RpcGroup.Rpcs<typeof RuntimePublicRpcGroup>
+
+export const RuntimeAdminRpcGroup = RpcGroup.make(
   Rpc.make("listProviders", {
     payload: {
       origin: Schema.String,
@@ -158,4 +217,4 @@ export const RuntimeRpcGroup = RpcGroup.make(
   }),
 )
 
-export type RuntimeRpc = RpcGroup.Rpcs<typeof RuntimeRpcGroup>
+export type RuntimeAdminRpc = RpcGroup.Rpcs<typeof RuntimeAdminRpcGroup>

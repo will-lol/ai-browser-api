@@ -21,7 +21,10 @@ import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 import { subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events";
 import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager";
 import { makeRuntimeCoreInfrastructureLayer } from "@/lib/runtime-app/runtime-adapters";
-import { RuntimeRpcHandlersLive } from "@/lib/runtime-app/runtime-rpc-handlers";
+import {
+  RuntimeAdminRpcHandlersLive,
+  RuntimePublicRpcHandlersLive,
+} from "@/lib/runtime-app/runtime-rpc-handlers";
 import { registerRuntimeRpcServer } from "@/lib/runtime-app/runtime-rpc-server";
 import {
   hasEnabledConnectedModel,
@@ -264,23 +267,34 @@ function createRuntimeLayer() {
     Layer.provide(infrastructureLayer),
   );
 
-  const runtimeRpcHandlersLayer = RuntimeRpcHandlersLive.pipe(
+  const runtimePublicRpcHandlersLayer = RuntimePublicRpcHandlersLive.pipe(
     Layer.provide(runtimeApplicationLayer),
   );
 
-  return Layer.merge(runtimeApplicationLayer, runtimeRpcHandlersLayer);
+  const runtimeAdminRpcHandlersLayer = RuntimeAdminRpcHandlersLive.pipe(
+    Layer.provide(runtimeApplicationLayer),
+  );
+
+  return {
+    runtimeApplicationLayer,
+    runtimePublicRpcHandlersLayer,
+    runtimeAdminRpcHandlersLayer,
+  };
 }
 
-function startRuntimeCore(layer: ReturnType<typeof createRuntimeLayer>) {
+function startRuntimeCore(layers: ReturnType<typeof createRuntimeLayer>) {
   void Effect.runPromise(
     Effect.flatMap(RuntimeApplication, (app) => app.startup()).pipe(
-      Effect.provide(layer),
+      Effect.provide(layers.runtimeApplicationLayer),
     ),
   ).catch((error) => {
     console.warn("runtime startup failed", error);
   });
 
-  void registerRuntimeRpcServer(layer).catch((error) => {
+  void registerRuntimeRpcServer({
+    publicLayer: layers.runtimePublicRpcHandlersLayer,
+    adminLayer: layers.runtimeAdminRpcHandlersLayer,
+  }).catch((error) => {
     console.warn("runtime rpc server failed", error);
   });
 }

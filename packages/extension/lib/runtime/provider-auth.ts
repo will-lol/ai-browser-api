@@ -1,4 +1,5 @@
 import { getAuth, removeAuth, setAuth } from "@/lib/runtime/auth-store"
+import { RuntimeValidationError } from "@llm-bridge/contracts"
 import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store"
 import type { RuntimeAuthFlowInstruction } from "@llm-bridge/contracts"
 import type { AuthMethodType, RuntimeAuthMethod } from "@/lib/runtime/plugin-manager"
@@ -25,7 +26,11 @@ async function resolveAuthContext(
   } = {},
 ): Promise<AuthContextResolved> {
   const provider = options.provider ?? (await getProvider(providerID))
-  if (!provider) throw new Error(`Provider ${providerID} not found`)
+  if (!provider) {
+    throw new RuntimeValidationError({
+      message: `Provider ${providerID} not found`,
+    })
+  }
   const auth = options.auth ?? (await getAuth(providerID))
   return {
     providerID,
@@ -87,7 +92,9 @@ export async function startProviderAuth(input: {
   const pluginManager = getPluginManager()
   const resolved = await pluginManager.resolveAuthMethod(ctx, input.methodID)
   if (!resolved) {
-    throw new Error(`Auth method ${input.methodID} was not found for provider ${input.providerID}`)
+    throw new RuntimeValidationError({
+      message: `Auth method ${input.methodID} was not found for provider ${input.providerID}`,
+    })
   }
 
   const result = await pluginManager.authorize(

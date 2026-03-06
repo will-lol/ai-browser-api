@@ -1,5 +1,10 @@
 import { browser } from "@wxt-dev/browser"
-import type { RuntimeAuthFlowInstruction } from "@llm-bridge/contracts"
+import {
+  RuntimeInternalError,
+  RuntimeValidationError,
+  isRuntimeRpcError,
+  type RuntimeAuthFlowInstruction,
+} from "@llm-bridge/contracts"
 import type { RuntimeAuthMethod } from "@/lib/runtime/plugin-manager"
 import {
   listProviderAuthMethods,
@@ -59,9 +64,31 @@ function canCancel(status: RuntimeAuthFlowStatus) {
   return status === "authorizing"
 }
 
-function toErrorMessage(error: unknown) {
-  if (error instanceof Error && error.message) return error.message
-  return String(error)
+function toAuthFlowErrorSummary(error: unknown) {
+  if (!isRuntimeRpcError(error)) {
+    return "Authentication failed. Please retry."
+  }
+
+  switch (error._tag) {
+    case "RuntimeUpstreamServiceError":
+      return `${error.providerID} authentication request failed${error.statusCode ? ` (${error.statusCode})` : ""}.`
+    case "RuntimeAuthProviderError":
+      return error.message
+    case "RuntimeValidationError":
+      return error.message
+    case "RuntimeAuthorizationError":
+      return "Authentication request is not authorized."
+    case "RuntimeInternalError":
+      return "Authentication failed due to an internal runtime error."
+    case "ProviderNotConnectedError":
+    case "PermissionDeniedError":
+    case "AuthFlowExpiredError":
+    case "TransportProtocolError":
+    case "ModelNotFoundError":
+      return error.message
+    default:
+      return "Authentication failed. Please retry."
+  }
 }
 
 export class AuthFlowManager {
@@ -203,7 +230,10 @@ export class AuthFlowManager {
     })
 
     if (!windowRef || typeof windowRef.id !== "number") {
-      throw new Error("Failed to open provider auth window")
+      throw new RuntimeInternalError({
+        operation: "openProviderAuthWindow",
+        message: "Failed to open provider auth window",
+      })
     }
 
     flow.windowId = windowRef.id
@@ -235,13 +265,17 @@ export class AuthFlowManager {
     }
 
     if (flow.status === "authorizing") {
-      throw new Error("Auth flow is already in progress")
+      throw new RuntimeValidationError({
+        message: "Auth flow is already in progress",
+      })
     }
 
     flow.methods = await listProviderAuthMethods(input.providerID)
     const selected = flow.methods.find((method) => method.id === input.methodID)
     if (!selected) {
-      throw new Error(`Auth method ${input.methodID} is not available for provider ${input.providerID}`)
+      throw new RuntimeValidationError({
+        message: `Auth method ${input.methodID} is not available for provider ${input.providerID}`,
+      })
     }
 
     this.clearExecution(flow)
@@ -319,11 +353,11 @@ export class AuthFlowManager {
         latest.error = "Authentication canceled."
       } else {
         latest.status = "error"
-        latest.error = toErrorMessage(error)
+        latest.error = toAuthFlowErrorSummary(error)
         console.error("[auth-flow] provider auth failed", {
           providerID: input.providerID,
           methodID: selected.id,
-          error: latest.error,
+          error,
         })
       }
       latest.instruction = undefined

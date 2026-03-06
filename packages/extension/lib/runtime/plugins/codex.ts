@@ -1,4 +1,9 @@
 import { browser } from "@wxt-dev/browser";
+import {
+  RuntimeAuthProviderError,
+  RuntimeUpstreamServiceError,
+  RuntimeValidationError,
+} from "@llm-bridge/contracts";
 import { setAuth } from "@/lib/runtime/auth-store";
 import type { AuthRecord } from "@/lib/runtime/auth-store";
 import type {
@@ -27,6 +32,7 @@ const CODEX_REDIRECT_URL_PATTERN = `${CODEX_REDIRECT_URI}*`;
 const CODEX_CALLBACK_TIMEOUT_MS = 90_000;
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3_000;
 const CODEX_DEFAULT_INSTRUCTIONS = "Follow the user's instructions.";
+const CODEX_PROVIDER_ID = "openai";
 
 type TokenResponse = {
   id_token?: string;
@@ -44,8 +50,49 @@ type RequestSummary = {
 
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
-    throw new Error("Authentication canceled");
+    throw new RuntimeAuthProviderError({
+      providerID: CODEX_PROVIDER_ID,
+      operation: "auth.abort",
+      retryable: true,
+      message: "Authentication canceled.",
+    });
   }
+}
+
+function codexUpstreamError(input: {
+  operation: string;
+  statusCode: number;
+  detail?: string;
+}) {
+  console.error("[builtin-codex-auth] upstream auth request failed", {
+    operation: input.operation,
+    statusCode: input.statusCode,
+    detail: input.detail?.slice(0, 500),
+  });
+
+  return new RuntimeUpstreamServiceError({
+    providerID: CODEX_PROVIDER_ID,
+    operation: input.operation,
+    statusCode: input.statusCode,
+    retryable:
+      input.statusCode >= 500 ||
+      input.statusCode === 429 ||
+      input.statusCode === 408,
+    message: "OpenAI authentication request failed.",
+  });
+}
+
+function codexAuthProviderError(input: {
+  operation: string;
+  message: string;
+  retryable?: boolean;
+}) {
+  return new RuntimeAuthProviderError({
+    providerID: CODEX_PROVIDER_ID,
+    operation: input.operation,
+    retryable: input.retryable ?? false,
+    message: input.message,
+  });
 }
 
 function summarizeCodexRequest(
@@ -281,9 +328,11 @@ async function exchangeCodeForTokens(
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(
-      `Codex token exchange failed (${response.status}): ${detail.slice(0, 300)}`,
-    );
+    throw codexUpstreamError({
+      operation: "oauth.exchangeCodeForTokens",
+      statusCode: response.status,
+      detail,
+    });
   }
 
   return (await response.json()) as TokenResponse;
@@ -304,9 +353,11 @@ async function refreshAccessToken(refreshToken: string) {
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(
-      `Codex token refresh failed (${response.status}): ${detail.slice(0, 300)}`,
-    );
+    throw codexUpstreamError({
+      operation: "oauth.refreshAccessToken",
+      statusCode: response.status,
+      detail,
+    });
   }
 
   return (await response.json()) as TokenResponse;
@@ -357,13 +408,20 @@ async function authorizeBrowser(input: PluginAuthorizeContext) {
   const parsed = input.oauth.parseCallback(callbackUrl);
 
   if (parsed.error) {
-    throw new Error(
-      `Codex OAuth failed: ${parsed.errorDescription ?? parsed.error}`,
-    );
+    throw codexAuthProviderError({
+      operation: "oauth.authorizeBrowser",
+      message: "OpenAI OAuth authorization failed.",
+    });
   }
-  if (!parsed.code) throw new Error("Missing authorization code");
+  if (!parsed.code) {
+    throw new RuntimeValidationError({
+      message: "Missing authorization code",
+    });
+  }
   if (parsed.state !== state) {
-    throw new Error("OAuth state mismatch");
+    throw new RuntimeValidationError({
+      message: "OAuth state mismatch",
+    });
   }
 
   const tokens = await exchangeCodeForTokens(
@@ -400,9 +458,11 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(
-      `Failed to start Codex device auth (${response.status}): ${detail.slice(0, 300)}`,
-    );
+    throw codexUpstreamError({
+      operation: "oauth.authorizeDevice.start",
+      statusCode: response.status,
+      detail,
+    });
   }
 
   const data = (await response.json()) as {
@@ -475,9 +535,11 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
 
       if (!tokenResponse.ok) {
         const detail = await tokenResponse.text().catch(() => "");
-        throw new Error(
-          `Codex device token exchange failed (${tokenResponse.status}): ${detail.slice(0, 300)}`,
-        );
+        throw codexUpstreamError({
+          operation: "oauth.authorizeDevice.exchangeToken",
+          statusCode: tokenResponse.status,
+          detail,
+        });
       }
 
       const tokens = (await tokenResponse.json()) as TokenResponse;
@@ -497,18 +559,22 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
 
     if (tokenPollResponse.status !== 403 && tokenPollResponse.status !== 404) {
       const detail = await tokenPollResponse.text().catch(() => "");
-      throw new Error(
-        `Codex device auth failed (${tokenPollResponse.status}): ${detail.slice(0, 300)}`,
-      );
+      throw codexUpstreamError({
+        operation: "oauth.authorizeDevice.poll",
+        statusCode: tokenPollResponse.status,
+        detail,
+      });
     }
 
     await sleep(intervalMs + OAUTH_POLLING_SAFETY_MARGIN_MS);
     throwIfAborted(signal);
   }
 
-  throw new Error(
-    `Codex device authorization timed out. Enter code: ${data.user_code}`,
-  );
+  throw codexAuthProviderError({
+    operation: "oauth.authorizeDevice.poll",
+    message: "Codex device authorization timed out.",
+    retryable: true,
+  });
 }
 
 function buildCodexOAuthProvider(provider: ProviderInfo) {

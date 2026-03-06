@@ -1,6 +1,11 @@
 import { setAuth } from "@/lib/runtime/auth-store";
 import { getAuth } from "@/lib/runtime/auth-store";
 import {
+  RuntimeAuthProviderError,
+  RuntimeUpstreamServiceError,
+  RuntimeValidationError,
+} from "@llm-bridge/contracts";
+import {
   buildExtensionRedirectPath,
   generatePKCE,
   generateState,
@@ -12,6 +17,7 @@ const CLIENT_ID =
   "6d66e9e281cd4298d71adfb271cd1baf57f18f7a186dbad4e94ca3e4ff2acb2e";
 const GITLAB_COM_URL = "https://gitlab.com";
 const OAUTH_SCOPES = ["api"];
+const GITLAB_PROVIDER_ID = "gitlab";
 
 type GitLabTokenResponse = {
   access_token: string;
@@ -20,6 +26,42 @@ type GitLabTokenResponse = {
 };
 
 const refreshLocks = new Map<string, Promise<void>>();
+
+function gitlabUpstreamError(input: {
+  operation: string;
+  statusCode: number;
+  detail?: string;
+}) {
+  console.error("[builtin-gitlab-auth] upstream auth request failed", {
+    operation: input.operation,
+    statusCode: input.statusCode,
+    detail: input.detail?.slice(0, 500),
+  });
+
+  return new RuntimeUpstreamServiceError({
+    providerID: GITLAB_PROVIDER_ID,
+    operation: input.operation,
+    statusCode: input.statusCode,
+    retryable:
+      input.statusCode >= 500 ||
+      input.statusCode === 429 ||
+      input.statusCode === 408,
+    message: "GitLab authentication request failed.",
+  });
+}
+
+function gitlabAuthProviderError(input: {
+  operation: string;
+  message: string;
+  retryable?: boolean;
+}) {
+  return new RuntimeAuthProviderError({
+    providerID: GITLAB_PROVIDER_ID,
+    operation: input.operation,
+    retryable: input.retryable ?? false,
+    message: input.message,
+  });
+}
 
 async function exchangeAuthorizationCode(
   instanceUrl: string,
@@ -44,9 +86,11 @@ async function exchangeAuthorizationCode(
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(
-      `GitLab token exchange failed (${response.status}): ${detail.slice(0, 300)}`,
-    );
+    throw gitlabUpstreamError({
+      operation: "oauth.exchangeAuthorizationCode",
+      statusCode: response.status,
+      detail,
+    });
   }
 
   return (await response.json()) as GitLabTokenResponse;
@@ -68,9 +112,11 @@ async function exchangeRefreshToken(instanceUrl: string, refreshToken: string) {
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(
-      `GitLab token refresh failed (${response.status}): ${detail.slice(0, 300)}`,
-    );
+    throw gitlabUpstreamError({
+      operation: "oauth.exchangeRefreshToken",
+      statusCode: response.status,
+      detail,
+    });
   }
 
   return (await response.json()) as GitLabTokenResponse;
@@ -123,14 +169,20 @@ export const gitlabAuthPlugin: RuntimePlugin = {
               const parsed = input.oauth.parseCallback(callbackUrl);
 
               if (parsed.error) {
-                throw new Error(
-                  `GitLab OAuth failed: ${parsed.errorDescription ?? parsed.error}`,
-                );
+                throw gitlabAuthProviderError({
+                  operation: "oauth.authorize",
+                  message: "GitLab OAuth authorization failed.",
+                });
               }
-              if (!parsed.code)
-                throw new Error("Missing GitLab authorization code");
+              if (!parsed.code) {
+                throw new RuntimeValidationError({
+                  message: "Missing GitLab authorization code",
+                });
+              }
               if (parsed.state && parsed.state !== state) {
-                throw new Error("OAuth state mismatch");
+                throw new RuntimeValidationError({
+                  message: "OAuth state mismatch",
+                });
               }
 
               const tokens = await exchangeAuthorizationCode(
@@ -178,7 +230,9 @@ export const gitlabAuthPlugin: RuntimePlugin = {
               );
               const token = input.values.token?.trim();
               if (!token) {
-                throw new Error("GitLab personal access token is required");
+                throw new RuntimeValidationError({
+                  message: "GitLab personal access token is required",
+                });
               }
 
               const response = await fetch(`${instanceUrl}/api/v4/user`, {
@@ -188,9 +242,10 @@ export const gitlabAuthPlugin: RuntimePlugin = {
               });
 
               if (!response.ok) {
-                throw new Error(
-                  "GitLab personal access token validation failed",
-                );
+                throw gitlabAuthProviderError({
+                  operation: "pat.validate",
+                  message: "GitLab personal access token validation failed.",
+                });
               }
 
               return {

@@ -95,7 +95,11 @@ export interface RuntimeApplicationApi {
     modelID: string
     options: RuntimeModelCallOptions
   }) => AppEffect<ReadableStream<RuntimeStreamPart>>
-  abortModelCall: (requestID: string) => AppEffect<void>
+  abortModelCall: (input: {
+    origin: string
+    sessionID: string
+    requestID: string
+  }) => AppEffect<void>
 }
 
 export class RuntimeApplication extends Context.Tag("@llm-bridge/runtime-core/RuntimeApplication")<
@@ -165,7 +169,12 @@ export const RuntimeApplicationLive = Layer.effect(
           modelID: input.modelID,
           options: input.options,
         }),
-      abortModelCall: (requestID) => model.abortModelCall(requestID),
+      abortModelCall: (input) =>
+        model.abortModelCall({
+          origin: input.origin,
+          sessionID: input.sessionID,
+          requestID: input.requestID,
+        }),
     } satisfies RuntimeApplicationApi
   }),
 ).pipe(

@@ -230,6 +230,14 @@ export type RuntimeUpdatePermissionInput = Schema.Schema.Type<typeof RuntimeUpda
 export const RuntimeRequestPermissionInputSchema = Schema.Union(
   Schema.Struct({
     origin: Schema.String,
+    action: Schema.Literal("create"),
+    modelId: Schema.String,
+    modelName: Schema.String,
+    provider: Schema.String,
+    capabilities: Schema.optional(Schema.Array(Schema.String)),
+  }),
+  Schema.Struct({
+    origin: Schema.String,
     action: Schema.Literal("resolve"),
     requestId: Schema.String,
     decision: RuntimePermissionDecisionSchema,
@@ -239,16 +247,20 @@ export const RuntimeRequestPermissionInputSchema = Schema.Union(
     action: Schema.Literal("dismiss"),
     requestId: Schema.String,
   }),
-  Schema.Struct({
-    origin: Schema.String,
-    action: Schema.Literal("create"),
-    modelId: Schema.String,
-    modelName: Schema.String,
-    provider: Schema.String,
-    capabilities: Schema.optional(Schema.Array(Schema.String)),
-  }),
 )
 export type RuntimeRequestPermissionInput = Schema.Schema.Type<typeof RuntimeRequestPermissionInputSchema>
+
+export const RuntimeCreatePermissionRequestInputSchema = Schema.Struct({
+  origin: Schema.String,
+  action: Schema.Literal("create"),
+  modelId: Schema.String,
+  modelName: Schema.String,
+  provider: Schema.String,
+  capabilities: Schema.optional(Schema.Array(Schema.String)),
+})
+export type RuntimeCreatePermissionRequestInput = Schema.Schema.Type<
+  typeof RuntimeCreatePermissionRequestInputSchema
+>
 
 export const SerializedSupportedUrlPatternSchema = Schema.Struct({
   source: Schema.String,
@@ -853,6 +865,8 @@ export const RuntimeStreamPartSchema = Schema.Union(
 export type RuntimeStreamPart = Schema.Schema.Type<typeof RuntimeStreamPartSchema>
 
 export const RuntimeAbortModelCallInputSchema = Schema.Struct({
+  origin: Schema.String,
+  sessionID: Schema.String,
   requestId: Schema.String,
 })
 export type RuntimeAbortModelCallInput = Schema.Schema.Type<typeof RuntimeAbortModelCallInputSchema>
@@ -882,6 +896,7 @@ export type BridgeModelCallRequest = Schema.Schema.Type<typeof BridgeModelCallRe
 
 export const BridgeAbortRequestSchema = Schema.Struct({
   requestId: Schema.optional(Schema.String),
+  sessionID: Schema.optional(Schema.String),
 })
 export type BridgeAbortRequest = Schema.Schema.Type<typeof BridgeAbortRequestSchema>
 

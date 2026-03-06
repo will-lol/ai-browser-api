@@ -1,4 +1,4 @@
-import { getRuntimeRPC } from "@/lib/runtime/rpc/runtime-rpc-client"
+import { getRuntimeAdminRPC } from "@/lib/runtime/rpc/runtime-admin-rpc-client"
 import type {
   RuntimeAuthFlowSnapshot,
   RuntimePermissionDecision,
@@ -23,7 +23,7 @@ export function currentOrigin() {
 }
 
 export async function fetchProviders(origin = currentOrigin()) {
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
   return runtime.listProviders({ origin })
 }
 
@@ -33,7 +33,7 @@ export async function fetchModels(input?: {
   origin?: string
 }) {
   const origin = input?.origin ?? currentOrigin()
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
   return runtime.listModels({
     origin,
     connectedOnly: input?.connectedOnly,
@@ -42,17 +42,17 @@ export async function fetchModels(input?: {
 }
 
 export async function fetchOriginState(origin = currentOrigin()) {
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
   return runtime.getOriginState({ origin })
 }
 
 export async function fetchPermissions(origin = currentOrigin()) {
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
   return runtime.listPermissions({ origin })
 }
 
 export async function fetchPendingRequests(origin = currentOrigin()) {
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
   return runtime.listPending({ origin })
 }
 
@@ -60,7 +60,7 @@ export async function openRuntimeProviderAuthWindow(input: {
   providerID: string
   origin?: string
 }) {
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
   const origin = input.origin ?? currentOrigin()
   return runtime.openProviderAuthWindow({
     origin,
@@ -72,7 +72,7 @@ export async function fetchProviderAuthFlow(input: {
   providerID: string
   origin?: string
 }) {
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
   const origin = input.origin ?? currentOrigin()
   return runtime.getProviderAuthFlow({
     origin,
@@ -86,7 +86,7 @@ export async function startRuntimeProviderAuthFlow(input: {
   values?: Record<string, string>
   origin?: string
 }) {
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
   const origin = input.origin ?? currentOrigin()
   return runtime.startProviderAuthFlow({
     origin,
@@ -101,7 +101,7 @@ export async function cancelRuntimeProviderAuthFlow(input: {
   reason?: string
   origin?: string
 }) {
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
   const origin = input.origin ?? currentOrigin()
   return runtime.cancelProviderAuthFlow({
     origin,
@@ -115,7 +115,7 @@ export async function disconnectRuntimeProvider(input: {
   origin?: string
 }) {
   const origin = input.origin ?? currentOrigin()
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
   return runtime.disconnectProvider({
     providerID: input.providerID,
     origin,
@@ -127,7 +127,7 @@ export async function setRuntimeOriginEnabled(input: {
   origin?: string
 }) {
   const origin = input.origin ?? currentOrigin()
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
 
   return runtime.updatePermission({
     mode: "origin",
@@ -141,7 +141,7 @@ export async function dismissRuntimePermissionRequest(input: {
   origin?: string
 }) {
   const origin = input.origin ?? currentOrigin()
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
 
   return runtime.requestPermission({
     action: "dismiss",
@@ -156,7 +156,7 @@ export async function resolveRuntimePermissionRequest(input: {
   origin?: string
 }) {
   const origin = input.origin ?? currentOrigin()
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
 
   return runtime.requestPermission({
     action: "resolve",
@@ -172,7 +172,7 @@ export async function updateRuntimeModelPermission(input: {
   origin?: string
 }) {
   const origin = input.origin ?? currentOrigin()
-  const runtime = getRuntimeRPC()
+  const runtime = getRuntimeAdminRPC()
 
   return runtime.updatePermission({
     origin,

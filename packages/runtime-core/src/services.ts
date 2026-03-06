@@ -270,7 +270,11 @@ export interface ModelExecutionServiceApi {
     modelID: string
     options: RuntimeModelCallOptions
   }) => AppEffect<ReadableStream<RuntimeStreamPart>>
-  abortModelCall: (requestID: string) => AppEffect<void>
+  abortModelCall: (input: {
+    origin: string
+    sessionID: string
+    requestID: string
+  }) => AppEffect<void>
 }
 
 export class ModelExecutionService extends Context.Tag("@llm-bridge/runtime-core/ModelExecutionService")<
@@ -311,16 +315,19 @@ export const ModelExecutionServiceLive = Layer.effect(
     const permissions = yield* PermissionService
     const controllers = new Map<string, AbortController>()
 
-    const registerController = (requestID: string) =>
+    const toControllerKey = (input: { origin: string; sessionID: string; requestID: string }) =>
+      `${input.origin}::${input.sessionID}::${input.requestID}`
+
+    const registerController = (input: { origin: string; sessionID: string; requestID: string }) =>
       Effect.sync(() => {
         const controller = new AbortController()
-        controllers.set(requestID, controller)
+        controllers.set(toControllerKey(input), controller)
         return controller
       })
 
-    const unregisterController = (requestID: string) =>
+    const unregisterController = (input: { origin: string; sessionID: string; requestID: string }) =>
       Effect.sync(() => {
-        controllers.delete(requestID)
+        controllers.delete(toControllerKey(input))
       })
 
     return {
@@ -334,19 +341,31 @@ export const ModelExecutionServiceLive = Layer.effect(
         Effect.gen(function*() {
           yield* permissions.ensureOriginEnabled(input.origin)
           yield* permissions.ensureRequestAllowed(input.origin, input.modelID)
-          const controller = yield* registerController(input.requestID)
+          const controller = yield* registerController({
+            origin: input.origin,
+            sessionID: input.sessionID,
+            requestID: input.requestID,
+          })
           return yield* models.generateModel({
             ...input,
             signal: controller.signal,
           }).pipe(
-            Effect.ensuring(unregisterController(input.requestID)),
+            Effect.ensuring(unregisterController({
+              origin: input.origin,
+              sessionID: input.sessionID,
+              requestID: input.requestID,
+            })),
           )
         }),
       streamModel: (input) =>
         Effect.gen(function*() {
           yield* permissions.ensureOriginEnabled(input.origin)
           yield* permissions.ensureRequestAllowed(input.origin, input.modelID)
-          const controller = yield* registerController(input.requestID)
+          const controller = yield* registerController({
+            origin: input.origin,
+            sessionID: input.sessionID,
+            requestID: input.requestID,
+          })
           const stream = yield* models.streamModel({
             ...input,
             signal: controller.signal,
@@ -354,13 +373,22 @@ export const ModelExecutionServiceLive = Layer.effect(
 
           return withStreamCleanup(stream, () => {
             controller.abort()
-            controllers.delete(input.requestID)
+            controllers.delete(toControllerKey({
+              origin: input.origin,
+              sessionID: input.sessionID,
+              requestID: input.requestID,
+            }))
           })
         }),
-      abortModelCall: (requestID) =>
+      abortModelCall: (input) =>
         Effect.sync(() => {
-          controllers.get(requestID)?.abort()
-          controllers.delete(requestID)
+          const key = toControllerKey({
+            origin: input.origin,
+            sessionID: input.sessionID,
+            requestID: input.requestID,
+          })
+          controllers.get(key)?.abort()
+          controllers.delete(key)
         }),
     } satisfies ModelExecutionServiceApi
   }),

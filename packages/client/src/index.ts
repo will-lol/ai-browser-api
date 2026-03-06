@@ -10,14 +10,12 @@ import {
   toRuntimeRpcError,
   type BridgePermissionRequest,
   type BridgeModelDescriptorResponse,
-  type BridgeStateResponse,
   type JsonValue,
   type PageBridgeRpc,
   type RuntimeCreatePermissionRequestResponse,
   type RuntimeGenerateResponse,
   type RuntimeModelCallOptions,
   type RuntimeModelSummary,
-  type RuntimeEvent,
   type RuntimeRpcError,
   type RuntimeStreamPart,
   type RuntimeTool,
@@ -111,7 +109,6 @@ export type BridgeModelSummary = RuntimeModelSummary;
 export type BridgePermissionResult = RuntimeCreatePermissionRequestResponse;
 
 export interface BridgeClientApi {
-  readonly events: Stream.Stream<RuntimeEvent, RuntimeRpcError>;
   readonly listModels: Effect.Effect<
     ReadonlyArray<BridgeModelSummary>,
     RuntimeRpcError
@@ -119,7 +116,6 @@ export interface BridgeClientApi {
   getModel: (
     modelId: string,
   ) => Effect.Effect<LanguageModelV3, RuntimeRpcError>;
-  readonly getState: Effect.Effect<BridgeStateResponse, RuntimeRpcError>;
   requestPermission: (
     payload?: BridgePermissionRequest,
   ) => Effect.Effect<BridgePermissionResult, RuntimeRpcError>;
@@ -1211,10 +1207,15 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
       ): Stream.Stream<A, RuntimeRpcError, R> =>
         Stream.mapError(stream, toRuntimeRpcError);
 
-      const abortRequest = (requestId: string) =>
+      const abortRequest = (input: { requestId: string; sessionID: string }) =>
         ensureConnection.pipe(
           Effect.flatMap((current) =>
-            normalizeRpcError(current.client.abort({ requestId })),
+            normalizeRpcError(
+              current.client.abort({
+                requestId: input.requestId,
+                sessionID: input.sessionID,
+              }),
+            ),
           ),
           Effect.asVoid,
         );
@@ -1243,7 +1244,12 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
           }
 
           const onAbort = () => {
-            void Effect.runPromise(abortRequest(requestId)).catch(
+            void Effect.runPromise(
+              abortRequest({
+                requestId,
+                sessionID: requestId,
+              }),
+            ).catch(
               () => undefined,
             );
           };
@@ -1295,7 +1301,12 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
 
           const reader = runtimeStream.getReader();
           const onAbort = () => {
-            void Effect.runPromise(abortRequest(requestId)).catch(
+            void Effect.runPromise(
+              abortRequest({
+                requestId,
+                sessionID: requestId,
+              }),
+            ).catch(
               () => undefined,
             );
           };
@@ -1322,9 +1333,12 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
                   await reader.cancel();
                 } finally {
                   cleanup();
-                  void Effect.runPromise(abortRequest(requestId)).catch(
-                    () => undefined,
-                  );
+                  void Effect.runPromise(
+                    abortRequest({
+                      requestId,
+                      sessionID: requestId,
+                    }),
+                  ).catch(() => undefined);
                 }
               },
             }),
@@ -1339,28 +1353,12 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
         Effect.map((response) => response.models),
       );
 
-      const getState = ensureConnection.pipe(
-        Effect.flatMap((current) =>
-          normalizeRpcError(current.client.getState({})),
-        ),
-      );
-
       const requestPermission = (payload: BridgePermissionRequest = {}) =>
         ensureConnection.pipe(
           Effect.flatMap((current) =>
             normalizeRpcError(current.client.requestPermission(payload)),
           ),
         );
-
-      const events = Stream.unwrap(
-        ensureConnection.pipe(
-          Effect.map((current) =>
-            normalizeRpcStreamError(
-              current.client.watchRuntimeEvents({}),
-            ),
-          ),
-        ),
-      );
 
       const getModel = (modelId: string) =>
         Effect.gen(function* () {
@@ -1379,10 +1377,8 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
         });
 
       return {
-        events,
         listModels,
         getModel,
-        getState,
         requestPermission,
         destroy,
       } satisfies BridgeClientApi;

@@ -16,17 +16,9 @@ npm i @llm-bridge/client ai effect
 import { generateText } from "ai"
 import { BridgeClient, withBridgeClient } from "@llm-bridge/client"
 import * as Effect from "effect/Effect"
-import * as Stream from "effect/Stream"
 
 const program = Effect.gen(function*() {
   const client = yield* BridgeClient
-  const eventFiber = yield* client.events.pipe(
-    Stream.take(1),
-    Stream.runForEach((event) =>
-      Effect.sync(() => console.log("runtime event", event)),
-    ),
-    Effect.fork,
-  )
   const models = yield* client.listModels
   const model = yield* client.getModel(models[0]!.id)
 
@@ -37,7 +29,6 @@ const program = Effect.gen(function*() {
     }),
   )
 
-  yield* Effect.interruptFiber(eventFiber)
   return response.text
 })
 

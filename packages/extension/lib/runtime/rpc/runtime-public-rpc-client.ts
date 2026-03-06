@@ -7,14 +7,14 @@ import * as Scope from "effect/Scope"
 import * as Exit from "effect/Exit"
 import * as Stream from "effect/Stream"
 import {
-  RUNTIME_ADMIN_RPC_PORT_NAME,
-  RuntimeAdminRpcGroup,
-  type RuntimeAdminRpc,
+  RUNTIME_PUBLIC_RPC_PORT_NAME,
+  RuntimePublicRpcGroup,
+  type RuntimePublicRpc,
 } from "@llm-bridge/contracts"
 
 type RuntimePort = ReturnType<typeof browser.runtime.connect>
 
-type RuntimeClient = Effect.Effect.Success<ReturnType<typeof RpcClient.make<RuntimeAdminRpc>>>
+type RuntimeClient = Effect.Effect.Success<ReturnType<typeof RpcClient.make<RuntimePublicRpc>>>
 
 type RuntimeConnection = {
   connectionId: number
@@ -29,7 +29,7 @@ type RuntimeRpcInput<K extends keyof RuntimeRpcClient> = Parameters<RuntimeRpcCl
 
 let connection: RuntimeConnection | null = null
 let nextRuntimeConnectionId = 0
-const RUNTIME_RPC_LOG_PREFIX = "[runtime-rpc-content]"
+const RUNTIME_RPC_LOG_PREFIX = "[runtime-public-rpc-content]"
 
 function toLogString(meta: unknown) {
   if (meta === undefined) return ""
@@ -129,7 +129,7 @@ async function ensureConnection(): Promise<RuntimeConnection> {
 
   const scope = await Effect.runPromise(Scope.make())
   const port = browser.runtime.connect({
-    name: RUNTIME_ADMIN_RPC_PORT_NAME,
+    name: RUNTIME_PUBLIC_RPC_PORT_NAME,
   })
   runtimeRpcLog("connection.port.opened", { name: port.name })
 
@@ -180,7 +180,7 @@ async function ensureConnection(): Promise<RuntimeConnection> {
   )
 
   const client = await Effect.runPromise(
-    RpcClient.make(RuntimeAdminRpcGroup, {
+    RpcClient.make(RuntimePublicRpcGroup, {
       disableTracing: true,
     }).pipe(
       Effect.provideService(RpcClient.Protocol, protocol),
@@ -251,55 +251,19 @@ function runStream<A, E>(
   return Stream.toAsyncIterable(stream)
 }
 
-export function getRuntimeAdminRPC() {
+export function getRuntimePublicRPC() {
   return {
-    async listProviders(input: RuntimeRpcInput<"listProviders">) {
-      const { client } = await ensureConnection()
-      return runEffect(client.listProviders(input), "listProviders")
-    },
     async listModels(input: RuntimeRpcInput<"listModels">) {
       const { client } = await ensureConnection()
       return runEffect(client.listModels(input), "listModels")
-    },
-    async listConnectedModels(input: RuntimeRpcInput<"listConnectedModels">) {
-      const { client } = await ensureConnection()
-      return runEffect(client.listConnectedModels(input), "listConnectedModels")
     },
     async getOriginState(input: RuntimeRpcInput<"getOriginState">) {
       const { client } = await ensureConnection()
       return runEffect(client.getOriginState(input), "getOriginState")
     },
-    async listPermissions(input: RuntimeRpcInput<"listPermissions">) {
-      const { client } = await ensureConnection()
-      return runEffect(client.listPermissions(input), "listPermissions")
-    },
     async listPending(input: RuntimeRpcInput<"listPending">) {
       const { client } = await ensureConnection()
       return runEffect(client.listPending(input), "listPending")
-    },
-    async openProviderAuthWindow(input: RuntimeRpcInput<"openProviderAuthWindow">) {
-      const { client } = await ensureConnection()
-      return runEffect(client.openProviderAuthWindow(input), "openProviderAuthWindow")
-    },
-    async getProviderAuthFlow(input: RuntimeRpcInput<"getProviderAuthFlow">) {
-      const { client } = await ensureConnection()
-      return runEffect(client.getProviderAuthFlow(input), "getProviderAuthFlow")
-    },
-    async startProviderAuthFlow(input: RuntimeRpcInput<"startProviderAuthFlow">) {
-      const { client } = await ensureConnection()
-      return runEffect(client.startProviderAuthFlow(input), "startProviderAuthFlow")
-    },
-    async cancelProviderAuthFlow(input: RuntimeRpcInput<"cancelProviderAuthFlow">) {
-      const { client } = await ensureConnection()
-      return runEffect(client.cancelProviderAuthFlow(input), "cancelProviderAuthFlow")
-    },
-    async disconnectProvider(input: RuntimeRpcInput<"disconnectProvider">) {
-      const { client } = await ensureConnection()
-      return runEffect(client.disconnectProvider(input), "disconnectProvider")
-    },
-    async updatePermission(input: RuntimeRpcInput<"updatePermission">) {
-      const { client } = await ensureConnection()
-      return runEffect(client.updatePermission(input), "updatePermission")
     },
     async requestPermission(input: RuntimeRpcInput<"requestPermission">) {
       const { client } = await ensureConnection()
@@ -333,6 +297,3 @@ export function getRuntimeAdminRPC() {
     },
   }
 }
-
-// Backward compatibility for existing imports.
-export const getRuntimeRPC = getRuntimeAdminRPC
