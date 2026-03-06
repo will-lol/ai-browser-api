@@ -127,6 +127,7 @@ export const AuthFlowServiceLive = Layer.effect(
     const auth = yield* AuthRepository
     const catalog = yield* CatalogService
 
+    // Auth orchestration owns catalog refresh side-effects.
     return {
       openProviderAuthWindow: (providerID) => auth.openProviderAuthWindow(providerID),
       getProviderAuthFlow: (providerID) => auth.getProviderAuthFlow(providerID),
@@ -342,6 +343,7 @@ export const ModelExecutionServiceLive = Layer.effect(
         pendingAbortKeys.delete(key)
       })
 
+    // Model orchestration owns origin/permission policy checks.
     return {
       acquireModel: (input) =>
         Effect.gen(function*() {

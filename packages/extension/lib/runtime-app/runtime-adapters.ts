@@ -36,7 +36,13 @@ import type {
 } from "@ai-sdk/provider"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import type { RuntimeLanguageModelCallOptions } from "@/lib/runtime/ai/language-model-runtime"
+import {
+  getRuntimeModelDescriptor,
+  runLanguageModelGenerate,
+  runLanguageModelStream,
+  type RuntimeLanguageModelCallOptions,
+} from "@/lib/runtime/ai/language-model-runtime"
+import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager"
 import { parseProviderModel } from "@/lib/runtime/util"
 import {
   getOriginState,
@@ -45,30 +51,19 @@ import {
   listPermissionsForOrigin,
   listProviders,
 } from "@/lib/runtime/query-service"
-import {
-  cancelRuntimeProviderAuthFlow,
-  createRuntimePermissionRequest,
-  dismissRuntimePermissionRequest,
-  disconnectRuntimeProvider,
-  getRuntimeProviderAuthFlow,
-  openRuntimeProviderAuthWindow,
-  resolveRuntimePermissionRequest,
-  setRuntimeOriginEnabled,
-  startRuntimeProviderAuthFlow,
-  updateRuntimePermission,
-} from "@/lib/runtime/mutation-service"
-import {
-  acquireRuntimeModel,
-  generateRuntimeModel,
-  streamRuntimeModel,
-} from "@/lib/runtime/service"
+import { disconnectProvider } from "@/lib/runtime/provider-auth"
 import {
   ensureProviderCatalog,
   refreshProviderCatalog,
   refreshProviderCatalogForProvider,
 } from "@/lib/runtime/provider-registry"
 import {
+  createPermissionRequest,
+  dismissPermissionRequest,
   getModelPermission,
+  resolvePermissionRequest,
+  setModelPermission,
+  setOriginEnabled,
   waitForPermissionDecision,
 } from "@/lib/runtime/permissions"
 
@@ -738,6 +733,8 @@ function mapStream(stream: ReadableStream<LanguageModelV3StreamPart>): ReadableS
   })
 }
 
+// This layer only bridges runtime-core repository interfaces to extension primitives.
+// Policy ownership (catalog refresh + permission checks) stays in runtime-core services.
 export function makeRuntimeCoreInfrastructureLayer() {
   const ProvidersRepoLive = Layer.succeed(ProvidersRepository, {
     listProviders: () => toEffect(() => listProviders()),
@@ -748,17 +745,55 @@ export function makeRuntimeCoreInfrastructureLayer() {
   })
 
   const AuthRepoLive = Layer.succeed(AuthRepository, {
-    openProviderAuthWindow: (providerID: string) => toEffect(() => openRuntimeProviderAuthWindow(providerID)),
-    getProviderAuthFlow: (providerID: string) => toEffect(() => getRuntimeProviderAuthFlow(providerID)),
+    openProviderAuthWindow: (providerID: string) =>
+      toEffect(() => {
+        const manager = getAuthFlowManager()
+        return manager.openProviderAuthWindow(providerID)
+      }),
+    getProviderAuthFlow: (providerID: string) =>
+      toEffect(async () => {
+        const manager = getAuthFlowManager()
+        return {
+          providerID,
+          result: await manager.getProviderAuthFlow(providerID),
+        }
+      }),
     startProviderAuthFlow: (input: {
       providerID: string
       methodID: string
       values?: Record<string, string>
     }) =>
-      toEffect(() => startRuntimeProviderAuthFlow(input)),
+      toEffect(async () => {
+        const manager = getAuthFlowManager()
+        return {
+          providerID: input.providerID,
+          result: await manager.startProviderAuthFlow(input),
+        }
+      }),
     cancelProviderAuthFlow: (input: { providerID: string; reason?: string }) =>
-      toEffect(() => cancelRuntimeProviderAuthFlow(input)),
-    disconnectProvider: (providerID: string) => toEffect(() => disconnectRuntimeProvider(providerID)),
+      toEffect(async () => {
+        const manager = getAuthFlowManager()
+        return {
+          providerID: input.providerID,
+          result: await manager.cancelProviderAuthFlow(input),
+        }
+      }),
+    disconnectProvider: (providerID: string) =>
+      toEffect(async () => {
+        const manager = getAuthFlowManager()
+        await manager.cancelProviderAuthFlow({
+          providerID,
+          reason: "disconnect",
+        }).catch(() => {
+          // Ignore cancellation failures and continue disconnecting stored auth.
+        })
+
+        await disconnectProvider(providerID)
+        return {
+          providerID,
+          connected: false,
+        }
+      }),
   })
 
   const PermissionsRepoLive = Layer.succeed(PermissionsRepository, {
@@ -766,20 +801,32 @@ export function makeRuntimeCoreInfrastructureLayer() {
     listPermissions: (origin: string) => toEffect(() => listPermissionsForOrigin(origin)),
     getModelPermission: (origin: string, modelID: string) => toEffect(() => getModelPermission(origin, modelID)),
     setOriginEnabled: (origin: string, enabled: boolean) =>
-      toEffect(() => setRuntimeOriginEnabled({ origin, enabled })),
+      toEffect(async () => {
+        await setOriginEnabled(origin, enabled)
+        return {
+          origin,
+          enabled,
+        }
+      }),
     updatePermission: (input: {
       origin: string
       modelID: string
       status: "allowed" | "denied"
       capabilities?: ReadonlyArray<string>
     }) =>
-      toEffect(() =>
-        updateRuntimePermission({
+      toEffect(async () => {
+        await setModelPermission(
+          input.origin,
+          input.modelID,
+          input.status,
+          input.capabilities ? [...input.capabilities] : undefined,
+        )
+        return {
           origin: input.origin,
           modelId: input.modelID,
           status: input.status,
-          capabilities: input.capabilities ? [...input.capabilities] : undefined,
-        })),
+        }
+      }),
     createPermissionRequest: (input: {
       origin: string
       modelId: string
@@ -788,13 +835,25 @@ export function makeRuntimeCoreInfrastructureLayer() {
       capabilities?: ReadonlyArray<string>
     }) =>
       toEffect(() =>
-        createRuntimePermissionRequest({
+        createPermissionRequest({
           ...input,
           capabilities: input.capabilities ? [...input.capabilities] : undefined,
         })),
     resolvePermissionRequest: (input: { requestId: string; decision: "allowed" | "denied" }) =>
-      toEffect(() => resolveRuntimePermissionRequest(input)),
-    dismissPermissionRequest: (requestId: string) => toEffect(() => dismissRuntimePermissionRequest(requestId)),
+      toEffect(async () => {
+        await resolvePermissionRequest(input.requestId, input.decision)
+        return {
+          requestId: input.requestId,
+          decision: input.decision,
+        }
+      }),
+    dismissPermissionRequest: (requestId: string) =>
+      toEffect(async () => {
+        await dismissPermissionRequest(requestId)
+        return {
+          requestId,
+        }
+      }),
     waitForPermissionDecision: (requestId: string, timeoutMs?: number, signal?: AbortSignal) =>
       toEffect(() => waitForPermissionDecision(requestId, timeoutMs, signal)),
   })
@@ -815,11 +874,11 @@ export function makeRuntimeCoreInfrastructureLayer() {
       modelID: string
     }) =>
       toEffect(() =>
-        acquireRuntimeModel({
+        getRuntimeModelDescriptor({
+          modelID: input.modelID,
           origin: input.origin,
           sessionID: input.sessionID,
           requestID: input.requestID,
-          model: input.modelID,
         }).then((descriptor) => ({
           specificationVersion: "v3",
           provider: descriptor.provider,
@@ -835,15 +894,15 @@ export function makeRuntimeCoreInfrastructureLayer() {
       signal?: AbortSignal
     }) =>
       toEffect(() =>
-        generateRuntimeModel(
+        runLanguageModelGenerate(
           {
+            modelID: input.modelID,
             origin: input.origin,
             sessionID: input.sessionID,
             requestID: input.requestID,
-            model: input.modelID,
             options: decodeCallOptions(input.options),
+            signal: input.signal,
           },
-          input.signal,
         ).then((result) => toGenerateResponse(result))),
     streamModel: (input: {
       origin: string
@@ -854,15 +913,15 @@ export function makeRuntimeCoreInfrastructureLayer() {
       signal?: AbortSignal
     }) =>
       toEffect(() =>
-        streamRuntimeModel(
+        runLanguageModelStream(
           {
+            modelID: input.modelID,
             origin: input.origin,
             sessionID: input.sessionID,
             requestID: input.requestID,
-            model: input.modelID,
             options: decodeCallOptions(input.options),
+            signal: input.signal,
           },
-          input.signal,
         ).then((stream) => mapStream(stream))),
   })
 

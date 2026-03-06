@@ -11,7 +11,6 @@ import {
   startProviderAuth,
 } from "@/lib/runtime/provider-auth"
 import { publishRuntimeEvent } from "@/lib/runtime/events/runtime-events"
-import { refreshProviderCatalogForProvider } from "@/lib/runtime/provider-registry"
 
 const AUTH_FLOW_WINDOW_WIDTH = 420
 const AUTH_FLOW_WINDOW_HEIGHT = 640
@@ -299,10 +298,7 @@ export class AuthFlowManager {
       })
       flow.task = task
 
-      const result = await task
-      if (result.connected) {
-        await refreshProviderCatalogForProvider(input.providerID)
-      }
+      await task
 
       const latest = this.flows.get(input.providerID)
       if (!latest) {

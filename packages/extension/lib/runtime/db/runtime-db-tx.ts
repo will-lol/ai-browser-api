@@ -17,6 +17,16 @@ export function afterCommit(effect: TxEffect) {
   effectsByTransaction.set(transaction, effects)
 }
 
+async function drainAfterCommitEffects(effects: ReadonlyArray<TxEffect>) {
+  for (const effect of effects) {
+    try {
+      await effect()
+    } catch (error) {
+      console.warn("runTx afterCommit effect failed", error)
+    }
+  }
+}
+
 export async function runTx<T>(
   mode: TxMode,
   tables: Array<Table>,
@@ -58,8 +68,9 @@ export async function runTx<T>(
   const effects = effectsByTransaction.get(transactionRef) ?? []
   effectsByTransaction.delete(transactionRef)
 
-  for (const effect of effects) {
-    await effect()
+  // Transaction success is defined by commit outcome only.
+  if (effects.length > 0) {
+    void drainAfterCommitEffects(effects)
   }
 
   return result

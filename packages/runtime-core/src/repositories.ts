@@ -49,6 +49,8 @@ export class ModelsRepository extends Context.Tag("@llm-bridge/runtime-core/Mode
 >() {}
 
 export interface AuthRepositoryApi {
+  // Repository operations must only perform auth storage/window work.
+  // Catalog refresh side-effects are owned by runtime-core services.
   openProviderAuthWindow: (providerID: string) => AppEffect<RuntimeOpenProviderAuthWindowResponse>
   getProviderAuthFlow: (providerID: string) => AppEffect<{
     providerID: string
@@ -137,6 +139,8 @@ export class MetaRepository extends Context.Tag("@llm-bridge/runtime-core/MetaRe
 >() {}
 
 export interface ModelExecutionRepositoryApi {
+  // Repository operations execute models only.
+  // Permission/origin policy checks are owned by runtime-core services.
   acquireModel: (input: {
     origin: string
     sessionID: string
