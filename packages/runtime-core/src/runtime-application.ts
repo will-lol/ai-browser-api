@@ -42,6 +42,7 @@ type AppEffect<A> = Effect.Effect<A, RuntimeRpcError>
 
 export interface RuntimeApplicationApi {
   startup: () => AppEffect<void>
+  ensureOriginEnabled: (origin: string) => AppEffect<void>
   listProviders: (origin: string) => AppEffect<ReadonlyArray<RuntimeProviderSummary>>
   listModels: (input: {
     origin: string
@@ -118,6 +119,7 @@ export const RuntimeApplicationLive = Layer.effect(
 
     return {
       startup: () => catalog.ensureCatalog(),
+      ensureOriginEnabled: (origin) => permission.ensureOriginEnabled(origin),
       listProviders: (_origin) => query.listProviders(),
       listModels: ({ connectedOnly, providerID }) =>
         query.listModels({
