@@ -1,6 +1,6 @@
 import { RuntimeInternalError } from "@llm-bridge/contracts"
 import * as Effect from "effect/Effect"
-import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-types"
+import type { AuthResult } from "@/lib/runtime/auth-types"
 import { AuthVaultStore } from "@/lib/runtime/security/auth-vault-store"
 import { runSecurityEffect } from "@/lib/runtime/security/runtime-security"
 

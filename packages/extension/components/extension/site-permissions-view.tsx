@@ -40,8 +40,11 @@ export function SitePermissionsView({
 
   const originEnabled =
     hasActiveOrigin && (originStateQuery.data?.enabled ?? true);
-  const pendingRequests = pendingRequestsQuery.data ?? [];
-  const allModels = modelsQuery.data ?? [];
+  const pendingRequests = useMemo(
+    () => pendingRequestsQuery.data ?? [],
+    [pendingRequestsQuery.data],
+  );
+  const allModels = useMemo(() => modelsQuery.data ?? [], [modelsQuery.data]);
 
   const permissionByModelId = useMemo(() => {
     const permissions = permissionsQuery.data ?? [];

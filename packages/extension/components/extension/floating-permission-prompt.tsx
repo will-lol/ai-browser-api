@@ -24,7 +24,7 @@ export function FloatingPermissionPrompt({
     () => new Set(),
   )
 
-  const pendingRequests = pendingQuery.data ?? []
+  const pendingRequests = useMemo(() => pendingQuery.data ?? [], [pendingQuery.data])
   const originEnabled = originStateQuery.data?.enabled ?? true
 
   useEffect(() => {
@@ -97,11 +97,13 @@ export function FloatingPermissionPrompt({
   }, [origin, softDismissRequest, visibleRequests])
 
   useEffect(() => {
+    const openToastIds = openToastIdsRef.current
+
     return () => {
-      for (const toastId of Array.from(openToastIdsRef.current)) {
+      for (const toastId of Array.from(openToastIds)) {
         toast.dismiss(toastId)
       }
-      openToastIdsRef.current.clear()
+      openToastIds.clear()
     }
   }, [])
 

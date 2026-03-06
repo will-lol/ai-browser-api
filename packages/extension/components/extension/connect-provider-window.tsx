@@ -93,7 +93,7 @@ export function ConnectProviderWindow({
   )
 
   const flow = authFlowQuery.data
-  const methods = flow?.methods ?? []
+  const methods = useMemo(() => flow?.methods ?? [], [flow?.methods])
   const instruction = flow?.instruction
 
   const [selectedMethodID, setSelectedMethodID] = useState<string | null>(null)
