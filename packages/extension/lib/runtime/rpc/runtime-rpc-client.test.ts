@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  RuntimeAdminRpcGroup,
-  RuntimePublicRpcGroup,
   type RuntimeAdminRpc,
   type RuntimeModelSummary,
   type RuntimePublicRpc,
@@ -10,8 +8,9 @@ import {
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
-import type { RuntimeConnection } from "./runtime-rpc-client-core";
-import { createRuntimeRpcFacade } from "./runtime-rpc-client-factory";
+import type { RuntimeRpcClientConnection } from "./runtime-rpc-client-core";
+import { createRuntimeAdminRpcClient } from "./runtime-rpc-client";
+import { createRuntimePublicRpcClient } from "./runtime-public-rpc-client";
 
 const TEST_MODELS: ReadonlyArray<RuntimeModelSummary> = [
   {
@@ -42,38 +41,33 @@ const TEST_STREAM_CHUNKS: ReadonlyArray<RuntimeStreamPart> = [
 ];
 
 describe("runtime rpc client facade", () => {
-  it("wraps public unary methods as promises", async () => {
-    const facade = createRuntimeRpcFacade<RuntimePublicRpc>({
-      ensureConnection: async () =>
+  it("wraps public unary methods as effects", async () => {
+    const client = createRuntimePublicRpcClient({
+      ensureClient: Effect.succeed(
         ({
-          client: {
-            listModels: () => Effect.succeed(TEST_MODELS),
-          },
-        }) as unknown as RuntimeConnection<RuntimePublicRpc>,
-      rpcGroup: RuntimePublicRpcGroup,
+          listModels: () => Effect.succeed(TEST_MODELS),
+        }) as unknown as RuntimeRpcClientConnection<RuntimePublicRpc>,
+      ),
     });
 
-    const promise = facade.listModels({
+    const effect = client.listModels({
       origin: "https://example.test",
       connectedOnly: true,
     });
 
-    assert.ok(promise instanceof Promise);
-    assert.deepEqual(await promise, TEST_MODELS);
+    assert.deepEqual(await Effect.runPromise(effect), TEST_MODELS);
   });
 
-  it("wraps public stream methods as async iterables", async () => {
-    const facade = createRuntimeRpcFacade<RuntimePublicRpc>({
-      ensureConnection: async () =>
+  it("wraps public stream methods as streams", async () => {
+    const client = createRuntimePublicRpcClient({
+      ensureClient: Effect.succeed(
         ({
-          client: {
-            modelDoStream: () => Stream.fromIterable(TEST_STREAM_CHUNKS),
-          },
-        }) as unknown as RuntimeConnection<RuntimePublicRpc>,
-      rpcGroup: RuntimePublicRpcGroup,
+          modelDoStream: () => Stream.fromIterable(TEST_STREAM_CHUNKS),
+        }) as unknown as RuntimeRpcClientConnection<RuntimePublicRpc>,
+      ),
     });
 
-    const iterable = facade.modelDoStream({
+    const stream = client.modelDoStream({
       origin: "https://example.test",
       requestId: "req_1",
       sessionID: "session_1",
@@ -83,49 +77,44 @@ describe("runtime rpc client facade", () => {
       },
     });
 
-    const chunks: RuntimeStreamPart[] = [];
-    for await (const chunk of iterable) {
-      chunks.push(chunk);
-    }
+    const chunks = await Effect.runPromise(Stream.runCollect(stream));
 
-    assert.deepEqual(chunks, TEST_STREAM_CHUNKS);
+    assert.deepEqual(Array.from(chunks), TEST_STREAM_CHUNKS);
   });
 
-  it("wraps admin unary and stream methods using the same generated factory", async () => {
-    const facade = createRuntimeRpcFacade<RuntimeAdminRpc>({
-      ensureConnection: async () =>
+  it("wraps admin unary and stream methods using the explicit client", async () => {
+    const client = createRuntimeAdminRpcClient({
+      ensureClient: Effect.succeed(
         ({
-          client: {
-            listProviders: () =>
-              Effect.succeed([
-                {
-                  id: "openai",
-                  name: "OpenAI",
-                  connected: true,
-                  env: ["OPENAI_API_KEY"],
-                  modelCount: 1,
-                },
-              ]),
-            modelDoStream: () => Stream.fromIterable(TEST_STREAM_CHUNKS),
-          },
-        }) as unknown as RuntimeConnection<RuntimeAdminRpc>,
-      rpcGroup: RuntimeAdminRpcGroup,
+          listProviders: () =>
+            Effect.succeed([
+              {
+                id: "openai",
+                name: "OpenAI",
+                connected: true,
+                env: ["OPENAI_API_KEY"],
+                modelCount: 1,
+              },
+            ]),
+          modelDoStream: () => Stream.fromIterable(TEST_STREAM_CHUNKS),
+        }) as unknown as RuntimeRpcClientConnection<RuntimeAdminRpc>,
+      ),
     });
 
-    const providers = await facade.listProviders({});
-    const streamChunks: RuntimeStreamPart[] = [];
-
-    for await (const chunk of facade.modelDoStream({
-      origin: "https://example.test",
-      requestId: "req_2",
-      sessionID: "session_2",
-      modelId: "openai/gpt-4o-mini",
-      options: {
-        prompt: [],
-      },
-    })) {
-      streamChunks.push(chunk);
-    }
+    const providers = await Effect.runPromise(client.listProviders({}));
+    const streamChunks = await Effect.runPromise(
+      Stream.runCollect(
+        client.modelDoStream({
+          origin: "https://example.test",
+          requestId: "req_2",
+          sessionID: "session_2",
+          modelId: "openai/gpt-4o-mini",
+          options: {
+            prompt: [],
+          },
+        }),
+      ),
+    );
 
     assert.deepEqual(providers, [
       {
@@ -136,6 +125,6 @@ describe("runtime rpc client facade", () => {
         modelCount: 1,
       },
     ]);
-    assert.deepEqual(streamChunks, TEST_STREAM_CHUNKS);
+    assert.deepEqual(Array.from(streamChunks), TEST_STREAM_CHUNKS);
   });
 });

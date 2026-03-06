@@ -1,23 +1,34 @@
+import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchInput } from "@/components/extension/search-input";
 import { useFrozenOrder } from "@/hooks/use-frozen-order";
 import {
-  useProviderDisconnectMutation,
-  useProviderOpenAuthWindowMutation,
-  useProvidersQuery,
-} from "@/lib/extension-query-hooks";
+  providersResultAtom,
+} from "@/lib/extension-runtime-atoms";
+import {
+  disconnectProviderAtom,
+  openProviderAuthWindowAtom,
+} from "@/lib/extension-runtime-mutations";
 
 export function ProvidersView() {
   const [search, setSearch] = useState("");
-  const providersQuery = useProvidersQuery();
-  const disconnectProviderMutation = useProviderDisconnectMutation();
-  const openProviderAuthWindowMutation = useProviderOpenAuthWindowMutation();
+  const [pendingAction, setPendingAction] = useState<{
+    providerID: string;
+    type: "connect" | "disconnect";
+  } | null>(null);
+  const providersResult = useAtomValue(providersResultAtom);
+  const disconnectProvider = useAtomSet(disconnectProviderAtom, {
+    mode: "promise",
+  });
+  const openProviderAuthWindow = useAtomSet(openProviderAuthWindowAtom, {
+    mode: "promise",
+  });
 
   const providers = useMemo(
-    () => providersQuery.data ?? [],
-    [providersQuery.data],
+    () => Result.getOrElse(providersResult, () => []),
+    [providersResult],
   );
 
   const frozenOrder = useFrozenOrder(
@@ -52,7 +63,7 @@ export function ProvidersView() {
     );
   }, [frozenOrder, providers, search]);
 
-  if (providersQuery.isError) {
+  if (providersResult._tag === "Failure" && providers.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
         <p className="text-xs text-destructive">Failed to load providers.</p>
@@ -60,7 +71,7 @@ export function ProvidersView() {
     );
   }
 
-  if (providersQuery.isPending) {
+  if (providersResult._tag === "Initial") {
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
         <p className="text-xs text-muted-foreground">Loading providers...</p>
@@ -81,12 +92,11 @@ export function ProvidersView() {
         <div className="flex flex-col">
           {sorted.map((provider) => {
             const controlsDisabled =
-              disconnectProviderMutation.isPending &&
-              disconnectProviderMutation.variables?.providerID === provider.id;
+              pendingAction?.type === "disconnect" &&
+              pendingAction.providerID === provider.id;
             const connectPending =
-              openProviderAuthWindowMutation.isPending &&
-              openProviderAuthWindowMutation.variables?.providerID ===
-                provider.id;
+              pendingAction?.type === "connect" &&
+              pendingAction.providerID === provider.id;
 
             return (
               <div
@@ -107,14 +117,50 @@ export function ProvidersView() {
                 <Button
                   onClick={() => {
                     if (provider.connected) {
-                      disconnectProviderMutation.mutate({
+                      setPendingAction({
                         providerID: provider.id,
+                        type: "disconnect",
                       });
+                      void disconnectProvider({
+                        providerID: provider.id,
+                      })
+                        .catch((error) => {
+                          console.error(
+                            "[providers-view] failed to disconnect provider",
+                            error,
+                          );
+                        })
+                        .finally(() => {
+                          setPendingAction((current) =>
+                            current?.providerID === provider.id &&
+                            current.type === "disconnect"
+                              ? null
+                              : current,
+                          );
+                        });
                       return;
                     }
-                    openProviderAuthWindowMutation.mutate({
+                    setPendingAction({
                       providerID: provider.id,
+                      type: "connect",
                     });
+                    void openProviderAuthWindow({
+                      providerID: provider.id,
+                    })
+                      .catch((error) => {
+                        console.error(
+                          "[providers-view] failed to open auth window",
+                          error,
+                        );
+                      })
+                      .finally(() => {
+                        setPendingAction((current) =>
+                          current?.providerID === provider.id &&
+                          current.type === "connect"
+                            ? null
+                            : current,
+                        );
+                      });
                   }}
                   disabled={controlsDisabled || connectPending}
                   variant={provider.connected ? "destructiveGhost" : "default"}

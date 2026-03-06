@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@llm-bridge/contracts": "workspace:*",
-    "effect": "^3.18.4"
+    "effect": "^3.19.19"
   },
   "devDependencies": {
     "@types/node": "^22.19.13",

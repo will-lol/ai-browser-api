@@ -1,4 +1,3 @@
-// @ts-expect-error bun:test types are not part of this package's TypeScript environment.
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 
 const TEST_ORIGIN = "https://example.test";

@@ -4,6 +4,7 @@ import {
   parseRetryAfterMs,
 } from "@/lib/runtime/ai/transport-pipeline";
 import type { RewrittenTransportRequest } from "@/lib/runtime/ai/transport-pipeline";
+import type { RuntimeFetch } from "@/lib/runtime/plugin-manager";
 
 const GENERATIVE_LANGUAGE_HOST = "generativelanguage.googleapis.com";
 const CODE_ASSIST_BASE_URL = "https://cloudcode-pa.googleapis.com";
@@ -21,7 +22,7 @@ export const GEMINI_CODE_ASSIST_HEADERS = {
 
 export interface GeminiCodeAssistFetchOptions {
   projectId: string;
-  fetchFn?: typeof fetch;
+  fetchFn?: RuntimeFetch;
   maxAttempts?: number;
   baseRetryDelayMs?: number;
 }
@@ -444,7 +445,7 @@ export async function normalizeGeminiCodeAssistResponse(
 
 export function createGeminiCodeAssistFetch(
   options: GeminiCodeAssistFetchOptions,
-): typeof fetch {
+): RuntimeFetch {
   return createTransportFetchPipeline({
     fetchFn: options.fetchFn,
     maxAttempts: options.maxAttempts,

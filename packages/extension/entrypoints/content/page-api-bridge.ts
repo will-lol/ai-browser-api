@@ -20,12 +20,6 @@ import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { getRuntimePublicRPC } from "@/lib/runtime/rpc/runtime-public-rpc-client";
-function fromPromise<A>(run: () => Promise<A>) {
-  return Effect.tryPromise({
-    try: run,
-    catch: toRuntimeRpcError,
-  });
-}
 
 function nextBridgeRequestId() {
   return `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -43,63 +37,74 @@ function normalizeModelCallInput(input: BridgeModelCallRequest) {
   };
 }
 
+function mapRuntimeEffect<A, E, R>(effect: Effect.Effect<A, E, R>) {
+  return Effect.mapError(effect, toRuntimeRpcError);
+}
+
+function mapRuntimeStream<A, E, R>(stream: Stream.Stream<A, E, R>) {
+  return Stream.mapError(stream, toRuntimeRpcError);
+}
+
 function createPageBridgeHandlers() {
   const runtime = getRuntimePublicRPC();
 
   return PageBridgeRpcGroup.of({
     listModels: () =>
-      fromPromise(async () => {
-        const models = await runtime.listModels({
+      mapRuntimeEffect(
+        runtime.listModels({
           origin: window.location.origin,
           connectedOnly: true,
-        });
-
-        return {
-          models,
-        };
-      }),
+        }),
+      ).pipe(
+          Effect.map((models) => ({
+            models,
+          })),
+        ),
 
     getModel: (input) =>
-      fromPromise(async () => {
+      mapRuntimeEffect(
+        Effect.gen(function* () {
         const requestId = input.requestId ?? nextBridgeRequestId();
         const sessionID = input.sessionID ?? requestId;
 
-        const descriptor = await runtime.acquireModel({
+        return yield* runtime.acquireModel({
           origin: window.location.origin,
           requestId,
           sessionID,
           modelId: input.modelId,
         });
-
-        return descriptor;
       }),
+      ),
 
     requestPermission: (input) =>
-      fromPromise(async () => {
-        const result = await runtime.requestPermission({
+      mapRuntimeEffect(
+        Effect.gen(function* () {
+        const result = yield* runtime.requestPermission({
           action: "create",
           origin: window.location.origin,
           modelId: input.modelId,
         });
 
         if (!("status" in result)) {
-          throw new RuntimeValidationError({
+          return yield* new RuntimeValidationError({
             message: "Unexpected permission response shape",
           });
         }
 
         return result;
       }),
+      ),
 
     abort: (input) =>
-      fromPromise(async () => {
+      mapRuntimeEffect(
+        Effect.gen(function* () {
         if (!input.requestId) {
           return { ok: true };
         }
 
         const sessionID = input.sessionID ?? input.requestId;
 
-        await runtime.abortModelCall({
+        yield* runtime.abortModelCall({
           origin: window.location.origin,
           sessionID,
           requestId: input.requestId,
@@ -109,16 +114,18 @@ function createPageBridgeHandlers() {
           ok: true,
         };
       }),
+      ),
 
     modelDoGenerate: (input) =>
-      fromPromise(async () => {
+      mapRuntimeEffect(
+        Effect.gen(function* () {
         const normalized = normalizeModelCallInput(input);
         if (!normalized.options) {
-          throw new RuntimeValidationError({
+          return yield* new RuntimeValidationError({
             message: "modelDoGenerate requires call options with prompt",
           });
         }
-        return runtime.modelDoGenerate({
+        return yield* runtime.modelDoGenerate({
           origin: window.location.origin,
           requestId: normalized.requestId,
           sessionID: normalized.sessionID,
@@ -126,6 +133,7 @@ function createPageBridgeHandlers() {
           options: normalized.options,
         });
       }),
+      ),
 
     modelDoStream: (input) => {
       const normalized = normalizeModelCallInput(input);
@@ -138,23 +146,14 @@ function createPageBridgeHandlers() {
         );
       }
 
-      return Stream.fromAsyncIterable(
-        {
-          [Symbol.asyncIterator]: async function* () {
-            const iterable = runtime.modelDoStream({
-              origin: window.location.origin,
-              requestId: normalized.requestId,
-              sessionID: normalized.sessionID,
-              modelId: normalized.modelId,
-              options,
-            });
-
-            for await (const chunk of iterable) {
-              yield chunk;
-            }
-          },
-        },
-        toRuntimeRpcError,
+      return mapRuntimeStream(
+        runtime.modelDoStream({
+        origin: window.location.origin,
+        requestId: normalized.requestId,
+        sessionID: normalized.sessionID,
+        modelId: normalized.modelId,
+        options,
+      }),
       );
     },
   });

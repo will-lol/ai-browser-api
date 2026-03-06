@@ -22,10 +22,13 @@
     "entrypoints/**/*.tsx",
     "components/**/*.ts",
     "components/**/*.tsx",
+    "components/**/*.d.ts",
     "lib/**/*.ts",
     "lib/**/*.tsx",
+    "lib/**/*.d.ts",
     "hooks/**/*.ts",
     "hooks/**/*.tsx",
+    "hooks/**/*.d.ts",
     "wxt.config.ts"
   ],
   "exclude": ["node_modules", ".wxt", ".output"]

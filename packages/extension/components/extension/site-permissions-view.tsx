@@ -1,3 +1,4 @@
+import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react";
 import { useMemo, useState } from "react";
 import { ModelRow } from "@/components/extension/model-row";
 import { PendingRequestCard } from "@/components/extension/pending-request-card";
@@ -9,12 +10,9 @@ import { SearchInput } from "@/components/extension/search-input";
 import { useFrozenOrder } from "@/hooks/use-frozen-order";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  useModelsQuery,
-  useOriginEnabledMutation,
-  useOriginStateQuery,
-  usePendingRequestsQuery,
-  usePermissionsQuery,
-} from "@/lib/extension-query-hooks";
+  sitePermissionsDataResultAtom,
+} from "@/lib/extension-runtime-atoms";
+import { setOriginEnabledAtom } from "@/lib/extension-runtime-mutations";
 
 interface SitePermissionsViewProps {
   origin: string | null;
@@ -27,27 +25,27 @@ export function SitePermissionsView({
 }: SitePermissionsViewProps) {
   const targetOrigin = origin ?? "";
   const hasActiveOrigin = origin != null;
-  const originStateQuery = useOriginStateQuery(targetOrigin);
-  const modelsQuery = useModelsQuery({
-    connectedOnly: true,
+  const [originTogglePending, setOriginTogglePending] = useState(false);
+  const dataResult = useAtomValue(sitePermissionsDataResultAtom(targetOrigin));
+  const setOriginEnabled = useAtomSet(setOriginEnabledAtom, {
+    mode: "promise",
   });
-  const permissionsQuery = usePermissionsQuery(targetOrigin);
-  const pendingRequestsQuery = usePendingRequestsQuery(targetOrigin);
-  const setOriginEnabledMutation = useOriginEnabledMutation(targetOrigin);
 
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const data = useMemo(() => Result.getOrElse(dataResult, () => null), [
+    dataResult,
+  ]);
 
-  const originEnabled =
-    hasActiveOrigin && (originStateQuery.data?.enabled ?? true);
+  const originEnabled = hasActiveOrigin && (data?.originState.enabled ?? true);
   const pendingRequests = useMemo(
-    () => pendingRequestsQuery.data ?? [],
-    [pendingRequestsQuery.data],
+    () => data?.pendingRequests ?? [],
+    [data],
   );
-  const allModels = useMemo(() => modelsQuery.data ?? [], [modelsQuery.data]);
+  const allModels = useMemo(() => data?.models ?? [], [data]);
 
   const permissionByModelId = useMemo(() => {
-    const permissions = permissionsQuery.data ?? [];
+    const permissions = data?.permissions ?? [];
     return new Map(
       permissions.map(
         (permission) =>
@@ -57,7 +55,7 @@ export function SitePermissionsView({
           ] as const,
       ),
     );
-  }, [permissionsQuery.data]);
+  }, [data]);
 
   const pendingModelIds = useMemo(
     () => new Set(pendingRequests.map((request) => request.modelId)),
@@ -119,7 +117,7 @@ export function SitePermissionsView({
 
   const hasConnectedProviders = allModels.length > 0;
   const controlsDisabled =
-    originPending || !hasActiveOrigin || setOriginEnabledMutation.isPending;
+    originPending || !hasActiveOrigin || originTogglePending;
 
   if (originPending) {
     return (
@@ -139,18 +137,11 @@ export function SitePermissionsView({
     );
   }
 
-  if (
-    originStateQuery.isError ||
-    modelsQuery.isError ||
-    permissionsQuery.isError ||
-    pendingRequestsQuery.isError
-  ) {
-    const error =
-      originStateQuery.error ??
-      modelsQuery.error ??
-      permissionsQuery.error ??
-      pendingRequestsQuery.error;
-    console.error("[site-permissions] failed to load permissions data", error);
+  if (dataResult._tag === "Failure" && data == null) {
+    console.error(
+      "[site-permissions] failed to load permissions data",
+      dataResult.cause,
+    );
 
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
@@ -161,12 +152,7 @@ export function SitePermissionsView({
     );
   }
 
-  if (
-    originStateQuery.isPending ||
-    modelsQuery.isPending ||
-    permissionsQuery.isPending ||
-    pendingRequestsQuery.isPending
-  ) {
+  if (dataResult._tag === "Initial" || data == null) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
         <p className="text-xs text-muted-foreground">Loading models...</p>
@@ -215,7 +201,20 @@ export function SitePermissionsView({
           checked={originEnabled}
           disabled={controlsDisabled}
           onCheckedChange={(checked) => {
-            setOriginEnabledMutation.mutate({ enabled: checked });
+            setOriginTogglePending(true);
+            void setOriginEnabled({
+              enabled: checked,
+              origin: targetOrigin,
+            })
+              .catch((error) => {
+                console.error(
+                  "[site-permissions] failed to update origin state",
+                  error,
+                );
+              })
+              .finally(() => {
+                setOriginTogglePending(false);
+              });
           }}
           aria-label="Enable extension on this site"
         />

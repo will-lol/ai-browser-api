@@ -6,7 +6,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { Toaster } from "sonner";
-import { ExtensionQueryProvider } from "@/components/extension/extension-query-provider";
+import { ExtensionAtomProvider } from "@/components/extension/extension-atom-provider";
 import { routeTree } from "./routeTree.gen";
 import "@/styles/globals.css";
 
@@ -23,7 +23,7 @@ declare module "@tanstack/react-router" {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ExtensionQueryProvider>
+    <ExtensionAtomProvider>
       <RouterProvider router={router} />
       <Toaster
         position="top-right"
@@ -32,6 +32,6 @@ createRoot(document.getElementById("root")!).render(
         visibleToasts={4}
         closeButton={false}
       />
-    </ExtensionQueryProvider>
+    </ExtensionAtomProvider>
   </StrictMode>,
 );

@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Toaster } from "sonner";
 import { ConnectProviderWindow } from "@/components/extension/connect-provider-window";
-import { ExtensionQueryProvider } from "@/components/extension/extension-query-provider";
+import { ExtensionAtomProvider } from "@/components/extension/extension-atom-provider";
 import "@/styles/globals.css";
 
 const params = new URLSearchParams(window.location.search);
@@ -10,7 +10,7 @@ const providerID = params.get("providerID") ?? "";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ExtensionQueryProvider>
+    <ExtensionAtomProvider>
       {providerID ? (
         <ConnectProviderWindow providerID={providerID} />
       ) : (
@@ -27,6 +27,6 @@ createRoot(document.getElementById("root")!).render(
         visibleToasts={4}
         closeButton={false}
       />
-    </ExtensionQueryProvider>
+    </ExtensionAtomProvider>
   </StrictMode>,
 );

@@ -131,6 +131,10 @@ export type RuntimeProviderFactory = (
 ) => RuntimeProviderSDK;
 
 export type RuntimeTransportAuthType = "bearer" | "api-key";
+export type RuntimeFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
 
 export interface RuntimeTransportConfig {
   baseURL?: string;
@@ -138,7 +142,7 @@ export interface RuntimeTransportConfig {
   authType?: RuntimeTransportAuthType;
   headers: Record<string, string>;
   metadata: Record<string, unknown>;
-  fetch?: typeof fetch;
+  fetch?: RuntimeFetch;
 }
 
 export interface RuntimeFactoryConfig {

@@ -1,11 +1,9 @@
+import { Result, useAtomValue } from "@effect-atom/atom-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PendingRequestCard } from "@/components/extension/pending-request-card";
 import { Toaster, toast } from "sonner";
 import { currentOrigin } from "@/lib/extension-runtime-api";
-import {
-  useOriginStateQuery,
-  usePendingRequestsQuery,
-} from "@/lib/extension-query-hooks";
+import { floatingPermissionDataResultAtom } from "@/lib/extension-runtime-atoms";
 
 interface FloatingPermissionPromptProps {
   className?: string;
@@ -17,18 +15,29 @@ export function FloatingPermissionPrompt({
   containerMode = "fixed",
 }: FloatingPermissionPromptProps = {}) {
   const origin = currentOrigin();
-  const originStateQuery = useOriginStateQuery(origin);
-  const pendingQuery = usePendingRequestsQuery(origin);
+  const dataResult = useAtomValue(floatingPermissionDataResultAtom(origin));
   const openToastIdsRef = useRef<Set<string>>(new Set());
   const [softDismissedIds, setSoftDismissedIds] = useState<Set<string>>(
     () => new Set(),
   );
 
-  const pendingRequests = useMemo(
-    () => pendingQuery.data ?? [],
-    [pendingQuery.data],
+  const data = useMemo(
+    () => Result.getOrElse(dataResult, () => null),
+    [dataResult],
   );
-  const originEnabled = originStateQuery.data?.enabled ?? true;
+  const pendingRequests = useMemo(
+    () => data?.pendingRequests ?? [],
+    [data],
+  );
+  const originEnabled = data?.originState.enabled ?? true;
+
+  useEffect(() => {
+    if (dataResult._tag !== "Failure") return;
+    console.error(
+      "[floating-permission-prompt] failed to load permission prompt data",
+      dataResult.cause,
+    );
+  }, [dataResult]);
 
   useEffect(() => {
     const pendingIds = new Set(pendingRequests.map((request) => request.id));

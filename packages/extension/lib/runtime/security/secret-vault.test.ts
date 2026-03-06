@@ -1,4 +1,3 @@
-// @ts-expect-error bun:test types are not part of this package's TypeScript environment.
 import { describe, expect, it } from "bun:test";
 import * as Effect from "effect/Effect";
 import type { AuthRecord } from "@/lib/runtime/auth-types";

@@ -20,13 +20,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@effect/platform": "^0.93.2",
+    "@effect/platform": "^0.94.2",
     "@effect/rpc": "^0.73.2",
     "@ai-sdk/provider": "^3.0.8",
     "@llm-bridge/bridge-codecs": "workspace:*",
     "@llm-bridge/contracts": "workspace:*",
     "@llm-bridge/runtime-core": "workspace:*",
-    "effect": "^3.18.4"
+    "effect": "^3.19.19"
   },
   "devDependencies": {
     "@types/node": "^22.19.13",

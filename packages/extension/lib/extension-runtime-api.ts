@@ -22,12 +22,12 @@ export function currentOrigin() {
   return window.location.origin;
 }
 
-export async function fetchProviders() {
+export function fetchProviders() {
   const runtime = getRuntimeAdminRPC();
   return runtime.listProviders({});
 }
 
-export async function fetchModels(input?: {
+export function fetchModels(input?: {
   connectedOnly?: boolean;
   providerID?: string;
 }) {
@@ -38,22 +38,22 @@ export async function fetchModels(input?: {
   });
 }
 
-export async function fetchOriginState(origin = currentOrigin()) {
+export function fetchOriginState(origin = currentOrigin()) {
   const runtime = getRuntimeAdminRPC();
   return runtime.getOriginState({ origin });
 }
 
-export async function fetchPermissions(origin = currentOrigin()) {
+export function fetchPermissions(origin = currentOrigin()) {
   const runtime = getRuntimeAdminRPC();
   return runtime.listPermissions({ origin });
 }
 
-export async function fetchPendingRequests(origin = currentOrigin()) {
+export function fetchPendingRequests(origin = currentOrigin()) {
   const runtime = getRuntimeAdminRPC();
   return runtime.listPending({ origin });
 }
 
-export async function openRuntimeProviderAuthWindow(input: {
+export function openRuntimeProviderAuthWindow(input: {
   providerID: string;
 }) {
   const runtime = getRuntimeAdminRPC();
@@ -62,14 +62,14 @@ export async function openRuntimeProviderAuthWindow(input: {
   });
 }
 
-export async function fetchProviderAuthFlow(input: { providerID: string }) {
+export function fetchProviderAuthFlow(input: { providerID: string }) {
   const runtime = getRuntimeAdminRPC();
   return runtime.getProviderAuthFlow({
     providerID: input.providerID,
   });
 }
 
-export async function startRuntimeProviderAuthFlow(input: {
+export function startRuntimeProviderAuthFlow(input: {
   providerID: string;
   methodID: string;
   values?: Record<string, string>;
@@ -82,7 +82,7 @@ export async function startRuntimeProviderAuthFlow(input: {
   });
 }
 
-export async function cancelRuntimeProviderAuthFlow(input: {
+export function cancelRuntimeProviderAuthFlow(input: {
   providerID: string;
   reason?: string;
 }) {
@@ -93,14 +93,14 @@ export async function cancelRuntimeProviderAuthFlow(input: {
   });
 }
 
-export async function disconnectRuntimeProvider(input: { providerID: string }) {
+export function disconnectRuntimeProvider(input: { providerID: string }) {
   const runtime = getRuntimeAdminRPC();
   return runtime.disconnectProvider({
     providerID: input.providerID,
   });
 }
 
-export async function setRuntimeOriginEnabled(input: {
+export function setRuntimeOriginEnabled(input: {
   enabled: boolean;
   origin?: string;
 }) {
@@ -114,7 +114,7 @@ export async function setRuntimeOriginEnabled(input: {
   });
 }
 
-export async function dismissRuntimePermissionRequest(input: {
+export function dismissRuntimePermissionRequest(input: {
   requestId: string;
 }) {
   const runtime = getRuntimeAdminRPC();
@@ -125,7 +125,7 @@ export async function dismissRuntimePermissionRequest(input: {
   });
 }
 
-export async function resolveRuntimePermissionRequest(input: {
+export function resolveRuntimePermissionRequest(input: {
   requestId: string;
   decision: PermissionDecision;
 }) {
@@ -138,7 +138,7 @@ export async function resolveRuntimePermissionRequest(input: {
   });
 }
 
-export async function updateRuntimeModelPermission(input: {
+export function updateRuntimeModelPermission(input: {
   modelId: string;
   status: RuntimePermissionDecision;
   origin?: string;

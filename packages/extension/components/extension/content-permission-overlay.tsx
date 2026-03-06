@@ -1,10 +1,10 @@
-import { ExtensionQueryProvider } from "@/components/extension/extension-query-provider";
+import { ExtensionAtomProvider } from "@/components/extension/extension-atom-provider";
 import { FloatingPermissionPrompt } from "@/components/extension/floating-permission-prompt";
 
 export function ContentPermissionOverlay() {
   return (
-    <ExtensionQueryProvider>
+    <ExtensionAtomProvider>
       <FloatingPermissionPrompt className="pointer-events-auto" />
-    </ExtensionQueryProvider>
+    </ExtensionAtomProvider>
   );
 }

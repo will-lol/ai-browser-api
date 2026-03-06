@@ -1,8 +1,10 @@
+import { useAtomSet } from "@effect-atom/atom-react";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import type { RuntimePermissionDecision } from "@llm-bridge/contracts";
 import { getProviderLabel } from "@/lib/provider-labels";
-import { usePermissionUpdateMutation } from "@/lib/extension-query-hooks";
+import { updateModelPermissionAtom } from "@/lib/extension-runtime-mutations";
+import { useState } from "react";
 
 interface ModelRowProps {
   id: string;
@@ -23,9 +25,12 @@ export function ModelRow({
   origin,
   disabled = false,
 }: ModelRowProps) {
-  const updatePermissionMutation = usePermissionUpdateMutation(origin);
+  const [pending, setPending] = useState(false);
+  const updatePermission = useAtomSet(updateModelPermissionAtom, {
+    mode: "promise",
+  });
   const isAllowed = permission === "allowed";
-  const controlsDisabled = disabled || updatePermissionMutation.isPending;
+  const controlsDisabled = disabled || pending;
 
   return (
     <label
@@ -60,10 +65,18 @@ export function ModelRow({
         id={`model-switch-${id}`}
         checked={isAllowed}
         onCheckedChange={(checked) => {
-          updatePermissionMutation.mutate({
+          setPending(true);
+          void updatePermission({
             modelId: id,
+            origin,
             status: checked ? "allowed" : "denied",
-          });
+          })
+            .catch((error) => {
+              console.error("[model-row] failed to update permission", error);
+            })
+            .finally(() => {
+              setPending(false);
+            });
         }}
         disabled={controlsDisabled}
         className="shrink-0 justify-self-end"

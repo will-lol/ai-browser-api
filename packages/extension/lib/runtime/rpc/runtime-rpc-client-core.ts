@@ -56,6 +56,7 @@ type RuntimeClient<Rpcs extends Rpc.Any> = RpcClient.RpcClient<
   Rpcs,
   RpcClientError
 >;
+export type RuntimeRpcClientConnection<Rpcs extends Rpc.Any> = RuntimeClient<Rpcs>;
 
 export type RuntimeConnection<Rpcs extends Rpc.Any> = {
   connectionId: number;
@@ -66,8 +67,11 @@ export type RuntimeConnection<Rpcs extends Rpc.Any> = {
 };
 
 export type RuntimeRpcClientCore<Rpcs extends Rpc.Any> = {
-  ensureConnection: () => Promise<RuntimeConnection<Rpcs>>;
-  destroyConnection: (reason: "destroy" | "pagehide") => Promise<void>;
+  ensureConnection: Effect.Effect<RuntimeConnection<Rpcs>, unknown>;
+  ensureClient: Effect.Effect<RuntimeClient<Rpcs>, unknown>;
+  destroyConnection: (
+    reason: "destroy" | "pagehide",
+  ) => Effect.Effect<void, never>;
 };
 
 type RuntimeRpcClientCoreOptions<Rpcs extends Rpc.Any, E> = {
@@ -269,22 +273,23 @@ export function makeRuntimeRpcClientCore<Rpcs extends Rpc.Any, E>(
     }),
   );
 
-  const destroyConnection = async (_reason: "destroy" | "pagehide") => {
-    if (!lifecycle) return;
-    await Effect.runPromise(lifecycle.destroy).catch(() => undefined);
-  };
+  const destroyConnection = (_reason: "destroy" | "pagehide") =>
+    lifecycle
+      ? lifecycle.destroy.pipe(Effect.catchAll(() => Effect.void))
+      : Effect.void;
 
   const windowLike = options.windowLike ?? defaultWindowLike;
   windowLike?.addEventListener(
     "pagehide",
     () => {
-      void destroyConnection("pagehide");
+      void Effect.runPromise(destroyConnection("pagehide"));
     },
     { once: true },
   );
 
   return {
-    ensureConnection: () => Effect.runPromise(lifecycle.ensure),
+    ensureConnection: lifecycle.ensure,
+    ensureClient: lifecycle.ensure.pipe(Effect.map((connection) => connection.client)),
     destroyConnection,
   };
 }

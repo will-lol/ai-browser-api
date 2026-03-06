@@ -1,4 +1,3 @@
-// @ts-expect-error bun:test types are not part of this package's TypeScript environment.
 import {
   afterAll,
   afterEach,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { RuntimePublicRpcGroup } from "@llm-bridge/contracts";
+import * as Effect from "effect/Effect";
 import {
   makeRuntimeRpcClientCore,
   type RuntimePort,
@@ -113,8 +114,8 @@ describe("makeRuntimeRpcClientCore", () => {
       },
     });
 
-    const first = core.ensureConnection();
-    const second = core.ensureConnection();
+    const first = Effect.runPromise(core.ensureConnection);
+    const second = Effect.runPromise(core.ensureConnection);
 
     await started.promise;
     assert.equal(connectCalls, 1);
@@ -148,7 +149,7 @@ describe("makeRuntimeRpcClientCore", () => {
       },
     });
 
-    const firstAttempt = core.ensureConnection().then(
+    const firstAttempt = Effect.runPromise(core.ensureConnection).then(
       () => {
         throw new Error("expected first attempt to fail");
       },
@@ -164,14 +165,14 @@ describe("makeRuntimeRpcClientCore", () => {
     release.resolve();
     await flushMicrotasks();
 
-    const second = await core.ensureConnection();
+    const second = await Effect.runPromise(core.ensureConnection);
     assert.equal(second.connectionId, 2);
     assert.strictEqual(second.port, ports[1]);
     assert.equal(ports[1]?.getDisconnectCalls(), 0);
 
     ports[0]?.emitDisconnect();
 
-    const reused = await core.ensureConnection();
+    const reused = await Effect.runPromise(core.ensureConnection);
     assert.strictEqual(reused.port, ports[1]);
     assert.equal(ports[1]?.getDisconnectCalls(), 0);
   });
@@ -197,7 +198,7 @@ describe("makeRuntimeRpcClientCore", () => {
       },
     });
 
-    const waiting = core.ensureConnection().then(
+    const waiting = Effect.runPromise(core.ensureConnection).then(
       () => {
         throw new Error("expected ensureConnection to reject");
       },
@@ -213,7 +214,7 @@ describe("makeRuntimeRpcClientCore", () => {
     release.resolve();
     await flushMicrotasks();
 
-    const second = await core.ensureConnection();
+    const second = await Effect.runPromise(core.ensureConnection);
     assert.equal(second.connectionId, 2);
     assert.strictEqual(second.port, ports[1]);
     assert.equal(ports[0]?.getDisconnectListenerCount(), 0);
@@ -235,13 +236,13 @@ describe("makeRuntimeRpcClientCore", () => {
       windowLike,
     });
 
-    const first = await core.ensureConnection();
+    const first = await Effect.runPromise(core.ensureConnection);
     windowLike.emitPagehide();
     await flushMicrotasks();
 
     assert.equal(ports[0]?.getDisconnectCalls(), 1);
 
-    const second = await core.ensureConnection();
+    const second = await Effect.runPromise(core.ensureConnection);
     assert.equal(second.connectionId, 2);
     assert.notStrictEqual(second.port, first.port);
   });
@@ -259,9 +260,9 @@ describe("makeRuntimeRpcClientCore", () => {
 
     assert.equal(windowLike.getListenerCount(), 1);
 
-    await core.ensureConnection();
-    await core.destroyConnection("destroy");
-    await core.ensureConnection();
+    await Effect.runPromise(core.ensureConnection);
+    await Effect.runPromise(core.destroyConnection("destroy"));
+    await Effect.runPromise(core.ensureConnection);
 
     assert.equal(windowLike.getListenerCount(), 1);
   });

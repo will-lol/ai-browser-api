@@ -4,6 +4,8 @@ export interface RewrittenTransportRequest<TMetadata = void> {
   metadata: TMetadata;
 }
 
+type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
 export interface TransportFetchPipelineOptions<TMetadata = void> {
   rewriteRequest: (
     input: RequestInfo | URL,
@@ -13,7 +15,7 @@ export interface TransportFetchPipelineOptions<TMetadata = void> {
     response: Response,
     metadata: TMetadata,
   ) => Promise<Response> | Response;
-  fetchFn?: typeof fetch;
+  fetchFn?: FetchLike;
   maxAttempts?: number;
   baseRetryDelayMs?: number;
   retryStatuses?: ReadonlySet<number>;
@@ -82,7 +84,7 @@ async function defaultRetryDelayResolver(
 }
 
 async function fetchWithRetry(
-  fetchFn: typeof fetch,
+  fetchFn: FetchLike,
   request: RequestInfo | URL,
   init: RequestInit,
   options: {
@@ -138,7 +140,7 @@ async function fetchWithRetry(
 
 export function createTransportFetchPipeline<TMetadata = void>(
   options: TransportFetchPipelineOptions<TMetadata>,
-): typeof fetch {
+): FetchLike {
   const fetchFn = options.fetchFn ?? fetch;
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const baseRetryDelayMs = Math.max(100, options.baseRetryDelayMs ?? 350);

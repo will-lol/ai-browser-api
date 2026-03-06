@@ -1,9 +1,11 @@
+import { useAtomSet } from "@effect-atom/atom-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Check, X as XIcon } from "lucide-react";
+import { useState } from "react";
 import type { RuntimePendingRequest } from "@llm-bridge/contracts";
 import { getProviderLabel } from "@/lib/provider-labels";
-import { usePermissionDecisionMutation } from "@/lib/extension-query-hooks";
+import { resolvePermissionDecisionAtom } from "@/lib/extension-runtime-mutations";
 
 interface PendingRequestCardProps {
   request: RuntimePendingRequest;
@@ -88,8 +90,11 @@ function InlinePendingRequestCard({
   origin: string;
   actionsDisabled?: boolean;
 }) {
-  const decisionMutation = usePermissionDecisionMutation(origin);
-  const controlsDisabled = actionsDisabled || decisionMutation.isPending;
+  const [pending, setPending] = useState(false);
+  const resolveDecision = useAtomSet(resolvePermissionDecisionAtom, {
+    mode: "promise",
+  });
+  const controlsDisabled = actionsDisabled || pending;
 
   return (
     <div className="flex items-center gap-2.5 border-b border-border bg-warning/5 px-3 py-2 font-sans">
@@ -106,10 +111,21 @@ function InlinePendingRequestCard({
       <div className="flex shrink-0 items-center gap-1">
         <Button
           onClick={() => {
-            decisionMutation.mutate({
+            setPending(true);
+            void resolveDecision({
               requestId: request.id,
               decision: "allowed",
-            });
+              origin,
+            })
+              .catch((error) => {
+                console.error(
+                  "[pending-request-card] failed to resolve permission",
+                  error,
+                );
+              })
+              .finally(() => {
+                setPending(false);
+              });
           }}
           disabled={controlsDisabled}
           variant="successGhost"
@@ -121,10 +137,21 @@ function InlinePendingRequestCard({
         </Button>
         <Button
           onClick={() => {
-            decisionMutation.mutate({
+            setPending(true);
+            void resolveDecision({
               requestId: request.id,
               decision: "denied",
-            });
+              origin,
+            })
+              .catch((error) => {
+                console.error(
+                  "[pending-request-card] failed to reject permission",
+                  error,
+                );
+              })
+              .finally(() => {
+                setPending(false);
+              });
           }}
           disabled={controlsDisabled}
           variant="destructiveGhost"

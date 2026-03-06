@@ -361,20 +361,28 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
           abortSignal?.addEventListener("abort", onAbort, { once: true });
 
           try {
-            const current = await Effect.runPromise(ensureConnection);
             const response = await Effect.runPromise(
-              normalizeRpcError(
-                current.client.modelDoGenerate({
-                  requestId,
-                  sessionID: requestId,
-                  modelId,
-                  options: toRuntimeModelCallOptions(options),
-                }),
-              ),
+              Effect.gen(function* () {
+                if (abortSignal?.aborted) {
+                  return yield* Effect.fail(createAbortError());
+                }
+
+                const current = yield* ensureConnection;
+                const generated = yield* normalizeRpcError(
+                  current.client.modelDoGenerate({
+                    requestId,
+                    sessionID: requestId,
+                    modelId,
+                    options: toRuntimeModelCallOptions(options),
+                  }),
+                );
+
+                return fromRuntimeGenerateResponse(generated);
+              }),
             );
 
             logBridgeDebug("doGenerate.succeeded", { modelId, requestId });
-            return fromRuntimeGenerateResponse(response);
+            return response;
           } catch (error) {
             logBridgeError("doGenerate.failed", error, {
               modelId,
@@ -396,20 +404,26 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
           }
 
           try {
-            const current = await Effect.runPromise(ensureConnection);
             const runtimeStream = await Effect.runPromise(
-              Effect.scoped(
-                Stream.toReadableStreamEffect(
-                  normalizeRpcStreamError(
-                    current.client.modelDoStream({
-                      requestId,
-                      sessionID: requestId,
-                      modelId,
-                      options: toRuntimeModelCallOptions(options),
-                    }),
+              Effect.gen(function* () {
+                if (abortSignal?.aborted) {
+                  return yield* Effect.fail(createAbortError());
+                }
+
+                const current = yield* ensureConnection;
+                return yield* Effect.scoped(
+                  Stream.toReadableStreamEffect(
+                    normalizeRpcStreamError(
+                      current.client.modelDoStream({
+                        requestId,
+                        sessionID: requestId,
+                        modelId,
+                        options: toRuntimeModelCallOptions(options),
+                      }),
+                    ),
                   ),
-                ),
-              ),
+                );
+              }),
             );
 
             const reader = runtimeStream.getReader();
@@ -480,7 +494,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
           }
         },
       });
-
+ 
       const listModels = ensureConnection.pipe(
         Effect.flatMap((current) =>
           normalizeRpcError(current.client.listModels({})),

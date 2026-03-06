@@ -1,3 +1,4 @@
+import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react";
 import { Check } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -13,11 +14,12 @@ import {
 import { Separator } from "@/components/ui/separator";
 import type { ExtensionAuthMethod } from "@/lib/extension-runtime-api";
 import {
-  useProviderAuthFlowQuery,
-  useProviderCancelAuthFlowMutation,
-  useProviderStartAuthFlowMutation,
-  useProvidersQuery,
-} from "@/lib/extension-query-hooks";
+  providerConnectDataResultAtom,
+} from "@/lib/extension-runtime-atoms";
+import {
+  cancelProviderAuthFlowAtom,
+  startProviderAuthFlowAtom,
+} from "@/lib/extension-runtime-mutations";
 
 type AuthField = NonNullable<ExtensionAuthMethod["fields"]>[number];
 
@@ -97,17 +99,27 @@ function buildInitialValues(fields: ReadonlyArray<AuthField>) {
 }
 
 export function ConnectProviderWindow({ providerID }: { providerID: string }) {
-  const providersQuery = useProvidersQuery();
-  const authFlowQuery = useProviderAuthFlowQuery(providerID);
-  const startAuthFlowMutation = useProviderStartAuthFlowMutation();
-  const cancelAuthFlowMutation = useProviderCancelAuthFlowMutation();
+  const [busyAction, setBusyAction] = useState<"cancel" | "start" | null>(
+    null,
+  );
+  const connectDataResult = useAtomValue(providerConnectDataResultAtom(providerID));
+  const connectData = useMemo(
+    () => Result.getOrElse(connectDataResult, () => null),
+    [connectDataResult],
+  );
+  const startAuthFlow = useAtomSet(startProviderAuthFlowAtom, {
+    mode: "promise",
+  });
+  const cancelAuthFlow = useAtomSet(cancelProviderAuthFlowAtom, {
+    mode: "promise",
+  });
 
   const provider = useMemo(
-    () => (providersQuery.data ?? []).find((item) => item.id === providerID),
-    [providerID, providersQuery.data],
+    () => (connectData?.providers ?? []).find((item) => item.id === providerID),
+    [connectData, providerID],
   );
 
-  const flow = authFlowQuery.data;
+  const flow = connectData?.authFlow;
   const methods = useMemo(() => flow?.methods ?? [], [flow?.methods]);
   const instruction = flow?.instruction;
 
@@ -173,10 +185,13 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
     if (Object.keys(validated.errors).length > 0) return;
 
     setFlowError(null);
-    await startAuthFlowMutation.mutateAsync({
+    setBusyAction("start");
+    await startAuthFlow({
       providerID,
       methodID: selectedMethod.id,
       values: validated.values,
+    }).finally(() => {
+      setBusyAction((current) => (current === "start" ? null : current));
     });
   }
 
@@ -187,9 +202,12 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
     }
 
     if (flow.status === "authorizing") {
-      await cancelAuthFlowMutation.mutateAsync({
+      setBusyAction("cancel");
+      await cancelAuthFlow({
         providerID,
         reason: "user",
+      }).finally(() => {
+        setBusyAction((current) => (current === "cancel" ? null : current));
       });
     }
 
@@ -210,8 +228,10 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
   }
 
   const status = flow?.status ?? "idle";
-  const isBusy =
-    startAuthFlowMutation.isPending || cancelAuthFlowMutation.isPending;
+  const isBusy = busyAction !== null;
+  const isLoading = connectDataResult._tag === "Initial";
+  const hasLoadFailure =
+    connectDataResult._tag === "Failure" && connectData == null;
 
   const displayError =
     flowError ??
@@ -233,20 +253,20 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
           </CardHeader>
           <Separator />
           <CardContent className="px-5 py-4">
-            {(providersQuery.isPending || authFlowQuery.isPending) && (
+            {isLoading && (
               <p className="text-xs text-muted-foreground">
                 Loading authentication flow...
               </p>
             )}
 
-            {authFlowQuery.isError && (
+            {hasLoadFailure && (
               <p className="text-xs text-destructive">
                 Failed to load authentication flow.
               </p>
             )}
 
-            {!authFlowQuery.isPending &&
-              !authFlowQuery.isError &&
+            {!isLoading &&
+              !hasLoadFailure &&
               methods.length === 0 && (
                 <p className="text-xs text-muted-foreground">
                   No auth methods are available for this provider.
@@ -432,9 +452,7 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
                         }}
                         disabled={isBusy}
                       >
-                        {startAuthFlowMutation.isPending
-                          ? "Starting..."
-                          : "Continue"}
+                        {busyAction === "start" ? "Starting..." : "Continue"}
                       </Button>
                     </div>
                   </div>
