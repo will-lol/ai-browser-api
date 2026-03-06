@@ -29,73 +29,8 @@ type RuntimeRpcInput<K extends keyof RuntimeRpcClient> = Parameters<RuntimeRpcCl
 
 let connection: RuntimeConnection | null = null
 let nextRuntimeConnectionId = 0
-const RUNTIME_RPC_LOG_PREFIX = "[runtime-public-rpc-content]"
 
-function toLogString(meta: unknown) {
-  if (meta === undefined) return ""
-  if (typeof meta === "string") return meta
-
-  try {
-    return JSON.stringify(meta, (_key, value) => (typeof value === "bigint" ? value.toString() : value))
-  } catch {
-    return String(meta)
-  }
-}
-
-function runtimeRpcLog(event: string, meta?: unknown) {
-  console.info(RUNTIME_RPC_LOG_PREFIX, new Date().toISOString(), event, toLogString(meta))
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
-
-function summarizeRpcMessage(message: unknown) {
-  if (!isRecord(message)) {
-    return { type: typeof message }
-  }
-
-  const summary: Record<string, unknown> = {}
-  for (const key of ["_id", "_tag", "id", "requestId", "tag", "method", "clientId"]) {
-    if (key in message) {
-      summary[key] = message[key]
-    }
-  }
-
-  if ("payload" in message && isRecord(message.payload)) {
-    summary.payloadKeys = Object.keys(message.payload)
-  }
-
-  if ("values" in message && Array.isArray(message.values)) {
-    summary.valuesLength = message.values.length
-  }
-
-  if ("exit" in message && isRecord(message.exit) && "_tag" in message.exit) {
-    summary.exitTag = message.exit._tag
-  }
-
-  return summary
-}
-
-function summarizeValue(value: unknown) {
-  if (Array.isArray(value)) {
-    return { type: "array", length: value.length }
-  }
-
-  if (isRecord(value)) {
-    return { type: "object", keys: Object.keys(value) }
-  }
-
-  return { type: typeof value, value }
-}
-
-async function disposeConnection(reason: string) {
-  runtimeRpcLog("connection.dispose.start", {
-    reason,
-    hasConnection: connection !== null,
-    connectionId: connection?.connectionId,
-  })
-
+async function disposeConnection(_reason: string) {
   if (!connection) return
 
   const current = connection
@@ -109,39 +44,22 @@ async function disposeConnection(reason: string) {
   } catch {
     // ignored
   }
-
-  runtimeRpcLog("connection.dispose.complete", {
-    reason,
-    connectionId: current.connectionId,
-  })
 }
 
 async function ensureConnection(): Promise<RuntimeConnection> {
-  if (connection) {
-    runtimeRpcLog("connection.reuse", {
-      connectionId: connection.connectionId,
-    })
-    return connection
-  }
+  if (connection) return connection
 
-  runtimeRpcLog("connection.create.start")
   const connectionId = ++nextRuntimeConnectionId
 
   const scope = await Effect.runPromise(Scope.make())
   const port = browser.runtime.connect({
     name: RUNTIME_PUBLIC_RPC_PORT_NAME,
   })
-  runtimeRpcLog("connection.port.opened", { name: port.name })
 
   const protocol = await Effect.runPromise(
     RpcClient.Protocol.make((writeResponse) =>
       Effect.gen(function*() {
         const onMessage: Parameters<typeof port.onMessage.addListener>[0] = (payload: FromServerEncoded) => {
-          runtimeRpcLog("transport.inbound", {
-            connectionId,
-            message: summarizeRpcMessage(payload),
-          })
-
           void Effect.runPromise(writeResponse(payload)).catch((error) => {
             console.warn("runtime rpc: failed to process server message", error)
           })
@@ -159,10 +77,6 @@ async function ensureConnection(): Promise<RuntimeConnection> {
           send: (message: FromClientEncoded) =>
             Effect.try({
               try: () => {
-                runtimeRpcLog("transport.outbound", {
-                  connectionId,
-                  message: summarizeRpcMessage(message),
-                })
                 port.postMessage(message)
               },
               catch: (cause) =>
@@ -189,10 +103,6 @@ async function ensureConnection(): Promise<RuntimeConnection> {
   )
 
   const onDisconnect: Parameters<typeof port.onDisconnect.addListener>[0] = () => {
-    runtimeRpcLog("transport.disconnected", {
-      lastError: browser.runtime.lastError?.message,
-      connectionId,
-    })
     void disposeConnection("port-disconnect")
   }
 
@@ -205,14 +115,11 @@ async function ensureConnection(): Promise<RuntimeConnection> {
   }
 
   port.onDisconnect.addListener(onDisconnect)
-  runtimeRpcLog("connection.listeners.attached")
 
   if (typeof window !== "undefined") {
-    runtimeRpcLog("connection.pagehide.listener.attached")
     window.addEventListener(
       "pagehide",
       () => {
-        runtimeRpcLog("connection.pagehide.triggered")
         void disposeConnection("pagehide")
       },
       { once: true },
@@ -220,34 +127,19 @@ async function ensureConnection(): Promise<RuntimeConnection> {
   }
 
   connection = nextConnection
-  runtimeRpcLog("connection.create.success", { connectionId })
   return nextConnection
 }
 
-async function runEffect<A, E>(
-  effect: Effect.Effect<A, E, never>,
-  operation: string,
-): Promise<A> {
-  runtimeRpcLog(`${operation}.start`)
+async function runEffect<A, E>(effect: Effect.Effect<A, E, never>): Promise<A> {
   return Effect.runPromise(effect)
-    .then((value) => {
-      runtimeRpcLog(`${operation}.success`, summarizeValue(value))
-      return value
-    })
+    .then((value) => value)
     .catch((error) => {
-      runtimeRpcLog(`${operation}.failure`, {
-        message: error instanceof Error ? error.message : String(error),
-      })
       console.error("runtime rpc: request failed", error)
       throw error
     })
 }
 
-function runStream<A, E>(
-  stream: Stream.Stream<A, E, never>,
-  operation: string,
-) {
-  runtimeRpcLog(`${operation}.stream.start`)
+function runStream<A, E>(stream: Stream.Stream<A, E, never>) {
   return Stream.toAsyncIterable(stream)
 }
 
@@ -255,45 +147,42 @@ export function getRuntimePublicRPC() {
   return {
     async listModels(input: RuntimeRpcInput<"listModels">) {
       const { client } = await ensureConnection()
-      return runEffect(client.listModels(input), "listModels")
+      return runEffect(client.listModels(input))
     },
     async getOriginState(input: RuntimeRpcInput<"getOriginState">) {
       const { client } = await ensureConnection()
-      return runEffect(client.getOriginState(input), "getOriginState")
+      return runEffect(client.getOriginState(input))
     },
     async listPending(input: RuntimeRpcInput<"listPending">) {
       const { client } = await ensureConnection()
-      return runEffect(client.listPending(input), "listPending")
+      return runEffect(client.listPending(input))
     },
     async requestPermission(input: RuntimeRpcInput<"requestPermission">) {
       const { client } = await ensureConnection()
-      return runEffect(client.requestPermission(input), "requestPermission")
+      return runEffect(client.requestPermission(input))
     },
     async acquireModel(input: RuntimeRpcInput<"acquireModel">) {
       const { client } = await ensureConnection()
-      return runEffect(client.acquireModel(input), "acquireModel")
+      return runEffect(client.acquireModel(input))
     },
     async modelDoGenerate(input: RuntimeRpcInput<"modelDoGenerate">) {
       const { client } = await ensureConnection()
-      return runEffect(client.modelDoGenerate(input), "modelDoGenerate")
+      return runEffect(client.modelDoGenerate(input))
     },
     modelDoStream(input: RuntimeRpcInput<"modelDoStream">) {
       return {
         async *[Symbol.asyncIterator]() {
           const { client } = await ensureConnection()
-          runtimeRpcLog("modelDoStream.start", summarizeValue(input))
-          const stream = runStream(client.modelDoStream(input), "modelDoStream")
+          const stream = runStream(client.modelDoStream(input))
           for await (const chunk of stream) {
-            runtimeRpcLog("modelDoStream.chunk", summarizeValue(chunk))
             yield chunk
           }
-          runtimeRpcLog("modelDoStream.complete")
         },
       }
     },
     async abortModelCall(input: RuntimeRpcInput<"abortModelCall">) {
       const { client } = await ensureConnection()
-      await runEffect(client.abortModelCall(input), "abortModelCall")
+      await runEffect(client.abortModelCall(input))
     },
   }
 }

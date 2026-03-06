@@ -1,6 +1,5 @@
 import {
   PAGE_BRIDGE_INIT_MESSAGE,
-  PAGE_BRIDGE_PORT_CONTROL_MESSAGE,
   PAGE_BRIDGE_READY_EVENT,
   PageBridgeRpcGroup,
   RuntimeValidationError,
@@ -18,80 +17,10 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { getRuntimePublicRPC } from "@/lib/runtime/rpc/runtime-public-rpc-client"
-const PAGE_BRIDGE_LOG_PREFIX = '[page-bridge-content]'
-
-function toLogString(meta: unknown) {
-  if (meta === undefined) return ''
-  if (typeof meta === 'string') return meta
-
-  try {
-    return JSON.stringify(meta, (_key, value) => (typeof value === 'bigint' ? value.toString() : value))
-  } catch {
-    return String(meta)
-  }
-}
-
-function bridgeLog(event: string, meta?: unknown) {
-  console.info(PAGE_BRIDGE_LOG_PREFIX, new Date().toISOString(), event, toLogString(meta))
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function summarizeRpcMessage(message: unknown) {
-  if (!isRecord(message)) {
-    return { type: typeof message }
-  }
-
-  const summary: Record<string, unknown> = {}
-  for (const key of ['_id', '_tag', 'id', 'requestId', 'tag', 'method', 'clientId']) {
-    if (key in message) {
-      summary[key] = message[key]
-    }
-  }
-
-  if ('payload' in message && isRecord(message.payload)) {
-    summary.payloadKeys = Object.keys(message.payload)
-  }
-
-  if ('values' in message && Array.isArray(message.values)) {
-    summary.valuesLength = message.values.length
-  }
-
-  if ('exit' in message && isRecord(message.exit) && '_tag' in message.exit) {
-    summary.exitTag = message.exit._tag
-  }
-
-  return summary
-}
-
-function summarizeValue(value: unknown) {
-  if (Array.isArray(value)) {
-    return { type: 'array', length: value.length }
-  }
-
-  if (isRecord(value)) {
-    return { type: 'object', keys: Object.keys(value) }
-  }
-
-  return { type: typeof value, value }
-}
-
-function fromPromise<A>(operation: string, run: () => Promise<A>) {
+function fromPromise<A>(run: () => Promise<A>) {
   return Effect.tryPromise({
-    try: async () => {
-      bridgeLog(`${operation}.start`)
-      const value = await run()
-      bridgeLog(`${operation}.success`, summarizeValue(value))
-      return value
-    },
-    catch: (error) => {
-      bridgeLog(`${operation}.failure`, {
-        message: error instanceof Error ? error.message : String(error),
-      })
-      return toRuntimeRpcError(error)
-    },
+    try: run,
+    catch: toRuntimeRpcError,
   })
 }
 
@@ -124,7 +53,7 @@ function createPageBridgeHandlers() {
 
   return PageBridgeRpcGroup.of({
     listModels: () =>
-      fromPromise('listModels', async () => {
+      fromPromise(async () => {
         const models = await runtime.listModels({
           origin: window.location.origin,
           connectedOnly: true,
@@ -136,7 +65,7 @@ function createPageBridgeHandlers() {
       }),
 
     getModel: (input) =>
-      fromPromise('getModel', async () => {
+      fromPromise(async () => {
         const requestId = input.requestId ?? nextBridgeRequestId()
         const sessionID = input.sessionID ?? requestId
 
@@ -151,7 +80,7 @@ function createPageBridgeHandlers() {
       }),
 
     requestPermission: (input) =>
-      fromPromise('requestPermission', async () => {
+      fromPromise(async () => {
         const modelId = input.modelId ?? "openai/gpt-4o-mini"
         const parsed = parseProviderModel(modelId)
         const result = await runtime.requestPermission({
@@ -173,7 +102,7 @@ function createPageBridgeHandlers() {
       }),
 
     abort: (input) =>
-      fromPromise('abort', async () => {
+      fromPromise(async () => {
         if (!input.requestId) {
           return { ok: true }
         }
@@ -192,7 +121,7 @@ function createPageBridgeHandlers() {
       }),
 
     modelDoGenerate: (input) =>
-      fromPromise('modelDoGenerate', async () => {
+      fromPromise(async () => {
         const normalized = normalizeModelCallInput(input)
         if (!normalized.options) {
           throw new RuntimeValidationError({
@@ -211,15 +140,7 @@ function createPageBridgeHandlers() {
     modelDoStream: (input) => {
       const normalized = normalizeModelCallInput(input)
       const options = normalized.options
-      bridgeLog('modelDoStream.start', {
-        requestId: normalized.requestId,
-        modelId: normalized.modelId,
-      })
       if (!options) {
-        bridgeLog('modelDoStream.invalidOptions', {
-          requestId: normalized.requestId,
-          modelId: normalized.modelId,
-        })
         return Stream.fail(
           new RuntimeValidationError({
             message: "modelDoStream requires call options with prompt",
@@ -239,24 +160,11 @@ function createPageBridgeHandlers() {
             })
 
             for await (const chunk of iterable) {
-              bridgeLog('modelDoStream.chunk', summarizeValue(chunk))
               yield chunk
             }
-
-            bridgeLog('modelDoStream.complete', {
-              requestId: normalized.requestId,
-              modelId: normalized.modelId,
-            })
           },
         },
-        (error) => {
-          bridgeLog('modelDoStream.failure', {
-            requestId: normalized.requestId,
-            modelId: normalized.modelId,
-            message: error instanceof Error ? error.message : String(error),
-          })
-          return toRuntimeRpcError(error)
-        },
+        toRuntimeRpcError,
       )
     },
   })
@@ -273,16 +181,14 @@ async function attachServerToPort(
   port: MessagePort,
   sessions: Map<MessagePort, PageBridgeSession>,
 ) {
-  bridgeLog('attachServerToPort.start', { sessionId })
   const scope = await Effect.runPromise(Scope.make())
   let disposed = false
   let onMessage: ((event: MessageEvent<FromClientEncoded | PageBridgePortControlMessage>) => void) | null = null
   let onMessageError: ((event: MessageEvent<unknown>) => void) | null = null
 
-  const cleanup = async (reason: string) => {
+  const cleanup = async (_reason: string) => {
     if (disposed) return
     disposed = true
-    bridgeLog('session.cleanup.start', { sessionId, reason })
 
     if (onMessage) {
       port.removeEventListener("message", onMessage)
@@ -304,12 +210,6 @@ async function attachServerToPort(
     } catch {
       // ignored
     }
-
-    bridgeLog('session.cleanup.complete', {
-      sessionId,
-      reason,
-      activeSessions: sessions.size,
-    })
   }
 
   const handlersLayer = PageBridgeRpcGroup.toLayer(Effect.succeed(createPageBridgeHandlers()))
@@ -324,14 +224,6 @@ async function attachServerToPort(
           event: MessageEvent<FromClientEncoded | PageBridgePortControlMessage>,
         ) => {
           if (isPageBridgePortControlMessage(event.data)) {
-            bridgeLog('port.control.inbound', {
-              sessionId,
-              controlTag: PAGE_BRIDGE_PORT_CONTROL_MESSAGE,
-              type: event.data.type,
-              reason: event.data.reason,
-              connectionId: event.data.connectionId,
-            })
-
             if (event.data.type === "disconnect") {
               void cleanup('control-disconnect')
             }
@@ -339,25 +231,12 @@ async function attachServerToPort(
             return
           }
 
-          bridgeLog('rpc.inbound', {
-            sessionId,
-            message: summarizeRpcMessage(event.data),
-          })
-
           void Effect.runPromise(writeRequest(0, event.data)).catch((error) => {
-            bridgeLog('rpc.write.failed', {
-              sessionId,
-              message: error instanceof Error ? error.message : String(error),
-            })
             console.warn("page bridge rpc write failed", error)
           })
         }
 
-        onMessageError = (event: MessageEvent<unknown>) => {
-          bridgeLog('port.messageerror', {
-            sessionId,
-            data: summarizeValue(event.data),
-          })
+        onMessageError = (_event: MessageEvent<unknown>) => {
           void Effect.runPromise(disconnects.offer(0)).catch(() => undefined)
           void cleanup('messageerror')
         }
@@ -365,7 +244,6 @@ async function attachServerToPort(
         port.addEventListener("message", onMessage)
         port.addEventListener("messageerror", onMessageError)
         port.start()
-        bridgeLog('port.started', { sessionId })
 
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
@@ -383,18 +261,9 @@ async function attachServerToPort(
           disconnects,
           send: (_clientId: number, message: FromServerEncoded) =>
             Effect.sync(() => {
-              bridgeLog('rpc.outbound', {
-                sessionId,
-                message: summarizeRpcMessage(message),
-              })
-
               try {
                 port.postMessage(message)
-              } catch (error) {
-                bridgeLog('rpc.outbound.postMessageFailed', {
-                  sessionId,
-                  message: error instanceof Error ? error.message : String(error),
-                })
+              } catch (_error) {
                 void cleanup('postMessage-failed')
               }
             }),
@@ -421,7 +290,6 @@ async function attachServerToPort(
     ),
   )
 
-  bridgeLog('attachServerToPort.ready', { sessionId })
   return cleanup
 }
 
@@ -431,28 +299,11 @@ export function setupPageApiBridge() {
 
   const cleanupAllSessions = async (reason: string) => {
     const activeSessions = [...sessions.values()]
-    bridgeLog('sessions.cleanupAll.start', {
-      reason,
-      count: activeSessions.length,
-    })
 
     await Promise.all(activeSessions.map((session) => session.cleanup(reason)))
-
-    bridgeLog('sessions.cleanupAll.complete', {
-      reason,
-      count: sessions.size,
-    })
   }
 
   const onMessage = async (event: MessageEvent) => {
-    if (event.data?.type === PAGE_BRIDGE_INIT_MESSAGE) {
-      bridgeLog('window.init.received', {
-        sourceIsWindow: event.source === window,
-        ports: event.ports.length,
-        origin: event.origin,
-      })
-    }
-
     // `event.source` is only used as a local filter; authorization is enforced in background RPC.
     if (event.source !== window || event.data?.type !== PAGE_BRIDGE_INIT_MESSAGE || !event.ports[0]) {
       return
@@ -460,16 +311,10 @@ export function setupPageApiBridge() {
 
     const port = event.ports[0]
     if (sessions.has(port)) {
-      bridgeLog('window.init.duplicatePort', {
-        sessionId: sessions.get(port)?.id,
-      })
       return
     }
 
     const sessionId = ++nextSessionId
-    bridgeLog('window.init.accepted', {
-      sessionId,
-    })
 
     try {
       const cleanup = await attachServerToPort(sessionId, port, sessions)
@@ -478,25 +323,15 @@ export function setupPageApiBridge() {
         port,
         cleanup,
       })
-      bridgeLog('window.init.attached', {
-        sessionId,
-        activeSessions: sessions.size,
-      })
     } catch (error) {
-      bridgeLog('window.init.attachFailed', {
-        sessionId,
-        message: error instanceof Error ? error.message : String(error),
-      })
       console.warn("failed to initialize page bridge rpc", error)
     }
   }
 
   window.addEventListener("message", onMessage)
-  bridgeLog('bridge.listener.installed')
   window.addEventListener(
     "pagehide",
     () => {
-      bridgeLog('bridge.pagehide')
       void cleanupAllSessions('pagehide')
     },
     { once: true },
@@ -504,5 +339,4 @@ export function setupPageApiBridge() {
 
   document.documentElement.dataset.llmBridgeReady = "true"
   window.dispatchEvent(new CustomEvent(PAGE_BRIDGE_READY_EVENT))
-  bridgeLog('bridge.ready.dispatched')
 }

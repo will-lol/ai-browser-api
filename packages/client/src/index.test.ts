@@ -5,21 +5,15 @@ import { BridgeClient, withBridgeClient } from "./index";
 
 describe("BridgeClientLive connection lifecycle", () => {
   it("recreates connection after a transient connect failure", async () => {
-    const events: Array<string> = [];
-    const logger: typeof console.info = (...args: Array<unknown>) => {
-      const event = args[2];
-      if (typeof event === "string") {
-        events.push(event);
-      }
-    };
-
     const globals = globalThis as typeof globalThis & {
       MessageChannel: typeof MessageChannel;
     };
     const originalMessageChannel = globals.MessageChannel;
+    let attempts = 0;
 
     globals.MessageChannel = class {
       constructor() {
+        attempts += 1;
         throw new Error("forced connect failure");
       }
     } as unknown as typeof MessageChannel;
@@ -36,8 +30,6 @@ describe("BridgeClientLive connection lifecycle", () => {
             assert.equal(second._tag, "Left");
           }),
           {
-            debug: true,
-            logger,
             timeoutMs: 5,
           },
         ),
@@ -46,9 +38,6 @@ describe("BridgeClientLive connection lifecycle", () => {
       globals.MessageChannel = originalMessageChannel;
     }
 
-    const createCount = events.filter(
-      (event) => event === "rpc.connection.create",
-    ).length;
-    assert.equal(createCount, 2);
+    assert.equal(attempts, 2);
   });
 });

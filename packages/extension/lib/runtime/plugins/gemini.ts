@@ -233,16 +233,6 @@ async function waitForGeminiOAuthCallback(signal?: AbortSignal) {
       "Timed out waiting for Gemini OAuth callback on http://localhost:8085/oauth2callback.",
     registerListenerErrorPrefix:
       "Failed to register Gemini OAuth callback listener",
-    onListenerArmed: () => {
-      console.info("[builtin-gemini-auth] oauth callback listener armed", {
-        pattern: GEMINI_REDIRECT_URL_PATTERN,
-      });
-    },
-    onIntercepted: (url) => {
-      console.info("[builtin-gemini-auth] oauth callback intercepted", {
-        hasQuery: url.includes("?"),
-      });
-    },
   });
 }
 
@@ -568,12 +558,6 @@ export const geminiOAuthPlugin: RuntimePlugin = {
               url.searchParams.set("prompt", "consent");
               url.hash = "llm-bridge";
 
-              console.info("[builtin-gemini-auth] oauth authorize start", {
-                providerID: input.providerID,
-                redirectUri,
-                authURLOrigin: url.origin,
-              });
-
               let authTabId: number | undefined;
               try {
                 const tab = await browser.tabs.create({
@@ -581,9 +565,6 @@ export const geminiOAuthPlugin: RuntimePlugin = {
                   active: true,
                 });
                 authTabId = tab.id;
-                console.info("[builtin-gemini-auth] oauth tab opened", {
-                  tabID: authTabId ?? null,
-                });
               } catch (error) {
                 throw new Error(
                   `Failed to open Google OAuth tab: ${toErrorMessage(error)}`,
@@ -607,19 +588,10 @@ export const geminiOAuthPlugin: RuntimePlugin = {
                   await browser.tabs.remove(authTabId).catch(() => {
                     // Ignore tab close failures if user already closed it.
                   });
-                  console.info("[builtin-gemini-auth] oauth tab closed", {
-                    tabID: authTabId,
-                  });
                 }
               }
 
               const parsed = input.oauth.parseCallback(callbackUrl);
-              console.info("[builtin-gemini-auth] oauth callback parsed", {
-                hasCode: Boolean(parsed.code),
-                hasState: Boolean(parsed.state),
-                error: parsed.error ?? null,
-                hasErrorDescription: Boolean(parsed.errorDescription),
-              });
 
               if (parsed.error) {
                 throw new Error(
@@ -634,19 +606,12 @@ export const geminiOAuthPlugin: RuntimePlugin = {
 
               let tokens: GoogleTokenResponse;
               try {
-                console.info(
-                  "[builtin-gemini-auth] exchanging authorization code",
-                );
                 tokens = await exchangeAuthorizationCode(
                   parsed.code,
                   pkce.verifier,
                   redirectUri,
                   clientSecret,
                 );
-                console.info("[builtin-gemini-auth] token exchange succeeded", {
-                  expiresIn: tokens.expires_in,
-                  hasRefreshToken: Boolean(tokens.refresh_token),
-                });
               } catch (error) {
                 console.error("[builtin-gemini-auth] token exchange failed", {
                   error: toErrorMessage(error),

@@ -41,13 +41,6 @@ type TokenResponse = {
   expires_in?: number;
 };
 
-type RequestSummary = {
-  model?: string;
-  stream?: boolean;
-  store?: boolean;
-  hasInstructions?: boolean;
-};
-
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
     throw new RuntimeAuthProviderError({
@@ -93,97 +86,6 @@ function codexAuthProviderError(input: {
     retryable: input.retryable ?? false,
     message: input.message,
   });
-}
-
-function summarizeCodexRequest(
-  input: RequestInfo | URL,
-  init?: RequestInit,
-): RequestSummary {
-  const body = init?.body;
-  if (typeof body !== "string") return {};
-
-  try {
-    const parsed = JSON.parse(body) as {
-      model?: unknown;
-      stream?: unknown;
-      store?: unknown;
-      instructions?: unknown;
-    };
-    return {
-      model: typeof parsed.model === "string" ? parsed.model : undefined,
-      stream: typeof parsed.stream === "boolean" ? parsed.stream : undefined,
-      store: typeof parsed.store === "boolean" ? parsed.store : undefined,
-      hasInstructions:
-        typeof parsed.instructions === "string" &&
-        parsed.instructions.trim().length > 0,
-    };
-  } catch {
-    return {};
-  }
-}
-
-function toUrlString(input: RequestInfo | URL) {
-  if (typeof input === "string") return input;
-  if (input instanceof URL) return input.toString();
-  return input.url;
-}
-
-function createCodexDebugFetch(): typeof fetch {
-  return async (input, init) => {
-    const url = toUrlString(input);
-    const method =
-      init?.method ?? (input instanceof Request ? input.method : "GET");
-
-    const headers = new Headers(
-      input instanceof Request ? input.headers : undefined,
-    );
-    const initHeaders = new Headers(init?.headers);
-    initHeaders.forEach((value, key) => {
-      headers.set(key, value);
-    });
-
-    const requestSummary = summarizeCodexRequest(input, init);
-    console.info("[builtin-codex-auth] request", {
-      method,
-      url,
-      model: requestSummary.model ?? null,
-      stream: requestSummary.stream ?? null,
-      store: requestSummary.store ?? null,
-      hasInstructions: requestSummary.hasInstructions ?? null,
-      hasAuthorization: Boolean(headers.get("authorization")),
-      hasAccountHeader: Boolean(headers.get("chatgpt-account-id")),
-      originator: headers.get("originator") ?? null,
-      openAIBeta: headers.get("openai-beta") ?? null,
-      accept: headers.get("accept") ?? null,
-      sessionID: headers.get("session_id") ?? null,
-    });
-
-    const response = await fetch(input, init);
-
-    if (!response.ok) {
-      const detail = await response
-        .clone()
-        .text()
-        .catch(() => "");
-      console.error("[builtin-codex-auth] response.error", {
-        method,
-        url,
-        status: response.status,
-        statusText: response.statusText,
-        contentType: response.headers.get("content-type") ?? null,
-        detail: detail.slice(0, 500),
-      });
-      return response;
-    }
-
-    console.info("[builtin-codex-auth] response.ok", {
-      method,
-      url,
-      status: response.status,
-      contentType: response.headers.get("content-type") ?? null,
-    });
-    return response;
-  };
 }
 
 function decodeJwtPayload(token: string) {
@@ -751,7 +653,6 @@ export const codexAuthPlugin: RuntimePlugin = {
             baseURL: CODEX_API_BASE,
             apiKey: access,
             authType: "bearer",
-            fetch: createCodexDebugFetch(),
             headers: {
               ...(effectiveAccountId
                 ? { "chatgpt-account-id": effectiveAccountId }

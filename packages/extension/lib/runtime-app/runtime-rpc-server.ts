@@ -23,7 +23,6 @@ import {
 type RuntimePort = ReturnType<typeof browser.runtime.connect>
 type RuntimeSender = RuntimePort["sender"]
 type RuntimeRole = "public" | "admin"
-const RUNTIME_RPC_SERVER_LOG_PREFIX = "[runtime-rpc-background]"
 
 type AuthorizedContext = {
   readonly role: RuntimeRole
@@ -81,50 +80,8 @@ const AdminRpcTags = new Set([
   "abortModelCall",
 ])
 
-function toLogString(meta: unknown) {
-  if (meta === undefined) return ""
-  if (typeof meta === "string") return meta
-
-  try {
-    return JSON.stringify(meta, (_key, value) => (typeof value === "bigint" ? value.toString() : value))
-  } catch {
-    return String(meta)
-  }
-}
-
-function runtimeServerLog(event: string, meta?: unknown) {
-  console.info(RUNTIME_RPC_SERVER_LOG_PREFIX, new Date().toISOString(), event, toLogString(meta))
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
-}
-
-function summarizeRpcMessage(message: unknown) {
-  if (!isRecord(message)) {
-    return { type: typeof message }
-  }
-
-  const summary: Record<string, unknown> = {}
-  for (const key of ["_id", "_tag", "id", "requestId", "tag", "method", "clientId"]) {
-    if (key in message) {
-      summary[key] = message[key]
-    }
-  }
-
-  if ("payload" in message && isRecord(message.payload)) {
-    summary.payloadKeys = Object.keys(message.payload)
-  }
-
-  if ("values" in message && Array.isArray(message.values)) {
-    summary.valuesLength = message.values.length
-  }
-
-  if ("exit" in message && isRecord(message.exit) && "_tag" in message.exit) {
-    summary.exitTag = message.exit._tag
-  }
-
-  return summary
 }
 
 function parseOrigin(url: string) {
@@ -149,10 +106,6 @@ function getPayloadOrigin(message: FromClientEncoded) {
   if (!isRecord(message.payload)) return undefined
   const origin = message.payload.origin
   return typeof origin === "string" ? origin : undefined
-}
-
-function requestTag(message: FromClientEncoded) {
-  return message._tag === "Request" ? message.tag : undefined
 }
 
 const RuntimeRpcAccessPolicy: RpcAccessPolicy = {
@@ -257,16 +210,9 @@ function protocolForRole(
       const sessions = new Map<number, RuntimePortSession>()
       const connectedClientIds = new Set<number>()
 
-      const cleanupSession = (clientId: number, reason: string) => {
+      const cleanupSession = (clientId: number, _reason: string) => {
         const session = sessions.get(clientId)
         if (!session) return
-
-        runtimeServerLog("transport.session.cleanup", {
-          role: options.role,
-          clientId,
-          reason,
-          senderOrigin: session.authorizedContext.senderOrigin,
-        })
 
         session.port.onMessage.removeListener(session.onMessage)
         session.port.onDisconnect.removeListener(session.onDisconnect)
@@ -274,15 +220,8 @@ function protocolForRole(
         connectedClientIds.delete(clientId)
       }
 
-      const rejectAndDisconnect = (clientId: number, reason: string, error: RuntimeRpcError) => {
+      const rejectAndDisconnect = (clientId: number, reason: string) => {
         const session = sessions.get(clientId)
-        runtimeServerLog("transport.request.rejected", {
-          role: options.role,
-          clientId,
-          reason,
-          errorTag: isRecord(error) && "_tag" in error ? error._tag : undefined,
-          message: isRecord(error) && "message" in error ? error.message : undefined,
-        })
 
         cleanupSession(clientId, reason)
 
@@ -307,11 +246,6 @@ function protocolForRole(
             port,
           }))
         } catch {
-          runtimeServerLog("transport.connect.rejected", {
-            role: options.role,
-            portName: port.name,
-            senderUrl: port.sender?.url,
-          })
           try {
             port.disconnect()
           } catch {
@@ -323,39 +257,21 @@ function protocolForRole(
         const clientId = ++nextClientId
 
         const onMessage: Parameters<typeof port.onMessage.addListener>[0] = (payload: FromClientEncoded) => {
-          runtimeServerLog("transport.inbound", {
-            role: options.role,
-            clientId,
-            message: summarizeRpcMessage(payload),
-          })
-
           void Effect.runPromise(
             options.policy.authorizeRequest({
               context: authorizedContext,
               message: payload,
             }).pipe(
               Effect.flatMap(() => writeRequest(clientId, payload)),
-              Effect.catchAll((error) =>
+              Effect.catchAll((_error) =>
                 Effect.sync(() => {
-                  rejectAndDisconnect(clientId, "authorization-failed", error)
+                  rejectAndDisconnect(clientId, "authorization-failed")
                 })),
             ),
-          ).catch((error) => {
-            runtimeServerLog("transport.write.failed", {
-              role: options.role,
-              clientId,
-              tag: requestTag(payload),
-              message: error instanceof Error ? error.message : String(error),
-            })
-          })
+          ).catch(() => undefined)
         }
 
         const onDisconnect: Parameters<typeof port.onDisconnect.addListener>[0] = () => {
-          runtimeServerLog("transport.disconnected", {
-            role: options.role,
-            clientId,
-            lastError: browser.runtime.lastError?.message,
-          })
           cleanupSession(clientId, "port-disconnect")
           void Effect.runPromise(disconnects.offer(clientId)).catch(() => undefined)
         }
@@ -368,14 +284,6 @@ function protocolForRole(
           onDisconnect,
         })
         connectedClientIds.add(clientId)
-
-        runtimeServerLog("transport.connected", {
-          role: options.role,
-          clientId,
-          portName: port.name,
-          senderOrigin: authorizedContext.senderOrigin,
-          hasTab: Boolean(port.sender?.tab),
-        })
 
         port.onMessage.addListener(onMessage)
         port.onDisconnect.addListener(onDisconnect)
@@ -407,20 +315,10 @@ function protocolForRole(
             const session = sessions.get(clientId)
             if (!session) return
 
-            runtimeServerLog("transport.outbound", {
-              role: options.role,
-              clientId,
-              message: summarizeRpcMessage(response),
-            })
-
             try {
               session.port.postMessage(response)
-            } catch (error) {
-              runtimeServerLog("transport.outbound.postMessageFailed", {
-                role: options.role,
-                clientId,
-                message: error instanceof Error ? error.message : String(error),
-              })
+            } catch {
+              // ignored
             }
           }),
         end: (clientId: number) =>
@@ -449,7 +347,6 @@ export async function registerRuntimeRpcServer<PE, AE>(input: {
   publicLayer: Layer.Layer<Rpc.ToHandler<RuntimePublicRpc> | Rpc.Middleware<RuntimePublicRpc>, PE, never>
   adminLayer: Layer.Layer<Rpc.ToHandler<RuntimeAdminRpc> | Rpc.Middleware<RuntimeAdminRpc>, AE, never>
 }) {
-  runtimeServerLog("server.register.start")
   const scope = await Effect.runPromise(Scope.make())
 
   const policy = RuntimeRpcAccessPolicy
@@ -492,12 +389,8 @@ export async function registerRuntimeRpcServer<PE, AE>(input: {
     ),
   )
 
-  runtimeServerLog("server.register.ready")
-
   return () =>
     Effect.runPromise(
       Scope.close(scope, Exit.succeed(undefined)),
-    ).then(() => {
-      runtimeServerLog("server.register.closed")
-    })
+    )
 }

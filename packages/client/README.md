@@ -32,7 +32,7 @@ const program = Effect.gen(function*() {
   return response.text
 })
 
-const text = await Effect.runPromise(withBridgeClient(program, { debug: true }))
+const text = await Effect.runPromise(withBridgeClient(program))
 console.log(text)
 ```
 

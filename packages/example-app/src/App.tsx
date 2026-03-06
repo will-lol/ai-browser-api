@@ -5,27 +5,11 @@ import {
   withBridgeClient,
 } from "@llm-bridge/client";
 import * as Effect from "effect/Effect";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const DEFAULT_MODEL_ID = "google/gemini-3.1-pro-preview";
-const LOG_LIMIT = 250;
-
-function stringify(value: unknown) {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
 
 export function App() {
-  const bridgeOptions = useMemo(
-    () => ({
-      debug: true,
-    }),
-    [],
-  );
-
   const [models, setModels] = useState<ReadonlyArray<BridgeModelSummary>>([]);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [prompt, setPrompt] = useState(
@@ -34,35 +18,23 @@ export function App() {
   const [status, setStatus] = useState("Idle");
   const [result, setResult] = useState("");
   const [busy, setBusy] = useState<"generate" | "stream" | null>(null);
-  const [debugLines, setDebugLines] = useState<ReadonlyArray<string>>([]);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const startupRefreshTriggeredRef = useRef(false);
-
-  const pushLog = useCallback((event: string, meta?: unknown) => {
-    const line =
-      `[example-app] ${new Date().toISOString()} ${event} ${meta === undefined ? "" : stringify(meta)}`.trim();
-
-    setDebugLines((prev) => [line, ...prev].slice(0, LOG_LIMIT));
-    console.info(line);
-  }, []);
 
   const pushError = useCallback((event: string, error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     const line = `[example-app] ${new Date().toISOString()} ${event} ${message}`;
-
-    setDebugLines((prev) => [line, ...prev].slice(0, LOG_LIMIT));
     console.error(line);
   }, []);
 
   const runBridge = useCallback(
     <A,>(program: Effect.Effect<A, unknown, BridgeClient>) =>
-      Effect.runPromise(withBridgeClient(program, bridgeOptions)),
-    [bridgeOptions],
+      Effect.runPromise(withBridgeClient(program)),
+    [],
   );
 
   const refreshModels = useCallback(async () => {
     if (refreshInFlightRef.current) {
-      pushLog("refreshModels.coalesced");
       return refreshInFlightRef.current;
     }
 
@@ -96,7 +68,6 @@ export function App() {
         });
 
         setStatus("Ready");
-        pushLog("refreshModels.success", { count: googleModels.length });
       } catch (error) {
         pushError("refreshModels.failed", error);
         setStatus("Failed to load models");
@@ -108,7 +79,7 @@ export function App() {
     });
 
     return refreshInFlightRef.current;
-  }, [pushError, pushLog, runBridge]);
+  }, [pushError, runBridge]);
 
   const loadModel = useCallback(
     (modelId: string) =>
@@ -149,16 +120,13 @@ export function App() {
 
       setResult(generated.text);
       setStatus(`Done (${generated.finishReason})`);
-      pushLog("generate.success", {
-        finishReason: generated.finishReason,
-      });
     } catch (error) {
       pushError("generate.failed", error);
       setStatus("Generation failed");
     } finally {
       setBusy(null);
     }
-  }, [loadModel, prompt, pushError, pushLog, selectedModelId]);
+  }, [loadModel, prompt, pushError, selectedModelId]);
 
   const runStream = useCallback(async () => {
     if (!selectedModelId) {
@@ -192,24 +160,20 @@ export function App() {
 
       const finishReason = await streamResult.finishReason;
       setStatus(`Done (${finishReason})`);
-      pushLog("stream.success", { finishReason });
     } catch (error) {
       pushError("stream.failed", error);
       setStatus("Streaming failed");
     } finally {
       setBusy(null);
     }
-  }, [loadModel, prompt, pushError, pushLog, selectedModelId]);
+  }, [loadModel, prompt, pushError, selectedModelId]);
 
   useEffect(() => {
-    if (startupRefreshTriggeredRef.current) {
-      pushLog("refreshModels.startup.skipped");
-      return;
-    }
+    if (startupRefreshTriggeredRef.current) return;
 
     startupRefreshTriggeredRef.current = true;
     void refreshModels();
-  }, [pushLog, refreshModels]);
+  }, [refreshModels]);
 
   return (
     <main className="container">
@@ -281,10 +245,6 @@ export function App() {
         <pre id="result">{result}</pre>
       </section>
 
-      <section className="card">
-        <label htmlFor="debug">Debug</label>
-        <pre id="debug">{debugLines.join("\n")}</pre>
-      </section>
     </main>
   );
 }

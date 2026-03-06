@@ -101,8 +101,6 @@ type ContractToolResultOutput = Extract<
 
 export type BridgeClientOptions = {
   timeoutMs?: number;
-  debug?: boolean;
-  logger?: typeof console.info;
 };
 
 export type BridgeModelSummary = RuntimeModelSummary;
@@ -130,75 +128,6 @@ function createAbortError() {
   const error = new Error("The operation was aborted");
   error.name = "AbortError";
   return error;
-}
-
-function log(
-  debug: boolean,
-  logger: typeof console.info,
-  event: string,
-  meta?: unknown,
-) {
-  if (!debug) return;
-  logger(
-    "[llm-bridge-client]",
-    new Date().toISOString(),
-    event,
-    formatLogMeta(meta),
-  );
-}
-
-function formatLogMeta(meta: unknown): string {
-  if (meta === undefined) return "";
-  if (typeof meta === "string") return meta;
-
-  try {
-    return JSON.stringify(meta, (_key, value) =>
-      typeof value === "bigint" ? value.toString() : value,
-    );
-  } catch {
-    return String(meta);
-  }
-}
-
-function summarizeRpcMessage(message: unknown): Record<string, unknown> {
-  if (typeof message !== "object" || message === null) {
-    return { type: typeof message };
-  }
-
-  const record = message as Record<string, unknown>;
-  const summary: Record<string, unknown> = {};
-
-  for (const key of [
-    "_id",
-    "_tag",
-    "id",
-    "requestId",
-    "tag",
-    "method",
-    "clientId",
-  ]) {
-    if (key in record) {
-      summary[key] = record[key];
-    }
-  }
-
-  if ("payload" in record && typeof record.payload === "object") {
-    const payload = record.payload as Record<string, unknown>;
-    summary.payloadKeys = Object.keys(payload);
-  }
-
-  if ("values" in record && Array.isArray(record.values)) {
-    summary.valuesLength = record.values.length;
-  }
-
-  if ("exit" in record && typeof record.exit === "object" && record.exit) {
-    const exit = record.exit as Record<string, unknown>;
-    if ("_tag" in exit) {
-      summary.exitTag = exit._tag;
-    }
-  }
-
-  return summary;
 }
 
 function waitForBridgeReady(timeoutMs: number) {
@@ -937,21 +866,14 @@ function closeConnection(
   connection: BridgeConnection,
   options: {
     reason: CloseConnectionReason;
-    debug: boolean;
-    logger: typeof console.info;
   },
 ): Effect.Effect<void, never> {
-  const { reason, debug, logger } = options;
+  const { reason } = options;
   const disconnectReason =
     reason === "destroy" ? "client-destroy" : "stale-connection";
 
   return Effect.tryPromise({
     try: async () => {
-      log(debug, logger, "rpc.destroy.start", {
-        connectionId: connection.connectionId,
-        reason,
-      });
-
       const disconnectMessage: PageBridgePortControlMessage = {
         _tag: PAGE_BRIDGE_PORT_CONTROL_MESSAGE,
         type: "disconnect",
@@ -961,16 +883,8 @@ function closeConnection(
 
       try {
         connection.port.postMessage(disconnectMessage);
-        log(debug, logger, "rpc.control.disconnect.sent", {
-          connectionId: connection.connectionId,
-          reason,
-        });
-      } catch (error) {
-        log(debug, logger, "rpc.control.disconnect.failed", {
-          connectionId: connection.connectionId,
-          reason,
-          message: error instanceof Error ? error.message : String(error),
-        });
+      } catch {
+        // ignored
       }
 
       try {
@@ -987,10 +901,6 @@ function closeConnection(
         // ignored
       }
 
-      log(debug, logger, "rpc.destroyed", {
-        connectionId: connection.connectionId,
-        reason,
-      });
     },
     catch: () => undefined,
   }).pipe(Effect.orElseSucceed(() => undefined));
@@ -1000,8 +910,6 @@ function createConnection(
   options: BridgeClientOptions,
 ): Effect.Effect<BridgeConnection, RuntimeRpcError> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const debug = options.debug ?? false;
-  const logger = options.logger ?? console.info;
   const connectionId = ++nextBridgeConnectionId;
 
   return Effect.tryPromise({
@@ -1010,18 +918,7 @@ function createConnection(
       let port: MessagePort | null = null;
 
       try {
-        log(debug, logger, "rpc.connect.start", {
-          connectionId,
-          timeoutMs,
-          bridgeReady:
-            typeof document !== "undefined"
-              ? document.documentElement.dataset.llmBridgeReady
-              : undefined,
-        });
         await waitForBridgeReady(timeoutMs);
-        log(debug, logger, "rpc.connect.ready", {
-          connectionId,
-        });
 
         const runtimeScope = await Effect.runPromise(Scope.make());
         scope = runtimeScope;
@@ -1034,42 +931,17 @@ function createConnection(
           RpcClient.Protocol.make((writeResponse) =>
             Effect.gen(function* () {
               const onMessage = (event: MessageEvent<FromServerEncoded>) => {
-                log(debug, logger, "rpc.port.inbound", {
-                  connectionId,
-                  message: summarizeRpcMessage(event.data),
-                });
                 void Effect.runPromise(writeResponse(event.data)).catch(
-                  (error) => {
-                    log(
-                      debug,
-                      logger,
-                      "rpc.writeError",
-                      {
-                        connectionId,
-                        message:
-                          error instanceof Error ? error.message : String(error),
-                        inbound: summarizeRpcMessage(event.data),
-                      },
-                    );
-                  },
+                  () => undefined,
                 );
               };
 
-              const onMessageError = (event: MessageEvent<unknown>) => {
-                log(debug, logger, "rpc.messageError", {
-                  connectionId,
-                  data: summarizeRpcMessage(event.data),
-                });
-              };
-
               runtimePort.addEventListener("message", onMessage);
-              runtimePort.addEventListener("messageerror", onMessageError);
               runtimePort.start();
 
               yield* Effect.addFinalizer(() =>
                 Effect.sync(() => {
                   runtimePort.removeEventListener("message", onMessage);
-                  runtimePort.removeEventListener("messageerror", onMessageError);
                 }),
               );
 
@@ -1077,10 +949,6 @@ function createConnection(
                 send: (message: FromClientEncoded) =>
                   Effect.try({
                     try: () => {
-                      log(debug, logger, "rpc.port.outbound", {
-                        connectionId,
-                        message: summarizeRpcMessage(message),
-                      });
                       runtimePort.postMessage(message);
                     },
                     catch: (cause) =>
@@ -1106,21 +974,9 @@ function createConnection(
           ),
         );
 
-        log(debug, logger, "rpc.handshake.postMessage", {
-          connectionId,
-          type: PAGE_BRIDGE_INIT_MESSAGE,
-        });
         window.postMessage({ type: PAGE_BRIDGE_INIT_MESSAGE }, "*", [
           messageChannel.port2,
         ]);
-
-        log(debug, logger, "rpc.connected", {
-          connectionId,
-          bridgeReady:
-            typeof document !== "undefined"
-              ? document.documentElement.dataset.llmBridgeReady
-              : undefined,
-        });
 
         return {
           connectionId,
@@ -1159,9 +1015,6 @@ function nextRequestId(sequence: number) {
 }
 
 export function BridgeClientLive(options: BridgeClientOptions = {}) {
-  const debug = options.debug ?? false;
-  const logger = options.logger ?? console.info;
-
   return Layer.scoped(
     BridgeClient,
     Effect.gen(function* () {
@@ -1174,24 +1027,10 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
         close: (connection, reason) =>
           closeConnection(connection, {
             reason,
-            debug,
-            logger,
           }),
         invalidatedError: () =>
           new RuntimeValidationError({
             message: CONNECTION_INVALIDATED_MESSAGE,
-          }),
-        onCreate: Effect.sync(() => {
-          log(debug, logger, "rpc.connection.create");
-        }),
-        onAwait: Effect.sync(() => {
-          log(debug, logger, "rpc.connection.await");
-        }),
-        onReuse: (current) =>
-          Effect.sync(() => {
-            log(debug, logger, "rpc.connection.reuse", {
-              connectionId: current.connectionId,
-            });
           }),
       });
 
