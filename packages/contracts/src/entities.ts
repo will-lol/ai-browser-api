@@ -234,13 +234,11 @@ export const RuntimeRequestPermissionInputSchema = Schema.Union(
     modelId: Schema.String,
   }),
   Schema.Struct({
-    origin: Schema.String,
     action: Schema.Literal("resolve"),
     requestId: Schema.String,
     decision: RuntimePermissionDecisionSchema,
   }),
   Schema.Struct({
-    origin: Schema.String,
     action: Schema.Literal("dismiss"),
     requestId: Schema.String,
   }),

@@ -47,7 +47,6 @@ export const makeRuntimePublicRpcHandlers = Effect.gen(function*() {
         Effect.gen(function*() {
           yield* app.ensureOriginEnabled(origin)
           return yield* app.listModels({
-            origin,
             connectedOnly,
             providerID,
           })
@@ -114,16 +113,15 @@ export const makeRuntimeAdminRpcHandlers = Effect.gen(function*() {
   const app = yield* RuntimeApplication
 
   return RuntimeAdminRpcGroup.of({
-    listProviders: ({ origin }) => mapRpcError(app.listProviders(origin)),
-    listModels: ({ origin, connectedOnly, providerID }) =>
+    listProviders: () => mapRpcError(app.listProviders()),
+    listModels: ({ connectedOnly, providerID }) =>
       mapRpcError(
         app.listModels({
-          origin,
           connectedOnly,
           providerID,
         }),
       ),
-    listConnectedModels: ({ origin }) => mapRpcError(app.listConnectedModels(origin)),
+    listConnectedModels: () => mapRpcError(app.listConnectedModels()),
     getOriginState: ({ origin }) => mapRpcError(app.getOriginState(origin)),
     listPermissions: ({ origin }) => mapRpcError(app.listPermissions(origin)),
     listPending: ({ origin }) => mapRpcError(app.listPending(origin)),

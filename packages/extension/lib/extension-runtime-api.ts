@@ -22,20 +22,17 @@ export function currentOrigin() {
   return window.location.origin
 }
 
-export async function fetchProviders(origin = currentOrigin()) {
+export async function fetchProviders() {
   const runtime = getRuntimeAdminRPC()
-  return runtime.listProviders({ origin })
+  return runtime.listProviders({})
 }
 
 export async function fetchModels(input?: {
   connectedOnly?: boolean
   providerID?: string
-  origin?: string
 }) {
-  const origin = input?.origin ?? currentOrigin()
   const runtime = getRuntimeAdminRPC()
   return runtime.listModels({
-    origin,
     connectedOnly: input?.connectedOnly,
     providerID: input?.providerID,
   })
@@ -58,24 +55,18 @@ export async function fetchPendingRequests(origin = currentOrigin()) {
 
 export async function openRuntimeProviderAuthWindow(input: {
   providerID: string
-  origin?: string
 }) {
   const runtime = getRuntimeAdminRPC()
-  const origin = input.origin ?? currentOrigin()
   return runtime.openProviderAuthWindow({
-    origin,
     providerID: input.providerID,
   })
 }
 
 export async function fetchProviderAuthFlow(input: {
   providerID: string
-  origin?: string
 }) {
   const runtime = getRuntimeAdminRPC()
-  const origin = input.origin ?? currentOrigin()
   return runtime.getProviderAuthFlow({
-    origin,
     providerID: input.providerID,
   })
 }
@@ -84,12 +75,9 @@ export async function startRuntimeProviderAuthFlow(input: {
   providerID: string
   methodID: string
   values?: Record<string, string>
-  origin?: string
 }) {
   const runtime = getRuntimeAdminRPC()
-  const origin = input.origin ?? currentOrigin()
   return runtime.startProviderAuthFlow({
-    origin,
     providerID: input.providerID,
     methodID: input.methodID,
     values: input.values,
@@ -99,12 +87,9 @@ export async function startRuntimeProviderAuthFlow(input: {
 export async function cancelRuntimeProviderAuthFlow(input: {
   providerID: string
   reason?: string
-  origin?: string
 }) {
   const runtime = getRuntimeAdminRPC()
-  const origin = input.origin ?? currentOrigin()
   return runtime.cancelProviderAuthFlow({
-    origin,
     providerID: input.providerID,
     reason: input.reason,
   })
@@ -112,13 +97,10 @@ export async function cancelRuntimeProviderAuthFlow(input: {
 
 export async function disconnectRuntimeProvider(input: {
   providerID: string
-  origin?: string
 }) {
-  const origin = input.origin ?? currentOrigin()
   const runtime = getRuntimeAdminRPC()
   return runtime.disconnectProvider({
     providerID: input.providerID,
-    origin,
   })
 }
 
@@ -138,31 +120,25 @@ export async function setRuntimeOriginEnabled(input: {
 
 export async function dismissRuntimePermissionRequest(input: {
   requestId: string
-  origin?: string
 }) {
-  const origin = input.origin ?? currentOrigin()
   const runtime = getRuntimeAdminRPC()
 
   return runtime.requestPermission({
     action: "dismiss",
     requestId: input.requestId,
-    origin,
   })
 }
 
 export async function resolveRuntimePermissionRequest(input: {
   requestId: string
   decision: PermissionDecision
-  origin?: string
 }) {
-  const origin = input.origin ?? currentOrigin()
   const runtime = getRuntimeAdminRPC()
 
   return runtime.requestPermission({
     action: "resolve",
     requestId: input.requestId,
     decision: input.decision,
-    origin,
   })
 }
 

@@ -30,13 +30,18 @@ const TEST_MODELS: ReadonlyArray<RuntimeModelSummary> = [
 type Trace = {
   ensureOriginEnabled: string[]
   listModels: Array<{
-    origin: string
     connectedOnly?: boolean
     providerID?: string
   }>
   requestPermission: Array<{
-    origin: string
     action: "create" | "resolve" | "dismiss"
+    origin?: string
+    requestId?: string
+  }>
+  startProviderAuthFlow: Array<{
+    providerID: string
+    methodID: string
+    values?: Record<string, string>
   }>
 }
 
@@ -53,6 +58,7 @@ function createRuntimeApplication(
     ensureOriginEnabled: [],
     listModels: [],
     requestPermission: [],
+    startProviderAuthFlow: [],
   }
 
   const runtimeApplication = {
@@ -61,9 +67,8 @@ function createRuntimeApplication(
       Effect.sync(() => {
         trace.ensureOriginEnabled.push(origin)
       }),
-    listProviders: (_origin: string) => Effect.succeed([]),
+    listProviders: () => Effect.succeed([]),
     listModels: (input: {
-      origin: string
       connectedOnly?: boolean
       providerID?: string
     }) =>
@@ -71,7 +76,7 @@ function createRuntimeApplication(
         trace.listModels.push(input)
         return TEST_MODELS
       }),
-    listConnectedModels: (_origin: string) => Effect.succeed(TEST_MODELS),
+    listConnectedModels: () => Effect.succeed(TEST_MODELS),
     getOriginState: (origin: string) =>
       Effect.succeed({
         origin,
@@ -101,15 +106,30 @@ function createRuntimeApplication(
       methodID: string
       values?: Record<string, string>
     }) =>
-      Effect.succeed({
-        providerID: input.providerID,
-        result: {
+      Effect.sync(() => {
+        trace.startProviderAuthFlow.push(
+          input.values == null
+            ? {
+              providerID: input.providerID,
+              methodID: input.methodID,
+            }
+            : {
+              providerID: input.providerID,
+              methodID: input.methodID,
+              values: input.values,
+            },
+        )
+
+        return {
           providerID: input.providerID,
-          status: "idle" as const,
-          methods: [],
-          updatedAt: 1,
-          canCancel: false,
-        },
+          result: {
+            providerID: input.providerID,
+            status: "idle" as const,
+            methods: [],
+            updatedAt: 1,
+            canCancel: false,
+          },
+        }
       }),
     cancelProviderAuthFlow: (input: {
       providerID: string
@@ -145,13 +165,12 @@ function createRuntimeApplication(
       ),
     requestPermission: (input) =>
       Effect.sync(() => {
-        trace.requestPermission.push({
-          origin: input.origin,
-          action: input.action,
-        })
-
         switch (input.action) {
           case "create":
+            trace.requestPermission.push({
+              action: input.action,
+              origin: input.origin,
+            })
             return {
               status: "requested" as const,
               request: {
@@ -167,11 +186,19 @@ function createRuntimeApplication(
               },
             }
           case "resolve":
+            trace.requestPermission.push({
+              action: input.action,
+              requestId: input.requestId,
+            })
             return {
               requestId: input.requestId,
               decision: input.decision,
             }
           case "dismiss":
+            trace.requestPermission.push({
+              action: input.action,
+              requestId: input.requestId,
+            })
             return {
               requestId: input.requestId,
             }
@@ -263,7 +290,6 @@ describe("runtime rpc handlers", () => {
     assert.deepEqual(result, TEST_MODELS)
     assert.deepEqual(trace.ensureOriginEnabled, [TEST_ORIGIN])
     assert.deepEqual(trace.listModels, [{
-      origin: TEST_ORIGIN,
       connectedOnly: true,
       providerID: "openai",
     }])
@@ -316,10 +342,12 @@ describe("runtime rpc handlers", () => {
     const { runtimeApplication, trace } = createRuntimeApplication((currentTrace) => ({
       requestPermission: (input) =>
         Effect.sync(() => {
-          currentTrace.requestPermission.push({
-            origin: input.origin,
-            action: input.action,
-          })
+          if (input.action === "create") {
+            currentTrace.requestPermission.push({
+              action: input.action,
+              origin: input.origin,
+            })
+          }
           return {
             requestId: "prm_1",
           }
@@ -352,16 +380,30 @@ describe("runtime rpc handlers", () => {
     const handlers = await loadAdminHandlers(runtimeApplication)
 
     const result = await Effect.runPromise(handlers.listModels({
-      origin: TEST_ORIGIN,
       connectedOnly: true,
     }))
 
     assert.deepEqual(result, TEST_MODELS)
     assert.equal(trace.ensureOriginEnabled.length, 0)
     assert.deepEqual(trace.listModels, [{
-      origin: TEST_ORIGIN,
       connectedOnly: true,
       providerID: undefined,
+    }])
+  })
+
+  it("delegates admin provider auth without origin in the payload shape", async () => {
+    const { runtimeApplication, trace } = createRuntimeApplication()
+    const handlers = await loadAdminHandlers(runtimeApplication)
+
+    const result = await Effect.runPromise(handlers.startProviderAuthFlow({
+      providerID: "openai",
+      methodID: "api-key",
+    }))
+
+    assert.equal(result.providerID, "openai")
+    assert.deepEqual(trace.startProviderAuthFlow, [{
+      providerID: "openai",
+      methodID: "api-key",
     }])
   })
 
@@ -374,13 +416,11 @@ describe("runtime rpc handlers", () => {
 
     const resolved = await Effect.runPromise(handlers.requestPermission({
       action: "resolve",
-      origin: TEST_ORIGIN,
       requestId: "prm_1",
       decision: "allowed",
     }))
     const dismissed = await Effect.runPromise(handlers.requestPermission({
       action: "dismiss",
-      origin: TEST_ORIGIN,
       requestId: "prm_2",
     }))
 
@@ -394,12 +434,12 @@ describe("runtime rpc handlers", () => {
     assert.equal(trace.ensureOriginEnabled.length, 0)
     assert.deepEqual(trace.requestPermission, [
       {
-        origin: TEST_ORIGIN,
         action: "resolve",
+        requestId: "prm_1",
       },
       {
-        origin: TEST_ORIGIN,
         action: "dismiss",
+        requestId: "prm_2",
       },
     ])
   })

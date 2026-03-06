@@ -29,7 +29,6 @@ export function SitePermissionsView({
   const hasActiveOrigin = origin != null;
   const originStateQuery = useOriginStateQuery(targetOrigin);
   const modelsQuery = useModelsQuery({
-    origin: targetOrigin,
     connectedOnly: true,
   });
   const permissionsQuery = usePermissionsQuery(targetOrigin);

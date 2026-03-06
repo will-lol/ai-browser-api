@@ -9,13 +9,8 @@ import {
   type RuntimeAuthFlowSnapshot,
   type RuntimeModelCallOptions,
   type RuntimeModelDescriptor,
-  type RuntimeModelSummary,
   type RuntimeOpenProviderAuthWindowResponse,
-  type RuntimeOriginState,
-  type RuntimePendingRequest,
   type RuntimePermissionDecision,
-  type RuntimePermissionEntry,
-  type RuntimeProviderSummary,
   type RuntimeRequestPermissionInput,
   type RuntimeResolvePermissionRequestResponse,
   type RuntimeRpcError,
@@ -33,70 +28,10 @@ import {
   CatalogRepository,
   MetaRepository,
   ModelExecutionRepository,
-  ModelsRepository,
-  PendingRequestsRepository,
   PermissionsRepository,
-  ProvidersRepository,
 } from "./repositories"
 
 type AppEffect<A> = Effect.Effect<A, RuntimeRpcError>
-
-export interface CatalogServiceApi {
-  ensureCatalog: () => AppEffect<void>
-  refreshCatalog: () => AppEffect<void>
-  refreshCatalogForProvider: (providerID: string) => AppEffect<void>
-}
-
-export class CatalogService extends Context.Tag("@llm-bridge/runtime-core/CatalogService")<
-  CatalogService,
-  CatalogServiceApi
->() {}
-
-export const CatalogServiceLive = Layer.effect(
-  CatalogService,
-  Effect.gen(function*() {
-    const catalog = yield* CatalogRepository
-    return {
-      ensureCatalog: () => catalog.ensureCatalog(),
-      refreshCatalog: () => catalog.refreshCatalog(),
-      refreshCatalogForProvider: (providerID: string) => catalog.refreshCatalogForProvider(providerID),
-    } satisfies CatalogServiceApi
-  }),
-)
-
-export interface RuntimeQueryServiceApi {
-  listProviders: () => AppEffect<ReadonlyArray<RuntimeProviderSummary>>
-  listModels: (input: {
-    connectedOnly?: boolean
-    providerID?: string
-  }) => AppEffect<ReadonlyArray<RuntimeModelSummary>>
-  getOriginState: (origin: string) => AppEffect<RuntimeOriginState>
-  listPermissions: (origin: string) => AppEffect<ReadonlyArray<RuntimePermissionEntry>>
-  listPending: (origin: string) => AppEffect<ReadonlyArray<RuntimePendingRequest>>
-}
-
-export class RuntimeQueryService extends Context.Tag("@llm-bridge/runtime-core/RuntimeQueryService")<
-  RuntimeQueryService,
-  RuntimeQueryServiceApi
->() {}
-
-export const RuntimeQueryServiceLive = Layer.effect(
-  RuntimeQueryService,
-  Effect.gen(function*() {
-    const providers = yield* ProvidersRepository
-    const models = yield* ModelsRepository
-    const permissions = yield* PermissionsRepository
-    const pending = yield* PendingRequestsRepository
-
-    return {
-      listProviders: () => providers.listProviders(),
-      listModels: (input) => models.listModels(input),
-      getOriginState: (origin) => permissions.getOriginState(origin),
-      listPermissions: (origin) => permissions.listPermissions(origin),
-      listPending: (origin) => pending.listPending(origin),
-    } satisfies RuntimeQueryServiceApi
-  }),
-)
 
 export interface AuthFlowServiceApi {
   openProviderAuthWindow: (providerID: string) => AppEffect<RuntimeOpenProviderAuthWindowResponse>
@@ -125,7 +60,7 @@ export const AuthFlowServiceLive = Layer.effect(
   AuthFlowService,
   Effect.gen(function*() {
     const auth = yield* AuthRepository
-    const catalog = yield* CatalogService
+    const catalog = yield* CatalogRepository
 
     // Auth orchestration owns catalog refresh side-effects.
     return {
@@ -142,7 +77,7 @@ export const AuthFlowServiceLive = Layer.effect(
         ),
     } satisfies AuthFlowServiceApi
   }),
-).pipe(Layer.provide(CatalogServiceLive))
+)
 
 export interface PermissionServiceApi {
   ensureOriginEnabled: (origin: string) => AppEffect<void>

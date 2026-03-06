@@ -82,8 +82,8 @@ function mapStream(stream: ReadableStream<LanguageModelV3StreamPart>): ReadableS
   })
 }
 
-// This layer only bridges runtime-core repository interfaces to extension primitives.
-// Policy ownership (catalog refresh + permission checks) stays in runtime-core services.
+// This layer bridges runtime-core repositories to extension primitives.
+// Read paths stay on repositories; orchestration stays in runtime-core services.
 export function makeRuntimeCoreInfrastructureLayer() {
   const ProvidersRepoLive = Layer.succeed(ProvidersRepository, {
     listProviders: () => toEffect(() => listProviders()),

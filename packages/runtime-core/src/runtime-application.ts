@@ -26,16 +26,19 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import {
+  CatalogRepository,
+  ModelsRepository,
+  PendingRequestsRepository,
+  PermissionsRepository,
+  ProvidersRepository,
+} from "./repositories"
+import {
   AuthFlowService,
   AuthFlowServiceLive,
-  CatalogService,
-  CatalogServiceLive,
   ModelExecutionService,
   ModelExecutionServiceLive,
   PermissionService,
   PermissionServiceLive,
-  RuntimeQueryService,
-  RuntimeQueryServiceLive,
 } from "./services"
 
 type AppEffect<A> = Effect.Effect<A, RuntimeRpcError>
@@ -43,13 +46,12 @@ type AppEffect<A> = Effect.Effect<A, RuntimeRpcError>
 export interface RuntimeApplicationApi {
   startup: () => AppEffect<void>
   ensureOriginEnabled: (origin: string) => AppEffect<void>
-  listProviders: (origin: string) => AppEffect<ReadonlyArray<RuntimeProviderSummary>>
+  listProviders: () => AppEffect<ReadonlyArray<RuntimeProviderSummary>>
   listModels: (input: {
-    origin: string
     connectedOnly?: boolean
     providerID?: string
   }) => AppEffect<ReadonlyArray<RuntimeModelSummary>>
-  listConnectedModels: (origin: string) => AppEffect<ReadonlyArray<RuntimeModelSummary>>
+  listConnectedModels: () => AppEffect<ReadonlyArray<RuntimeModelSummary>>
   getOriginState: (origin: string) => AppEffect<RuntimeOriginState>
   listPermissions: (origin: string) => AppEffect<ReadonlyArray<RuntimePermissionEntry>>
   listPending: (origin: string) => AppEffect<ReadonlyArray<RuntimePendingRequest>>
@@ -111,8 +113,11 @@ export class RuntimeApplication extends Context.Tag("@llm-bridge/runtime-core/Ru
 export const RuntimeApplicationLive = Layer.effect(
   RuntimeApplication,
   Effect.gen(function*() {
-    const catalog = yield* CatalogService
-    const query = yield* RuntimeQueryService
+    const catalog = yield* CatalogRepository
+    const providers = yield* ProvidersRepository
+    const models = yield* ModelsRepository
+    const permissions = yield* PermissionsRepository
+    const pending = yield* PendingRequestsRepository
     const auth = yield* AuthFlowService
     const permission = yield* PermissionService
     const model = yield* ModelExecutionService
@@ -120,19 +125,19 @@ export const RuntimeApplicationLive = Layer.effect(
     return {
       startup: () => catalog.ensureCatalog(),
       ensureOriginEnabled: (origin) => permission.ensureOriginEnabled(origin),
-      listProviders: (_origin) => query.listProviders(),
+      listProviders: () => providers.listProviders(),
       listModels: ({ connectedOnly, providerID }) =>
-        query.listModels({
+        models.listModels({
           connectedOnly,
           providerID,
         }),
-      listConnectedModels: (_origin) =>
-        query.listModels({
+      listConnectedModels: () =>
+        models.listModels({
           connectedOnly: true,
         }),
-      getOriginState: (origin) => query.getOriginState(origin),
-      listPermissions: (origin) => query.listPermissions(origin),
-      listPending: (origin) => query.listPending(origin),
+      getOriginState: (origin) => permissions.getOriginState(origin),
+      listPermissions: (origin) => permissions.listPermissions(origin),
+      listPending: (origin) => pending.listPending(origin),
       openProviderAuthWindow: (providerID) => auth.openProviderAuthWindow(providerID),
       getProviderAuthFlow: (providerID) => auth.getProviderAuthFlow(providerID),
       startProviderAuthFlow: (input) => auth.startProviderAuthFlow(input),
@@ -182,8 +187,7 @@ export const RuntimeApplicationLive = Layer.effect(
 ).pipe(
   Layer.provide(
     Layer.mergeAll(
-      RuntimeQueryServiceLive,
-      AuthFlowServiceLive.pipe(Layer.provideMerge(CatalogServiceLive)),
+      AuthFlowServiceLive,
       ModelExecutionServiceLive.pipe(Layer.provideMerge(PermissionServiceLive)),
     ),
   ),

@@ -6,13 +6,11 @@ export const extensionQueryKeys = {
   models: (input: {
     connectedOnly?: boolean
     providerID?: string
-    origin?: string
   } = {}) =>
     [
       ...extensionQueryKeys.modelsRoot,
       input.connectedOnly === true,
       input.providerID ?? "*",
-      input.origin ?? "*",
     ] as const,
 
   originStateRoot: ["originState"] as const,

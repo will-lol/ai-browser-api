@@ -27,20 +27,17 @@ type ProvidersData = Awaited<ReturnType<typeof fetchProviders>>
 type PermissionsData = Awaited<ReturnType<typeof fetchPermissions>>
 type PendingRequestsData = Awaited<ReturnType<typeof fetchPendingRequests>>
 
-export function useProvidersQuery(origin = currentOrigin()) {
+export function useProvidersQuery() {
   return useQuery({
     queryKey: extensionQueryKeys.providers(),
-    queryFn: () => fetchProviders(origin),
+    queryFn: () => fetchProviders(),
   })
 }
 
-export function useProviderAuthFlowQuery(
-  providerID: string,
-  origin = currentOrigin(),
-) {
+export function useProviderAuthFlowQuery(providerID: string) {
   return useQuery({
     queryKey: extensionQueryKeys.authFlow(providerID),
-    queryFn: () => fetchProviderAuthFlow({ providerID, origin }).then((response) => response.result),
+    queryFn: () => fetchProviderAuthFlow({ providerID }).then((response) => response.result),
     enabled: providerID.length > 0,
     refetchInterval: (query) => {
       const status = query.state.data?.status
@@ -51,21 +48,16 @@ export function useProviderAuthFlowQuery(
 }
 
 export function useModelsQuery(input?: {
-  origin?: string
   connectedOnly?: boolean
   providerID?: string
 }) {
-  const origin = input?.origin ?? currentOrigin()
-
   return useQuery({
     queryKey: extensionQueryKeys.models({
       connectedOnly: input?.connectedOnly,
       providerID: input?.providerID,
-      origin,
     }),
     queryFn: () =>
       fetchModels({
-        origin,
         connectedOnly: input?.connectedOnly,
         providerID: input?.providerID,
       }),
@@ -93,12 +85,12 @@ export function usePendingRequestsQuery(origin = currentOrigin()) {
   })
 }
 
-export function useProviderDisconnectMutation(origin = currentOrigin()) {
+export function useProviderDisconnectMutation() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: ({ providerID }: { providerID: string }) =>
-      disconnectRuntimeProvider({ providerID, origin }),
+      disconnectRuntimeProvider({ providerID }),
     onSuccess: (_result, variables) => {
       const providerID = variables.providerID
 
@@ -128,14 +120,14 @@ export function useProviderDisconnectMutation(origin = currentOrigin()) {
   })
 }
 
-export function useProviderOpenAuthWindowMutation(origin = currentOrigin()) {
+export function useProviderOpenAuthWindowMutation() {
   return useMutation({
     mutationFn: ({ providerID }: { providerID: string }) =>
-      openRuntimeProviderAuthWindow({ providerID, origin }),
+      openRuntimeProviderAuthWindow({ providerID }),
   })
 }
 
-export function useProviderStartAuthFlowMutation(origin = currentOrigin()) {
+export function useProviderStartAuthFlowMutation() {
   const queryClient = useQueryClient()
 
   return useMutation({
@@ -147,7 +139,7 @@ export function useProviderStartAuthFlowMutation(origin = currentOrigin()) {
       providerID: string
       methodID: string
       values?: Record<string, string>
-    }) => startRuntimeProviderAuthFlow({ providerID, methodID, values, origin }),
+    }) => startRuntimeProviderAuthFlow({ providerID, methodID, values }),
     onSuccess: (response) => {
       queryClient.setQueryData(
         extensionQueryKeys.authFlow(response.providerID),
@@ -157,7 +149,7 @@ export function useProviderStartAuthFlowMutation(origin = currentOrigin()) {
   })
 }
 
-export function useProviderCancelAuthFlowMutation(origin = currentOrigin()) {
+export function useProviderCancelAuthFlowMutation() {
   const queryClient = useQueryClient()
 
   return useMutation({
@@ -167,7 +159,7 @@ export function useProviderCancelAuthFlowMutation(origin = currentOrigin()) {
     }: {
       providerID: string
       reason?: string
-    }) => cancelRuntimeProviderAuthFlow({ providerID, reason, origin }),
+    }) => cancelRuntimeProviderAuthFlow({ providerID, reason }),
     onSuccess: (response) => {
       queryClient.setQueryData(
         extensionQueryKeys.authFlow(response.providerID),
@@ -234,7 +226,7 @@ export function usePermissionDecisionMutation(origin = currentOrigin()) {
     }: {
       requestId: string
       decision: RuntimePermissionDecision
-    }) => resolveRuntimePermissionRequest({ requestId, decision, origin }),
+    }) => resolveRuntimePermissionRequest({ requestId, decision }),
     onSuccess: (_result, variables) => {
       queryClient.setQueryData<PendingRequestsData>(
         extensionQueryKeys.pendingRequests(origin),
@@ -254,7 +246,7 @@ export function usePermissionDismissMutation(origin = currentOrigin()) {
 
   return useMutation({
     mutationFn: ({ requestId }: { requestId: string }) =>
-      dismissRuntimePermissionRequest({ requestId, origin }),
+      dismissRuntimePermissionRequest({ requestId }),
     onSuccess: (_result, variables) => {
       queryClient.setQueryData<PendingRequestsData>(
         extensionQueryKeys.pendingRequests(origin),

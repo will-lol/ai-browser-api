@@ -8,7 +8,7 @@
   - Owns pure AI SDK v3 `<->` runtime wire codecs shared by the browser client and extension runtime adapters.
   - Depends on `@llm-bridge/contracts` and `@ai-sdk/provider`.
 - `@llm-bridge/runtime-core`
-  - Pure application logic using Effect services and layers.
+  - Pure application logic using repositories for direct reads and Effect services for orchestration.
   - Depends on `@llm-bridge/contracts` only.
 - `@llm-bridge/runtime-events`
   - Shared Effect event bus + transport interfaces for runtime event fanout.

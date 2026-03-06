@@ -91,15 +91,12 @@ export type RuntimePublicRpc = RpcGroup.Rpcs<typeof RuntimePublicRpcGroup>
 
 export const RuntimeAdminRpcGroup = RpcGroup.make(
   Rpc.make("listProviders", {
-    payload: {
-      origin: Schema.String,
-    },
+    payload: {},
     success: Schema.Array(RuntimeProviderSummarySchema),
     error: RuntimeRpcErrorSchema,
   }),
   Rpc.make("listModels", {
     payload: {
-      origin: Schema.String,
       connectedOnly: Schema.optional(Schema.Boolean),
       providerID: Schema.optional(Schema.String),
     },
@@ -107,9 +104,7 @@ export const RuntimeAdminRpcGroup = RpcGroup.make(
     error: RuntimeRpcErrorSchema,
   }),
   Rpc.make("listConnectedModels", {
-    payload: {
-      origin: Schema.String,
-    },
+    payload: {},
     success: Schema.Array(RuntimeModelSummarySchema),
     error: RuntimeRpcErrorSchema,
   }),
@@ -136,7 +131,6 @@ export const RuntimeAdminRpcGroup = RpcGroup.make(
   }),
   Rpc.make("openProviderAuthWindow", {
     payload: {
-      origin: Schema.String,
       providerID: Schema.String,
     },
     success: RuntimeOpenProviderAuthWindowResponseSchema,
@@ -144,7 +138,6 @@ export const RuntimeAdminRpcGroup = RpcGroup.make(
   }),
   Rpc.make("getProviderAuthFlow", {
     payload: {
-      origin: Schema.String,
       providerID: Schema.String,
     },
     success: Schema.Struct({
@@ -155,7 +148,6 @@ export const RuntimeAdminRpcGroup = RpcGroup.make(
   }),
   Rpc.make("startProviderAuthFlow", {
     payload: {
-      origin: Schema.String,
       providerID: Schema.String,
       methodID: Schema.String,
       values: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
@@ -165,7 +157,6 @@ export const RuntimeAdminRpcGroup = RpcGroup.make(
   }),
   Rpc.make("cancelProviderAuthFlow", {
     payload: {
-      origin: Schema.String,
       providerID: Schema.String,
       reason: Schema.optional(Schema.String),
     },
@@ -174,7 +165,6 @@ export const RuntimeAdminRpcGroup = RpcGroup.make(
   }),
   Rpc.make("disconnectProvider", {
     payload: {
-      origin: Schema.String,
       providerID: Schema.String,
     },
     success: RuntimeDisconnectProviderResponseSchema,
