@@ -7,7 +7,6 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
-import * as Ref from "effect/Ref"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import {
@@ -143,7 +142,7 @@ describe("RuntimeEventBus", () => {
     )
   })
 
-  it("dedupes repeated envelopes by id", async () => {
+  it("ignores same-source envelopes and allows repeated foreign ids", async () => {
     await Effect.runPromise(
       Effect.gen(function*() {
         const transport = createTestTransportHarness()
@@ -157,15 +156,13 @@ describe("RuntimeEventBus", () => {
         )
         const busB = Context.get(contextB, RuntimeEventBus)
 
-        const count = yield* Ref.make(0)
-
-        const collector = yield* busB.stream.pipe(
+        const eventFiber = yield* busB.stream.pipe(
           Stream.take(2),
-          Stream.runForEach(() => Ref.update(count, (value) => value + 1)),
+          Stream.runCollect,
           Effect.fork,
         )
 
-        const envelope: RuntimeEventEnvelope = {
+        const foreignEnvelope: RuntimeEventEnvelope = {
           id: "evt-duplicate",
           source: "bus-a",
           at: Date.now(),
@@ -173,15 +170,21 @@ describe("RuntimeEventBus", () => {
         }
 
         yield* Effect.sleep("10 millis")
-        transport.emit(envelope)
-        transport.emit(envelope)
+        transport.emit({
+          id: "evt-self",
+          source: "bus-b",
+          at: Date.now(),
+          event: sampleEvent("https://self.example"),
+        })
+        transport.emit(foreignEnvelope)
+        transport.emit(foreignEnvelope)
 
-        yield* Effect.sleep("100 millis")
-        const observed = yield* Ref.get(count)
-
-        yield* Fiber.interrupt(collector)
-
-        assert.equal(observed, 1)
+        const events = yield* Fiber.join(eventFiber)
+        const values = Chunk.toReadonlyArray(events)
+        assert.deepEqual(values, [
+          sampleEvent("https://dedupe.example"),
+          sampleEvent("https://dedupe.example"),
+        ])
 
         yield* Scope.close(scopeB, Exit.succeed(undefined))
       }),

@@ -62,14 +62,11 @@ export function makeRuntimeEventBusLayer(options: { source: string }) {
     Effect.gen(function*() {
       const transport = yield* RuntimeEventTransport
       const pubsub = yield* PubSub.unbounded<RuntimeEvent>()
-      const seenEnvelopeIds = new Set<string>()
 
       const emitEnvelope = (envelope: RuntimeEventEnvelope) =>
         Effect.gen(function*() {
           if (envelope.source === options.source) return
-          if (seenEnvelopeIds.has(envelope.id)) return
 
-          seenEnvelopeIds.add(envelope.id)
           yield* PubSub.publish(pubsub, envelope.event)
         })
 
@@ -87,7 +84,6 @@ export function makeRuntimeEventBusLayer(options: { source: string }) {
             event,
           }
 
-          seenEnvelopeIds.add(envelope.id)
           yield* PubSub.publish(pubsub, event)
           yield* transport.publishEnvelope(envelope)
         })
