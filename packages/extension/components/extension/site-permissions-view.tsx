@@ -50,7 +50,11 @@ export function SitePermissionsView({
     const permissions = permissionsQuery.data ?? [];
     return new Map(
       permissions.map(
-        (permission) => [permission.modelId, permission.status === "allowed" ? "allowed" : "denied"] as const,
+        (permission) =>
+          [
+            permission.modelId,
+            permission.status === "allowed" ? "allowed" : "denied",
+          ] as const,
       ),
     );
   }, [permissionsQuery.data]);

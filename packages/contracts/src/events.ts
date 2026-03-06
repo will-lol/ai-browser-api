@@ -1,5 +1,5 @@
-import * as Either from "effect/Either"
-import * as Schema from "effect/Schema"
+import * as Either from "effect/Either";
+import * as Schema from "effect/Schema";
 
 export const RuntimeEventSchema = Schema.Union(
   Schema.Struct({
@@ -54,16 +54,16 @@ export const RuntimeEventSchema = Schema.Union(
       updatedAt: Schema.Number,
     }),
   }),
-)
+);
 
-export type RuntimeEvent = Schema.Schema.Type<typeof RuntimeEventSchema>
+export type RuntimeEvent = Schema.Schema.Type<typeof RuntimeEventSchema>;
 
-const decodeRuntimeEvent = Schema.decodeUnknownEither(RuntimeEventSchema)
+const decodeRuntimeEvent = Schema.decodeUnknownEither(RuntimeEventSchema);
 
 export function parseRuntimeEvent(input: unknown): RuntimeEvent | undefined {
-  const result = decodeRuntimeEvent(input)
+  const result = decodeRuntimeEvent(input);
   if (Either.isLeft(result)) {
-    return undefined
+    return undefined;
   }
-  return result.right
+  return result.right;
 }

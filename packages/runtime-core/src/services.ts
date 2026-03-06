@@ -19,339 +19,390 @@ import {
   type RuntimeStreamPart,
   type RuntimeUpdatePermissionResponse,
   RuntimeValidationError,
-} from "@llm-bridge/contracts"
-import * as Context from "effect/Context"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
+} from "@llm-bridge/contracts";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import {
   AuthRepository,
   CatalogRepository,
   MetaRepository,
   ModelExecutionRepository,
   PermissionsRepository,
-} from "./repositories"
+} from "./repositories";
 
-type AppEffect<A> = Effect.Effect<A, RuntimeRpcError>
+type AppEffect<A> = Effect.Effect<A, RuntimeRpcError>;
 
 export interface AuthFlowServiceApi {
-  openProviderAuthWindow: (providerID: string) => AppEffect<RuntimeOpenProviderAuthWindowResponse>
+  openProviderAuthWindow: (
+    providerID: string,
+  ) => AppEffect<RuntimeOpenProviderAuthWindowResponse>;
   getProviderAuthFlow: (providerID: string) => AppEffect<{
-    providerID: string
-    result: RuntimeAuthFlowSnapshot
-  }>
+    providerID: string;
+    result: RuntimeAuthFlowSnapshot;
+  }>;
   startProviderAuthFlow: (input: {
-    providerID: string
-    methodID: string
-    values?: Record<string, string>
-  }) => AppEffect<RuntimeStartProviderAuthFlowResponse>
+    providerID: string;
+    methodID: string;
+    values?: Record<string, string>;
+  }) => AppEffect<RuntimeStartProviderAuthFlowResponse>;
   cancelProviderAuthFlow: (input: {
-    providerID: string
-    reason?: string
-  }) => AppEffect<RuntimeCancelProviderAuthFlowResponse>
-  disconnectProvider: (providerID: string) => AppEffect<RuntimeDisconnectProviderResponse>
+    providerID: string;
+    reason?: string;
+  }) => AppEffect<RuntimeCancelProviderAuthFlowResponse>;
+  disconnectProvider: (
+    providerID: string,
+  ) => AppEffect<RuntimeDisconnectProviderResponse>;
 }
 
-export class AuthFlowService extends Context.Tag("@llm-bridge/runtime-core/AuthFlowService")<
-  AuthFlowService,
-  AuthFlowServiceApi
->() {}
+export class AuthFlowService extends Context.Tag(
+  "@llm-bridge/runtime-core/AuthFlowService",
+)<AuthFlowService, AuthFlowServiceApi>() {}
 
 export const AuthFlowServiceLive = Layer.effect(
   AuthFlowService,
-  Effect.gen(function*() {
-    const auth = yield* AuthRepository
-    const catalog = yield* CatalogRepository
+  Effect.gen(function* () {
+    const auth = yield* AuthRepository;
+    const catalog = yield* CatalogRepository;
 
     // Auth orchestration owns catalog refresh side-effects.
     return {
-      openProviderAuthWindow: (providerID) => auth.openProviderAuthWindow(providerID),
+      openProviderAuthWindow: (providerID) =>
+        auth.openProviderAuthWindow(providerID),
       getProviderAuthFlow: (providerID) => auth.getProviderAuthFlow(providerID),
       startProviderAuthFlow: (input) =>
-        auth.startProviderAuthFlow(input).pipe(
-          Effect.tap(() => catalog.refreshCatalogForProvider(input.providerID)),
-        ),
+        auth
+          .startProviderAuthFlow(input)
+          .pipe(
+            Effect.tap(() =>
+              catalog.refreshCatalogForProvider(input.providerID),
+            ),
+          ),
       cancelProviderAuthFlow: (input) => auth.cancelProviderAuthFlow(input),
       disconnectProvider: (providerID) =>
-        auth.disconnectProvider(providerID).pipe(
-          Effect.tap(() => catalog.refreshCatalogForProvider(providerID)),
-        ),
-    } satisfies AuthFlowServiceApi
+        auth
+          .disconnectProvider(providerID)
+          .pipe(
+            Effect.tap(() => catalog.refreshCatalogForProvider(providerID)),
+          ),
+    } satisfies AuthFlowServiceApi;
   }),
-)
+);
 
 export interface PermissionServiceApi {
-  ensureOriginEnabled: (origin: string) => AppEffect<void>
-  ensureRequestAllowed: (origin: string, modelID: string, signal?: AbortSignal) => AppEffect<void>
-  setOriginEnabled: (origin: string, enabled: boolean) => AppEffect<RuntimeSetOriginEnabledResponse>
+  ensureOriginEnabled: (origin: string) => AppEffect<void>;
+  ensureRequestAllowed: (
+    origin: string,
+    modelID: string,
+    signal?: AbortSignal,
+  ) => AppEffect<void>;
+  setOriginEnabled: (
+    origin: string,
+    enabled: boolean,
+  ) => AppEffect<RuntimeSetOriginEnabledResponse>;
   updatePermission: (input: {
-    origin: string
-    modelID: string
-    status: RuntimePermissionDecision
-    capabilities?: ReadonlyArray<string>
-  }) => AppEffect<RuntimeUpdatePermissionResponse>
+    origin: string;
+    modelID: string;
+    status: RuntimePermissionDecision;
+    capabilities?: ReadonlyArray<string>;
+  }) => AppEffect<RuntimeUpdatePermissionResponse>;
   requestPermission: (
     input: RuntimeRequestPermissionInput,
   ) => AppEffect<
-    RuntimeCreatePermissionRequestResponse | RuntimeDismissPermissionRequestResponse | RuntimeResolvePermissionRequestResponse
-  >
+    | RuntimeCreatePermissionRequestResponse
+    | RuntimeDismissPermissionRequestResponse
+    | RuntimeResolvePermissionRequestResponse
+  >;
 }
 
-export class PermissionService extends Context.Tag("@llm-bridge/runtime-core/PermissionService")<
-  PermissionService,
-  PermissionServiceApi
->() {}
+export class PermissionService extends Context.Tag(
+  "@llm-bridge/runtime-core/PermissionService",
+)<PermissionService, PermissionServiceApi>() {}
 
 export const PermissionServiceLive = Layer.effect(
   PermissionService,
-  Effect.gen(function*() {
-    const permissions = yield* PermissionsRepository
-    const meta = yield* MetaRepository
+  Effect.gen(function* () {
+    const permissions = yield* PermissionsRepository;
+    const meta = yield* MetaRepository;
 
     const ensureOriginEnabled = (origin: string) =>
-      Effect.gen(function*() {
-        const state = yield* permissions.getOriginState(origin)
-        if (state.enabled) return
+      Effect.gen(function* () {
+        const state = yield* permissions.getOriginState(origin);
+        if (state.enabled) return;
         return yield* new RuntimeValidationError({
           message: `Origin ${origin} is disabled`,
-        })
-      })
+        });
+      });
 
-    const ensureRequestAllowed = (origin: string, modelID: string, signal?: AbortSignal) =>
-      Effect.gen(function*() {
-        const permission = yield* permissions.getModelPermission(origin, modelID)
-        if (permission === "allowed") return
+    const ensureRequestAllowed = (
+      origin: string,
+      modelID: string,
+      signal?: AbortSignal,
+    ) =>
+      Effect.gen(function* () {
+        const permission = yield* permissions.getModelPermission(
+          origin,
+          modelID,
+        );
+        if (permission === "allowed") return;
 
-        const target = yield* meta.resolvePermissionTarget(modelID)
+        const target = yield* meta.resolvePermissionTarget(modelID);
         const result = yield* permissions.createPermissionRequest({
           origin,
           modelId: target.modelId,
           provider: target.provider,
           modelName: target.modelName,
           capabilities: target.capabilities,
-        })
+        });
 
         if (result.status === "alreadyAllowed") {
-          return
+          return;
         }
 
-        const waitResult = yield* permissions.waitForPermissionDecision(result.request.id, undefined, signal)
+        const waitResult = yield* permissions.waitForPermissionDecision(
+          result.request.id,
+          undefined,
+          signal,
+        );
         if (waitResult === "timeout") {
           return yield* new AuthFlowExpiredError({
             providerID: target.provider,
             message: "Permission request timed out",
-          })
+          });
         }
         if (waitResult === "aborted") {
           return yield* new RuntimeValidationError({
             message: "Request canceled",
-          })
+          });
         }
 
-        const updated = yield* permissions.getModelPermission(origin, modelID)
+        const updated = yield* permissions.getModelPermission(origin, modelID);
         if (updated !== "allowed") {
           return yield* new PermissionDeniedError({
             origin,
             modelId: modelID,
             message: "Permission denied",
-          })
+          });
         }
-      })
+      });
 
     const requestPermission = (input: RuntimeRequestPermissionInput) =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         switch (input.action) {
           case "resolve": {
             return yield* permissions.resolvePermissionRequest({
               requestId: input.requestId,
               decision: input.decision,
-            })
+            });
           }
           case "dismiss": {
-            return yield* permissions.dismissPermissionRequest(input.requestId)
+            return yield* permissions.dismissPermissionRequest(input.requestId);
           }
           case "create": {
-            const target = yield* meta.resolvePermissionTarget(input.modelId)
+            const target = yield* meta.resolvePermissionTarget(input.modelId);
             return yield* permissions.createPermissionRequest({
               origin: input.origin,
               modelId: target.modelId,
               modelName: target.modelName,
               provider: target.provider,
               capabilities: target.capabilities,
-            })
+            });
           }
         }
-      })
+      });
 
     return {
       ensureOriginEnabled,
       ensureRequestAllowed,
-      setOriginEnabled: (origin, enabled) => permissions.setOriginEnabled(origin, enabled),
+      setOriginEnabled: (origin, enabled) =>
+        permissions.setOriginEnabled(origin, enabled),
       updatePermission: (input) => permissions.updatePermission(input),
       requestPermission,
-    } satisfies PermissionServiceApi
+    } satisfies PermissionServiceApi;
   }),
-)
+);
 
 export interface ModelExecutionServiceApi {
   acquireModel: (input: {
-    origin: string
-    sessionID: string
-    requestID: string
-    modelID: string
-  }) => AppEffect<RuntimeModelDescriptor>
+    origin: string;
+    sessionID: string;
+    requestID: string;
+    modelID: string;
+  }) => AppEffect<RuntimeModelDescriptor>;
   generateModel: (input: {
-    origin: string
-    requestID: string
-    sessionID: string
-    modelID: string
-    options: RuntimeModelCallOptions
-  }) => AppEffect<RuntimeGenerateResponse>
+    origin: string;
+    requestID: string;
+    sessionID: string;
+    modelID: string;
+    options: RuntimeModelCallOptions;
+  }) => AppEffect<RuntimeGenerateResponse>;
   streamModel: (input: {
-    origin: string
-    requestID: string
-    sessionID: string
-    modelID: string
-    options: RuntimeModelCallOptions
-  }) => AppEffect<ReadableStream<RuntimeStreamPart>>
+    origin: string;
+    requestID: string;
+    sessionID: string;
+    modelID: string;
+    options: RuntimeModelCallOptions;
+  }) => AppEffect<ReadableStream<RuntimeStreamPart>>;
   abortModelCall: (input: {
-    origin: string
-    sessionID: string
-    requestID: string
-  }) => AppEffect<void>
+    origin: string;
+    sessionID: string;
+    requestID: string;
+  }) => AppEffect<void>;
 }
 
-export class ModelExecutionService extends Context.Tag("@llm-bridge/runtime-core/ModelExecutionService")<
-  ModelExecutionService,
-  ModelExecutionServiceApi
->() {}
+export class ModelExecutionService extends Context.Tag(
+  "@llm-bridge/runtime-core/ModelExecutionService",
+)<ModelExecutionService, ModelExecutionServiceApi>() {}
 
 function withStreamCleanup<T>(
   stream: ReadableStream<T>,
   onFinalize: () => void,
 ): ReadableStream<T> {
-  const reader = stream.getReader()
+  const reader = stream.getReader();
 
   return new ReadableStream<T>({
     async pull(controller) {
-      const chunk = await reader.read()
+      const chunk = await reader.read();
       if (chunk.done) {
-        onFinalize()
-        controller.close()
-        return
+        onFinalize();
+        controller.close();
+        return;
       }
-      controller.enqueue(chunk.value)
+      controller.enqueue(chunk.value);
     },
     async cancel() {
       try {
-        await reader.cancel()
+        await reader.cancel();
       } finally {
-        onFinalize()
+        onFinalize();
       }
     },
-  })
+  });
 }
 
 export const ModelExecutionServiceLive = Layer.effect(
   ModelExecutionService,
-  Effect.gen(function*() {
-    const models = yield* ModelExecutionRepository
-    const permissions = yield* PermissionService
-    const controllers = new Map<string, AbortController>()
-    const pendingAbortKeys = new Set<string>()
+  Effect.gen(function* () {
+    const models = yield* ModelExecutionRepository;
+    const permissions = yield* PermissionService;
+    const controllers = new Map<string, AbortController>();
+    const pendingAbortKeys = new Set<string>();
 
-    const toControllerKey = (input: { origin: string; sessionID: string; requestID: string }) =>
-      `${input.origin}::${input.sessionID}::${input.requestID}`
+    const toControllerKey = (input: {
+      origin: string;
+      sessionID: string;
+      requestID: string;
+    }) => `${input.origin}::${input.sessionID}::${input.requestID}`;
 
-    const registerController = (input: { origin: string; sessionID: string; requestID: string }) =>
+    const registerController = (input: {
+      origin: string;
+      sessionID: string;
+      requestID: string;
+    }) =>
       Effect.sync(() => {
-        const key = toControllerKey(input)
-        const controller = new AbortController()
-        controllers.set(key, controller)
+        const key = toControllerKey(input);
+        const controller = new AbortController();
+        controllers.set(key, controller);
         if (pendingAbortKeys.delete(key)) {
-          controller.abort()
+          controller.abort();
         }
-        return controller
-      })
+        return controller;
+      });
 
-    const unregisterController = (input: { origin: string; sessionID: string; requestID: string }) =>
+    const unregisterController = (input: {
+      origin: string;
+      sessionID: string;
+      requestID: string;
+    }) =>
       Effect.sync(() => {
-        const key = toControllerKey(input)
-        controllers.delete(key)
-        pendingAbortKeys.delete(key)
-      })
+        const key = toControllerKey(input);
+        controllers.delete(key);
+        pendingAbortKeys.delete(key);
+      });
 
     // Model orchestration owns origin/permission policy checks.
     return {
       acquireModel: (input) =>
-        Effect.gen(function*() {
-          yield* permissions.ensureOriginEnabled(input.origin)
-          yield* permissions.ensureRequestAllowed(input.origin, input.modelID)
-          return yield* models.acquireModel(input)
+        Effect.gen(function* () {
+          yield* permissions.ensureOriginEnabled(input.origin);
+          yield* permissions.ensureRequestAllowed(input.origin, input.modelID);
+          return yield* models.acquireModel(input);
         }),
       generateModel: (input) =>
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           const controllerInput = {
             origin: input.origin,
             sessionID: input.sessionID,
             requestID: input.requestID,
-          }
+          };
 
-          return yield* Effect.gen(function*() {
-            const controller = yield* registerController(controllerInput)
-            yield* permissions.ensureOriginEnabled(input.origin)
-            yield* permissions.ensureRequestAllowed(input.origin, input.modelID, controller.signal)
+          return yield* Effect.gen(function* () {
+            const controller = yield* registerController(controllerInput);
+            yield* permissions.ensureOriginEnabled(input.origin);
+            yield* permissions.ensureRequestAllowed(
+              input.origin,
+              input.modelID,
+              controller.signal,
+            );
             if (controller.signal.aborted) {
               return yield* new RuntimeValidationError({
                 message: "Request canceled",
-              })
+              });
             }
             return yield* models.generateModel({
               ...input,
               signal: controller.signal,
-            })
+            });
           }).pipe(
-            Effect.ensuring(unregisterController({
-              origin: input.origin,
-              sessionID: input.sessionID,
-              requestID: input.requestID,
-            })),
-          )
+            Effect.ensuring(
+              unregisterController({
+                origin: input.origin,
+                sessionID: input.sessionID,
+                requestID: input.requestID,
+              }),
+            ),
+          );
         }),
       streamModel: (input) =>
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           const controllerInput = {
             origin: input.origin,
             sessionID: input.sessionID,
             requestID: input.requestID,
-          }
+          };
 
-          const controller = yield* registerController(controllerInput)
-          const stream = yield* Effect.gen(function*() {
-            yield* permissions.ensureOriginEnabled(input.origin)
-            yield* permissions.ensureRequestAllowed(input.origin, input.modelID, controller.signal)
+          const controller = yield* registerController(controllerInput);
+          const stream = yield* Effect.gen(function* () {
+            yield* permissions.ensureOriginEnabled(input.origin);
+            yield* permissions.ensureRequestAllowed(
+              input.origin,
+              input.modelID,
+              controller.signal,
+            );
             if (controller.signal.aborted) {
               return yield* new RuntimeValidationError({
                 message: "Request canceled",
-              })
+              });
             }
             return yield* models.streamModel({
               ...input,
               signal: controller.signal,
-            })
+            });
           }).pipe(
             Effect.tapError(() =>
               unregisterController({
                 origin: input.origin,
                 sessionID: input.sessionID,
                 requestID: input.requestID,
-              })),
-          )
+              }),
+            ),
+          );
 
           return withStreamCleanup(stream, () => {
-            controller.abort()
-            controllers.delete(toControllerKey(controllerInput))
-            pendingAbortKeys.delete(toControllerKey(controllerInput))
-          })
+            controller.abort();
+            controllers.delete(toControllerKey(controllerInput));
+            pendingAbortKeys.delete(toControllerKey(controllerInput));
+          });
         }),
       abortModelCall: (input) =>
         Effect.sync(() => {
@@ -359,15 +410,15 @@ export const ModelExecutionServiceLive = Layer.effect(
             origin: input.origin,
             sessionID: input.sessionID,
             requestID: input.requestID,
-          })
-          const controller = controllers.get(key)
+          });
+          const controller = controllers.get(key);
           if (!controller) {
-            pendingAbortKeys.add(key)
-            return
+            pendingAbortKeys.add(key);
+            return;
           }
-          controller.abort()
-          controllers.delete(key)
+          controller.abort();
+          controllers.delete(key);
         }),
-    } satisfies ModelExecutionServiceApi
+    } satisfies ModelExecutionServiceApi;
   }),
-)
+);

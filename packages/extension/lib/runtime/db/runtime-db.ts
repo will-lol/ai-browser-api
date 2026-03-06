@@ -1,4 +1,4 @@
-import Dexie, { type EntityTable } from "dexie"
+import Dexie, { type EntityTable } from "dexie";
 import type {
   RuntimeDbAuth,
   RuntimeDbConfig,
@@ -9,23 +9,23 @@ import type {
   RuntimeDbPermission,
   RuntimeDbProvider,
   RuntimeDbVaultKey,
-} from "@/lib/runtime/db/runtime-db-types"
+} from "@/lib/runtime/db/runtime-db-types";
 
-export const RUNTIME_DB_NAME = "llm-bridge-runtime-db-v3"
+export const RUNTIME_DB_NAME = "llm-bridge-runtime-db-v3";
 
 export class RuntimeDb extends Dexie {
-  providers!: EntityTable<RuntimeDbProvider, "id">
-  models!: EntityTable<RuntimeDbModel, "id">
-  auth!: EntityTable<RuntimeDbAuth, "providerID">
-  vaultKeys!: EntityTable<RuntimeDbVaultKey, "id">
-  origins!: EntityTable<RuntimeDbOrigin, "origin">
-  permissions!: EntityTable<RuntimeDbPermission, "id">
-  pendingRequests!: EntityTable<RuntimeDbPendingRequest, "id">
-  meta!: EntityTable<RuntimeDbMeta, "key">
-  config!: EntityTable<RuntimeDbConfig, "id">
+  providers!: EntityTable<RuntimeDbProvider, "id">;
+  models!: EntityTable<RuntimeDbModel, "id">;
+  auth!: EntityTable<RuntimeDbAuth, "providerID">;
+  vaultKeys!: EntityTable<RuntimeDbVaultKey, "id">;
+  origins!: EntityTable<RuntimeDbOrigin, "origin">;
+  permissions!: EntityTable<RuntimeDbPermission, "id">;
+  pendingRequests!: EntityTable<RuntimeDbPendingRequest, "id">;
+  meta!: EntityTable<RuntimeDbMeta, "key">;
+  config!: EntityTable<RuntimeDbConfig, "id">;
 
   constructor() {
-    super(RUNTIME_DB_NAME)
+    super(RUNTIME_DB_NAME);
 
     this.version(1).stores({
       providers: "id, connected, updatedAt, name",
@@ -37,8 +37,8 @@ export class RuntimeDb extends Dexie {
       pendingRequests: "id, origin, status, dismissed, requestedAt, modelId",
       meta: "key, updatedAt",
       config: "id, updatedAt",
-    })
+    });
   }
 }
 
-export const runtimeDb = new RuntimeDb()
+export const runtimeDb = new RuntimeDb();

@@ -7,12 +7,21 @@ import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
 
 const repoRootDir = path.dirname(fileURLToPath(import.meta.url));
-const autoImportsModule = await import("./packages/extension/.wxt/eslint-auto-imports.mjs").catch(() => null);
+const autoImportsModule =
+  await import("./packages/extension/.wxt/eslint-auto-imports.mjs").catch(
+    () => null,
+  );
 const autoImports = autoImportsModule?.default ?? {};
 
 export default defineConfig(
   {
-    ignores: ["**/node_modules/**", "**/.wxt/**", "**/.output/**", "**/dist/**", "**/coverage/**"],
+    ignores: [
+      "**/node_modules/**",
+      "**/.wxt/**",
+      "**/.output/**",
+      "**/dist/**",
+      "**/coverage/**",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -50,7 +59,10 @@ export default defineConfig(
     },
   },
   {
-    files: ["packages/extension/**/*.{js,jsx,ts,tsx}", "packages/example-app/**/*.{js,jsx,ts,tsx}"],
+    files: [
+      "packages/extension/**/*.{js,jsx,ts,tsx}",
+      "packages/example-app/**/*.{js,jsx,ts,tsx}",
+    ],
     plugins: {
       react: reactPlugin,
       "react-hooks": reactHooksPlugin,
@@ -81,7 +93,8 @@ export default defineConfig(
                 "../../../client/src/*",
                 "../../../../client/src/*",
               ],
-              message: "Do not import internal src files from other workspace packages.",
+              message:
+                "Do not import internal src files from other workspace packages.",
             },
           ],
         },

@@ -15,7 +15,10 @@ export function ProvidersView() {
   const disconnectProviderMutation = useProviderDisconnectMutation();
   const openProviderAuthWindowMutation = useProviderOpenAuthWindowMutation();
 
-  const providers = useMemo(() => providersQuery.data ?? [], [providersQuery.data]);
+  const providers = useMemo(
+    () => providersQuery.data ?? [],
+    [providersQuery.data],
+  );
 
   const frozenOrder = useFrozenOrder(
     providers,

@@ -62,7 +62,7 @@ import { Effect, Fiber, TestClock } from "effect";
 
 const runWithTime = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
-  adjust: Parameters<typeof TestClock.adjust>[0] = "1000 millis"
+  adjust: Parameters<typeof TestClock.adjust>[0] = "1000 millis",
 ) =>
   Effect.gen(function* () {
     const fiber = yield* Effect.fork(effect);

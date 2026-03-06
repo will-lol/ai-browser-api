@@ -635,9 +635,7 @@ export const codexAuthPlugin: RuntimePlugin = {
             metadata: {
               ...(auth.metadata ?? {}),
               authMode: "codex_oauth",
-              ...(effectiveAccountId
-                ? { accountId: effectiveAccountId }
-                : {}),
+              ...(effectiveAccountId ? { accountId: effectiveAccountId } : {}),
             },
           });
         }

@@ -1,9 +1,14 @@
-import type { RuntimePlugin } from "@/lib/runtime/plugin-manager"
+import type { RuntimePlugin } from "@/lib/runtime/plugin-manager";
 
 export const openaiPlugin: RuntimePlugin = {
   id: "builtin-openai",
   name: "Builtin OpenAI Behaviors",
-  supportedProviders: ["openai", "opencode", "azure", "azure-cognitive-services"],
+  supportedProviders: [
+    "openai",
+    "opencode",
+    "azure",
+    "azure-cognitive-services",
+  ],
   hooks: {
     chat: {
       async headers(_ctx, headers) {
@@ -13,8 +18,8 @@ export const openaiPlugin: RuntimePlugin = {
             ...headers,
             "x-llm-bridge-originator": "llm-bridge",
           },
-        }
+        };
       },
     },
   },
-}
+};

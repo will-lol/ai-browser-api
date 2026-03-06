@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from "@llm-bridge/contracts"
+import type { RuntimeEvent } from "@llm-bridge/contracts";
 import {
   RuntimeEventBus,
   RuntimeEventTransport,
@@ -6,49 +6,49 @@ import {
   parseRuntimeEventEnvelope,
   type RuntimeEventBusApi,
   type RuntimeEventEnvelope,
-} from "@llm-bridge/runtime-events"
-import { browser } from "@wxt-dev/browser"
-import * as Context from "effect/Context"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
-import * as Scope from "effect/Scope"
-import * as Stream from "effect/Stream"
-import { RUNTIME_EVENT_STORAGE_KEY } from "@/lib/runtime/constants"
+} from "@llm-bridge/runtime-events";
+import { browser } from "@wxt-dev/browser";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
+import { RUNTIME_EVENT_STORAGE_KEY } from "@/lib/runtime/constants";
 
-export type RuntimeEventPayload = RuntimeEvent
+export type RuntimeEventPayload = RuntimeEvent;
 
-export const RUNTIME_EVENT_CHANNEL_NAME = "llm-bridge-runtime-events-v1"
+export const RUNTIME_EVENT_CHANNEL_NAME = "llm-bridge-runtime-events-v1";
 
-let runtimeChannel: BroadcastChannel | null = null
+let runtimeChannel: BroadcastChannel | null = null;
 
 function getRuntimeChannel() {
-  if (typeof BroadcastChannel === "undefined") return null
+  if (typeof BroadcastChannel === "undefined") return null;
 
   if (!runtimeChannel) {
-    runtimeChannel = new BroadcastChannel(RUNTIME_EVENT_CHANNEL_NAME)
+    runtimeChannel = new BroadcastChannel(RUNTIME_EVENT_CHANNEL_NAME);
   }
 
-  return runtimeChannel
+  return runtimeChannel;
 }
 
 const EVENT_SOURCE =
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? `extension-${crypto.randomUUID()}`
-    : `extension-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    : `extension-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 const StorageRuntimeEventTransportLive = Layer.succeed(RuntimeEventTransport, {
   publishEnvelope: (envelope: RuntimeEventEnvelope) =>
     Effect.tryPromise({
       try: async () => {
-        const channel = getRuntimeChannel()
-        channel?.postMessage(envelope)
+        const channel = getRuntimeChannel();
+        channel?.postMessage(envelope);
 
-        const storage = browser.storage?.local
-        if (!storage) return
+        const storage = browser.storage?.local;
+        if (!storage) return;
 
         await storage.set({
           [RUNTIME_EVENT_STORAGE_KEY]: envelope,
-        })
+        });
       },
       catch: () => undefined,
     }).pipe(Effect.orElseSucceed(() => undefined)),
@@ -58,75 +58,75 @@ const StorageRuntimeEventTransportLive = Layer.succeed(RuntimeEventTransport, {
         const storageListener: Parameters<
           typeof browser.storage.onChanged.addListener
         >[0] = (changes, area) => {
-          if (area !== "local") return
+          if (area !== "local") return;
 
           const envelope = parseRuntimeEventEnvelope(
             changes[RUNTIME_EVENT_STORAGE_KEY]?.newValue,
-          )
-          if (!envelope) return
+          );
+          if (!envelope) return;
 
-          emit.single(envelope)
-        }
+          emit.single(envelope);
+        };
 
-        browser.storage.onChanged.addListener(storageListener)
+        browser.storage.onChanged.addListener(storageListener);
 
-        const channel = getRuntimeChannel()
+        const channel = getRuntimeChannel();
         const channelListener = (event: MessageEvent<unknown>) => {
-          const envelope = parseRuntimeEventEnvelope(event.data)
-          if (!envelope) return
+          const envelope = parseRuntimeEventEnvelope(event.data);
+          if (!envelope) return;
 
-          emit.single(envelope)
-        }
+          emit.single(envelope);
+        };
 
-        channel?.addEventListener("message", channelListener)
+        channel?.addEventListener("message", channelListener);
 
         return () => {
-          browser.storage.onChanged.removeListener(storageListener)
-          channel?.removeEventListener("message", channelListener)
-        }
+          browser.storage.onChanged.removeListener(storageListener);
+          channel?.removeEventListener("message", channelListener);
+        };
       }),
       (cleanup) => Effect.sync(cleanup),
     ),
   ),
-})
+});
 
 const RuntimeEventBusLive = makeRuntimeEventBusLayer({
   source: EVENT_SOURCE,
-}).pipe(Layer.provideMerge(StorageRuntimeEventTransportLive))
+}).pipe(Layer.provideMerge(StorageRuntimeEventTransportLive));
 
 type RuntimeEventRuntime = {
-  readonly scope: Scope.CloseableScope
-  readonly bus: RuntimeEventBusApi
-}
+  readonly scope: Scope.CloseableScope;
+  readonly bus: RuntimeEventBusApi;
+};
 
-let runtimeEventRuntimePromise: Promise<RuntimeEventRuntime> | null = null
-let dispatchLoopStarted = false
-const listeners = new Set<(event: RuntimeEventPayload) => void>()
+let runtimeEventRuntimePromise: Promise<RuntimeEventRuntime> | null = null;
+let dispatchLoopStarted = false;
+const listeners = new Set<(event: RuntimeEventPayload) => void>();
 
 function ensureRuntimeEventRuntime() {
   if (runtimeEventRuntimePromise) {
-    return runtimeEventRuntimePromise
+    return runtimeEventRuntimePromise;
   }
 
   runtimeEventRuntimePromise = Effect.runPromise(
-    Effect.gen(function*() {
-      const scope = yield* Scope.make()
-      const context = yield* Layer.buildWithScope(RuntimeEventBusLive, scope)
-      const bus = Context.get(context, RuntimeEventBus)
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const context = yield* Layer.buildWithScope(RuntimeEventBusLive, scope);
+      const bus = Context.get(context, RuntimeEventBus);
 
       return {
         scope,
         bus,
-      } satisfies RuntimeEventRuntime
+      } satisfies RuntimeEventRuntime;
     }),
-  )
+  );
 
-  return runtimeEventRuntimePromise
+  return runtimeEventRuntimePromise;
 }
 
 function ensureDispatchLoop() {
-  if (dispatchLoopStarted) return
-  dispatchLoopStarted = true
+  if (dispatchLoopStarted) return;
+  dispatchLoopStarted = true;
 
   void ensureRuntimeEventRuntime()
     .then((runtime) =>
@@ -136,9 +136,9 @@ function ensureDispatchLoop() {
             Effect.sync(() => {
               for (const listener of listeners) {
                 try {
-                  listener(event)
+                  listener(event);
                 } catch (error) {
-                  console.warn("runtime event listener failed", error)
+                  console.warn("runtime event listener failed", error);
                 }
               }
             }),
@@ -147,32 +147,32 @@ function ensureDispatchLoop() {
       ),
     )
     .catch((error) => {
-      dispatchLoopStarted = false
-      console.warn("runtime event dispatch loop failed", error)
-    })
+      dispatchLoopStarted = false;
+      console.warn("runtime event dispatch loop failed", error);
+    });
 }
 
 export async function publishRuntimeEvent(event: RuntimeEventPayload) {
-  const runtime = await ensureRuntimeEventRuntime()
-  await Effect.runPromise(runtime.bus.publish(event))
+  const runtime = await ensureRuntimeEventRuntime();
+  await Effect.runPromise(runtime.bus.publish(event));
 }
 
 export function subscribeRuntimeEvents(
   handler: (event: RuntimeEventPayload) => void,
 ) {
-  listeners.add(handler)
-  ensureDispatchLoop()
+  listeners.add(handler);
+  ensureDispatchLoop();
 
   return () => {
-    listeners.delete(handler)
-  }
+    listeners.delete(handler);
+  };
 }
 
 export function streamRuntimeEvents() {
   return Stream.unwrap(
     Effect.promise(async () => {
-      const runtime = await ensureRuntimeEventRuntime()
-      return runtime.bus.stream
+      const runtime = await ensureRuntimeEventRuntime();
+      return runtime.bus.stream;
     }),
-  )
+  );
 }

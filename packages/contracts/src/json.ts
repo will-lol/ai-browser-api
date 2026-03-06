@@ -1,7 +1,10 @@
-import * as Schema from "effect/Schema"
+import * as Schema from "effect/Schema";
 
-export type JsonPrimitive = string | number | boolean | null
-export type JsonValue = JsonPrimitive | ReadonlyArray<JsonValue> | { readonly [key: string]: JsonValue }
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue =
+  | JsonPrimitive
+  | ReadonlyArray<JsonValue>
+  | { readonly [key: string]: JsonValue };
 
 export const JsonValueSchema: Schema.Schema<JsonValue> = Schema.suspend(() =>
   Schema.Union(
@@ -15,9 +18,11 @@ export const JsonValueSchema: Schema.Schema<JsonValue> = Schema.suspend(() =>
       value: JsonValueSchema,
     }),
   ),
-)
+);
 
-export const JsonObjectSchema: Schema.Schema<{ readonly [key: string]: JsonValue }> = Schema.Record({
+export const JsonObjectSchema: Schema.Schema<{
+  readonly [key: string]: JsonValue;
+}> = Schema.Record({
   key: Schema.String,
   value: JsonValueSchema,
-})
+});

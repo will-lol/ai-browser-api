@@ -1,9 +1,9 @@
-import assert from "node:assert/strict"
-import { describe, it } from "node:test"
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import {
   normalizeGeminiCodeAssistResponse,
   rewriteGeminiCodeAssistRequest,
-} from "@/lib/runtime/plugins/gemini-code-assist-transport"
+} from "@/lib/runtime/plugins/gemini-code-assist-transport";
 
 describe("gemini-code-assist transport request rewrite", () => {
   it("rewrites generateContent requests to code assist envelope", async () => {
@@ -24,25 +24,28 @@ describe("gemini-code-assist transport request rewrite", () => {
       {
         projectId: "managed-project-1",
       },
-    )
+    );
 
-    assert.ok(rewritten)
+    assert.ok(rewritten);
     assert.equal(
       String(rewritten.request),
       "https://cloudcode-pa.googleapis.com/v1internal:generateContent",
-    )
+    );
 
-    const rewrittenHeaders = new Headers(rewritten.init.headers)
-    assert.equal(rewrittenHeaders.get("authorization"), "Bearer oauth-token")
-    assert.equal(rewrittenHeaders.get("x-goog-api-key"), null)
-    assert.equal(rewrittenHeaders.get("x-api-key"), null)
+    const rewrittenHeaders = new Headers(rewritten.init.headers);
+    assert.equal(rewrittenHeaders.get("authorization"), "Bearer oauth-token");
+    assert.equal(rewrittenHeaders.get("x-goog-api-key"), null);
+    assert.equal(rewrittenHeaders.get("x-api-key"), null);
 
-    const body = JSON.parse(String(rewritten.init.body)) as Record<string, unknown>
-    assert.equal(body.project, "managed-project-1")
-    assert.equal(body.model, "gemini-2.5-flash")
-    assert.equal(typeof body.user_prompt_id, "string")
-    assert.ok(body.request)
-  })
+    const body = JSON.parse(String(rewritten.init.body)) as Record<
+      string,
+      unknown
+    >;
+    assert.equal(body.project, "managed-project-1");
+    assert.equal(body.model, "gemini-2.5-flash");
+    assert.equal(typeof body.user_prompt_id, "string");
+    assert.ok(body.request);
+  });
 
   it("rewrites streamGenerateContent requests with SSE query", async () => {
     const rewritten = await rewriteGeminiCodeAssistRequest(
@@ -61,20 +64,20 @@ describe("gemini-code-assist transport request rewrite", () => {
       {
         projectId: "managed-project-2",
       },
-    )
+    );
 
-    assert.ok(rewritten)
+    assert.ok(rewritten);
     assert.equal(
       String(rewritten.request),
       "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
-    )
-    assert.equal(rewritten.metadata.streaming, true)
+    );
+    assert.equal(rewritten.metadata.streaming, true);
 
-    const rewrittenHeaders = new Headers(rewritten.init.headers)
-    assert.equal(rewrittenHeaders.get("accept"), "text/event-stream")
-    assert.equal(rewrittenHeaders.get("x-goog-api-key"), null)
-  })
-})
+    const rewrittenHeaders = new Headers(rewritten.init.headers);
+    assert.equal(rewrittenHeaders.get("accept"), "text/event-stream");
+    assert.equal(rewrittenHeaders.get("x-goog-api-key"), null);
+  });
+});
 
 describe("gemini-code-assist transport response normalization", () => {
   it("unwraps JSON response payloads from { response: ... }", async () => {
@@ -91,17 +94,17 @@ describe("gemini-code-assist transport response normalization", () => {
           "content-type": "application/json",
         },
       },
-    )
+    );
 
     const normalized = await normalizeGeminiCodeAssistResponse(response, {
       streaming: false,
       requestedModel: "gemini-2.5-flash",
-    })
-    const body = (await normalized.json()) as Record<string, unknown>
-    assert.equal(Array.isArray(body.candidates), true)
-    assert.equal((body.candidates as unknown[]).length, 1)
-    assert.equal(body.responseId, "trace-1")
-  })
+    });
+    const body = (await normalized.json()) as Record<string, unknown>;
+    assert.equal(Array.isArray(body.candidates), true);
+    assert.equal((body.candidates as unknown[]).length, 1);
+    assert.equal(body.responseId, "trace-1");
+  });
 
   it("unwraps SSE data frames and preserves non-data lines", async () => {
     const response = new Response(
@@ -116,21 +119,21 @@ describe("gemini-code-assist transport response normalization", () => {
           "content-type": "text/event-stream",
         },
       },
-    )
+    );
 
     const normalized = await normalizeGeminiCodeAssistResponse(response, {
       streaming: true,
       requestedModel: "gemini-2.5-pro",
-    })
-    const text = await normalized.text()
-    const lines = text.split("\n")
+    });
+    const text = await normalized.text();
+    const lines = text.split("\n");
 
-    assert.equal(lines[0], "event: message")
+    assert.equal(lines[0], "event: message");
 
-    const dataLine = lines.find((line) => line.startsWith("data: "))
-    assert.ok(dataLine)
-    const payload = JSON.parse(dataLine.slice(6)) as Record<string, unknown>
-    assert.equal(payload.responseId, "trace-2")
-    assert.equal(Array.isArray(payload.candidates), true)
-  })
-})
+    const dataLine = lines.find((line) => line.startsWith("data: "));
+    assert.ok(dataLine);
+    const payload = JSON.parse(dataLine.slice(6)) as Record<string, unknown>;
+    assert.equal(payload.responseId, "trace-2");
+    assert.equal(Array.isArray(payload.candidates), true);
+  });
+});

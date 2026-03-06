@@ -1,39 +1,42 @@
 // @ts-expect-error bun:test types are not part of this package's TypeScript environment.
-import { describe, expect, it } from "bun:test"
-import { ModelNotFoundError, RuntimeValidationError } from "@llm-bridge/contracts"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
+import { describe, expect, it } from "bun:test";
+import {
+  ModelNotFoundError,
+  RuntimeValidationError,
+} from "@llm-bridge/contracts";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import type {
   MetaRepositoryApi,
   ModelExecutionRepositoryApi,
   PermissionsRepositoryApi,
-} from "./repositories"
+} from "./repositories";
 import {
   MetaRepository,
   ModelExecutionRepository,
   PermissionsRepository,
-} from "./repositories"
+} from "./repositories";
 import {
   ModelExecutionService,
   ModelExecutionServiceLive,
   PermissionServiceLive,
-} from "./services"
+} from "./services";
 
-const TEST_ORIGIN = "https://example.test"
-const TEST_MODEL_ID = "provider/model"
-const TEST_SESSION_ID = "session-1"
-const TEST_REQUEST_ID = "request-1"
+const TEST_ORIGIN = "https://example.test";
+const TEST_MODEL_ID = "provider/model";
+const TEST_SESSION_ID = "session-1";
+const TEST_REQUEST_ID = "request-1";
 
 function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function createModelExecutionService(input: {
-  waitBehavior: "resolved" | "signal-abort"
-  postWaitPermission?: "allowed" | "denied"
+  waitBehavior: "resolved" | "signal-abort";
+  postWaitPermission?: "allowed" | "denied";
 }) {
-  let permissionReads = 0
-  let generateCalls = 0
+  let permissionReads = 0;
+  let generateCalls = 0;
 
   const permissionsRepo = {
     getOriginState: () =>
@@ -44,9 +47,9 @@ async function createModelExecutionService(input: {
     listPermissions: () => Effect.succeed([]),
     getModelPermission: () =>
       Effect.sync(() => {
-        permissionReads += 1
-        if (permissionReads === 1) return "denied"
-        return input.postWaitPermission ?? "allowed"
+        permissionReads += 1;
+        if (permissionReads === 1) return "denied";
+        return input.postWaitPermission ?? "allowed";
       }),
     setOriginEnabled: (origin: string, enabled: boolean) =>
       Effect.succeed({
@@ -54,10 +57,10 @@ async function createModelExecutionService(input: {
         enabled,
       }),
     updatePermission: (payload: {
-      origin: string
-      modelID: string
-      status: "allowed" | "denied"
-      capabilities?: ReadonlyArray<string>
+      origin: string;
+      modelID: string;
+      status: "allowed" | "denied";
+      capabilities?: ReadonlyArray<string>;
     }) =>
       Effect.succeed({
         origin: payload.origin,
@@ -79,7 +82,10 @@ async function createModelExecutionService(input: {
           status: "pending" as const,
         },
       }),
-    resolvePermissionRequest: (payload: { requestId: string; decision: "allowed" | "denied" }) =>
+    resolvePermissionRequest: (payload: {
+      requestId: string;
+      decision: "allowed" | "denied";
+    }) =>
       Effect.succeed({
         requestId: payload.requestId,
         decision: payload.decision,
@@ -88,27 +94,33 @@ async function createModelExecutionService(input: {
       Effect.succeed({
         requestId,
       }),
-    waitForPermissionDecision: (_requestId: string, _timeoutMs?: number, signal?: AbortSignal) => {
+    waitForPermissionDecision: (
+      _requestId: string,
+      _timeoutMs?: number,
+      signal?: AbortSignal,
+    ) => {
       if (input.waitBehavior === "resolved") {
-        return Effect.succeed("resolved" as const)
+        return Effect.succeed("resolved" as const);
       }
 
       return Effect.tryPromise({
         try: () =>
           new Promise<"aborted">((resolve) => {
             if (signal?.aborted) {
-              resolve("aborted")
-              return
+              resolve("aborted");
+              return;
             }
-            signal?.addEventListener("abort", () => resolve("aborted"), { once: true })
+            signal?.addEventListener("abort", () => resolve("aborted"), {
+              once: true,
+            });
           }),
         catch: () =>
           new RuntimeValidationError({
             message: "Permission wait failed",
           }),
-      })
+      });
     },
-  } satisfies PermissionsRepositoryApi
+  } satisfies PermissionsRepositoryApi;
 
   const metaRepo = {
     parseProviderModel: (modelID: string) => ({
@@ -122,7 +134,7 @@ async function createModelExecutionService(input: {
             modelId: modelID,
             message: `Model ${modelID} was not found`,
           }),
-        )
+        );
       }
 
       return Effect.succeed({
@@ -130,9 +142,9 @@ async function createModelExecutionService(input: {
         modelName: "model",
         provider: "provider",
         capabilities: [],
-      })
+      });
     },
-  } satisfies MetaRepositoryApi
+  } satisfies MetaRepositoryApi;
 
   const modelRepo = {
     acquireModel: () =>
@@ -144,7 +156,7 @@ async function createModelExecutionService(input: {
       }),
     generateModel: () =>
       Effect.sync(() => {
-        generateCalls += 1
+        generateCalls += 1;
         return {
           content: [],
           finishReason: {
@@ -155,35 +167,35 @@ async function createModelExecutionService(input: {
             outputTokens: {},
           },
           warnings: [],
-        }
+        };
       }),
     streamModel: () =>
       Effect.succeed(
         new ReadableStream({
           start(controller) {
-            controller.close()
+            controller.close();
           },
         }),
       ),
-  } satisfies ModelExecutionRepositoryApi
+  } satisfies ModelExecutionRepositoryApi;
 
   const layer = ModelExecutionServiceLive.pipe(
     Layer.provideMerge(PermissionServiceLive),
     Layer.provideMerge(Layer.succeed(PermissionsRepository, permissionsRepo)),
     Layer.provideMerge(Layer.succeed(MetaRepository, metaRepo)),
     Layer.provideMerge(Layer.succeed(ModelExecutionRepository, modelRepo)),
-  )
+  );
 
   const service = await Effect.runPromise(
-    Effect.gen(function*() {
-      return yield* ModelExecutionService
+    Effect.gen(function* () {
+      return yield* ModelExecutionService;
     }).pipe(Effect.provide(layer)),
-  )
+  );
 
   return {
     service,
     getGenerateCalls: () => generateCalls,
-  }
+  };
 }
 
 function modelCallInput() {
@@ -200,7 +212,7 @@ function modelCallInput() {
         },
       ],
     },
-  }
+  };
 }
 
 function abortInput() {
@@ -208,42 +220,48 @@ function abortInput() {
     origin: TEST_ORIGIN,
     requestID: TEST_REQUEST_ID,
     sessionID: TEST_SESSION_ID,
-  }
+  };
 }
 
 describe("ModelExecutionService permission wait cancellation", () => {
   it("stops generation when abortModelCall occurs during permission wait", async () => {
     const { service, getGenerateCalls } = await createModelExecutionService({
       waitBehavior: "signal-abort",
-    })
+    });
 
-    const generateTask = Effect.runPromise(service.generateModel(modelCallInput()))
-    await sleep(5)
-    await Effect.runPromise(service.abortModelCall(abortInput()))
+    const generateTask = Effect.runPromise(
+      service.generateModel(modelCallInput()),
+    );
+    await sleep(5);
+    await Effect.runPromise(service.abortModelCall(abortInput()));
 
-    await expect(generateTask).rejects.toThrow(/Request canceled/)
-    expect(getGenerateCalls()).toBe(0)
-  })
+    await expect(generateTask).rejects.toThrow(/Request canceled/);
+    expect(getGenerateCalls()).toBe(0);
+  });
 
   it("honors aborts that arrive before controller registration", async () => {
     const { service, getGenerateCalls } = await createModelExecutionService({
       waitBehavior: "signal-abort",
-    })
+    });
 
-    await Effect.runPromise(service.abortModelCall(abortInput()))
+    await Effect.runPromise(service.abortModelCall(abortInput()));
 
-    await expect(Effect.runPromise(service.generateModel(modelCallInput()))).rejects.toThrow(/Request canceled/)
-    expect(getGenerateCalls()).toBe(0)
-  })
+    await expect(
+      Effect.runPromise(service.generateModel(modelCallInput())),
+    ).rejects.toThrow(/Request canceled/);
+    expect(getGenerateCalls()).toBe(0);
+  });
 
   it("continues to model generation when permission wait resolves", async () => {
     const { service, getGenerateCalls } = await createModelExecutionService({
       waitBehavior: "resolved",
       postWaitPermission: "allowed",
-    })
+    });
 
-    const result = await Effect.runPromise(service.generateModel(modelCallInput()))
-    expect(result.finishReason.unified).toBe("stop")
-    expect(getGenerateCalls()).toBe(1)
-  })
-})
+    const result = await Effect.runPromise(
+      service.generateModel(modelCallInput()),
+    );
+    expect(result.finishReason.unified).toBe("stop");
+    expect(getGenerateCalls()).toBe(1);
+  });
+});

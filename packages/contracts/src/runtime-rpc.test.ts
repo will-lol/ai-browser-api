@@ -1,12 +1,12 @@
-import assert from "node:assert/strict"
-import { describe, it } from "node:test"
-import * as Schema from "effect/Schema"
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import * as Schema from "effect/Schema";
 import {
   RuntimeCreatePermissionRequestInputSchema,
   RuntimeRequestPermissionInputSchema,
   RuntimeAdminRpcGroup,
   RuntimePublicRpcGroup,
-} from "./index"
+} from "./index";
 
 const EXPECTED_PUBLIC_TAGS = new Set([
   "listModels",
@@ -17,7 +17,7 @@ const EXPECTED_PUBLIC_TAGS = new Set([
   "modelDoGenerate",
   "modelDoStream",
   "abortModelCall",
-])
+]);
 
 const EXPECTED_ADMIN_TAGS = new Set([
   "listProviders",
@@ -37,7 +37,7 @@ const EXPECTED_ADMIN_TAGS = new Set([
   "modelDoGenerate",
   "modelDoStream",
   "abortModelCall",
-])
+]);
 
 const SHARED_TAGS = [
   "listModels",
@@ -47,31 +47,41 @@ const SHARED_TAGS = [
   "modelDoGenerate",
   "modelDoStream",
   "abortModelCall",
-] as const
+] as const;
 
 describe("runtime rpc contracts", () => {
   it("exposes the expected public and admin tag sets", () => {
-    assert.deepEqual(new Set(RuntimePublicRpcGroup.requests.keys()), EXPECTED_PUBLIC_TAGS)
-    assert.deepEqual(new Set(RuntimeAdminRpcGroup.requests.keys()), EXPECTED_ADMIN_TAGS)
-  })
+    assert.deepEqual(
+      new Set(RuntimePublicRpcGroup.requests.keys()),
+      EXPECTED_PUBLIC_TAGS,
+    );
+    assert.deepEqual(
+      new Set(RuntimeAdminRpcGroup.requests.keys()),
+      EXPECTED_ADMIN_TAGS,
+    );
+  });
 
   it("shares every common rpc definition except requestPermission", () => {
     for (const tag of SHARED_TAGS) {
       assert.strictEqual(
         RuntimePublicRpcGroup.requests.get(tag),
         RuntimeAdminRpcGroup.requests.get(tag),
-      )
+      );
     }
 
     assert.notStrictEqual(
       RuntimePublicRpcGroup.requests.get("requestPermission"),
       RuntimeAdminRpcGroup.requests.get("requestPermission"),
-    )
-  })
+    );
+  });
 
   it("keeps requestPermission as the only role-divergent contract", () => {
-    const decodePublic = Schema.decodeUnknownSync(RuntimeCreatePermissionRequestInputSchema)
-    const decodeAdmin = Schema.decodeUnknownSync(RuntimeRequestPermissionInputSchema)
+    const decodePublic = Schema.decodeUnknownSync(
+      RuntimeCreatePermissionRequestInputSchema,
+    );
+    const decodeAdmin = Schema.decodeUnknownSync(
+      RuntimeRequestPermissionInputSchema,
+    );
 
     assert.throws(
       () =>
@@ -82,7 +92,7 @@ describe("runtime rpc contracts", () => {
           decision: "allowed",
         }),
       /create/,
-    )
+    );
 
     assert.deepEqual(
       decodeAdmin({
@@ -95,6 +105,6 @@ describe("runtime rpc contracts", () => {
         requestId: "prm_1",
         decision: "allowed",
       },
-    )
-  })
-})
+    );
+  });
+});

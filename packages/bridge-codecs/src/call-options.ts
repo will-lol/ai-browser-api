@@ -1,9 +1,9 @@
-import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
+import type { LanguageModelV3CallOptions } from "@ai-sdk/provider";
 import type {
   RuntimeModelCallOptions,
   RuntimePromptMessage,
   RuntimeTool,
-} from "@llm-bridge/contracts"
+} from "@llm-bridge/contracts";
 import {
   assertNever,
   decodeDataContent,
@@ -27,41 +27,46 @@ import {
   type RuntimeToolPart,
   type RuntimeToolResultOutput,
   type RuntimeUserPart,
-} from "./internal"
-import { decodeRuntimeWireValue, encodeRuntimeWireValue } from "@llm-bridge/contracts"
+} from "./internal";
+import {
+  decodeRuntimeWireValue,
+  encodeRuntimeWireValue,
+} from "@llm-bridge/contracts";
 
-function toRuntimeToolResultOutput(output: ProviderToolResultOutput): RuntimeToolResultOutput {
+function toRuntimeToolResultOutput(
+  output: ProviderToolResultOutput,
+): RuntimeToolResultOutput {
   switch (output.type) {
     case "text":
       return {
         type: "text",
         value: output.value,
         providerOptions: toRuntimeProviderOptions(output.providerOptions),
-      }
+      };
     case "json":
       return {
         type: "json",
         value: toContractJsonValue(output.value),
         providerOptions: toRuntimeProviderOptions(output.providerOptions),
-      }
+      };
     case "execution-denied":
       return {
         type: "execution-denied",
         reason: output.reason,
         providerOptions: toRuntimeProviderOptions(output.providerOptions),
-      }
+      };
     case "error-text":
       return {
         type: "error-text",
         value: output.value,
         providerOptions: toRuntimeProviderOptions(output.providerOptions),
-      }
+      };
     case "error-json":
       return {
         type: "error-json",
         value: toContractJsonValue(output.value),
         providerOptions: toRuntimeProviderOptions(output.providerOptions),
-      }
+      };
     case "content":
       return {
         type: "content",
@@ -69,44 +74,46 @@ function toRuntimeToolResultOutput(output: ProviderToolResultOutput): RuntimeToo
           ...part,
           providerOptions: toRuntimeProviderOptions(part.providerOptions),
         })),
-      }
+      };
     default:
-      return assertNever(output)
+      return assertNever(output);
   }
 }
 
-function fromRuntimeToolResultOutput(output: RuntimeToolResultOutput): ProviderToolResultOutput {
+function fromRuntimeToolResultOutput(
+  output: RuntimeToolResultOutput,
+): ProviderToolResultOutput {
   switch (output.type) {
     case "text":
       return {
         type: "text",
         value: output.value,
         providerOptions: fromRuntimeProviderOptions(output.providerOptions),
-      }
+      };
     case "json":
       return {
         type: "json",
         value: toProviderJsonValue(output.value),
         providerOptions: fromRuntimeProviderOptions(output.providerOptions),
-      }
+      };
     case "execution-denied":
       return {
         type: "execution-denied",
         reason: output.reason,
         providerOptions: fromRuntimeProviderOptions(output.providerOptions),
-      }
+      };
     case "error-text":
       return {
         type: "error-text",
         value: output.value,
         providerOptions: fromRuntimeProviderOptions(output.providerOptions),
-      }
+      };
     case "error-json":
       return {
         type: "error-json",
         value: toProviderJsonValue(output.value),
         providerOptions: fromRuntimeProviderOptions(output.providerOptions),
-      }
+      };
     case "content":
       return {
         type: "content",
@@ -114,9 +121,9 @@ function fromRuntimeToolResultOutput(output: RuntimeToolResultOutput): ProviderT
           ...part,
           providerOptions: fromRuntimeProviderOptions(part.providerOptions),
         })),
-      }
+      };
     default:
-      return assertNever(output)
+      return assertNever(output);
   }
 }
 
@@ -132,7 +139,7 @@ function toRuntimeTool(tool: ProviderToolSpec): RuntimeTool {
           encodeRuntimeWireValue(value),
         ]),
       ),
-    }
+    };
   }
 
   return {
@@ -145,7 +152,7 @@ function toRuntimeTool(tool: ProviderToolSpec): RuntimeTool {
     })),
     strict: tool.strict,
     providerOptions: toRuntimeProviderOptions(tool.providerOptions),
-  }
+  };
 }
 
 function fromRuntimeTool(tool: RuntimeTool): ProviderToolSpec {
@@ -155,17 +162,17 @@ function fromRuntimeTool(tool: RuntimeTool): ProviderToolSpec {
         key,
         decodeRuntimeWireValue(value),
       ]),
-    )
+    );
 
     return {
       type: "provider",
       id: toProviderToolId(tool.id),
       name: tool.name,
       args,
-    }
+    };
   }
 
-  const decodedInputSchema = decodeRuntimeWireValue(tool.inputSchema)
+  const decodedInputSchema = decodeRuntimeWireValue(tool.inputSchema);
 
   return {
     type: "function",
@@ -177,7 +184,7 @@ function fromRuntimeTool(tool: RuntimeTool): ProviderToolSpec {
     })),
     strict: tool.strict,
     providerOptions: fromRuntimeProviderOptions(tool.providerOptions),
-  }
+  };
 }
 
 function toRuntimeUserPart(part: ProviderUserPart): RuntimeUserPart {
@@ -186,7 +193,7 @@ function toRuntimeUserPart(part: ProviderUserPart): RuntimeUserPart {
       type: "text",
       text: part.text,
       providerOptions: toRuntimeProviderOptions(part.providerOptions),
-    }
+    };
   }
 
   return {
@@ -195,7 +202,7 @@ function toRuntimeUserPart(part: ProviderUserPart): RuntimeUserPart {
     data: encodeDataContent(part.data),
     mediaType: part.mediaType,
     providerOptions: toRuntimeProviderOptions(part.providerOptions),
-  }
+  };
 }
 
 function fromRuntimeUserPart(part: RuntimeUserPart): ProviderUserPart {
@@ -204,7 +211,7 @@ function fromRuntimeUserPart(part: RuntimeUserPart): ProviderUserPart {
       type: "text",
       text: part.text,
       providerOptions: fromRuntimeProviderOptions(part.providerOptions),
-    }
+    };
   }
 
   return {
@@ -213,17 +220,19 @@ function fromRuntimeUserPart(part: RuntimeUserPart): ProviderUserPart {
     data: decodeDataContent(part.data),
     mediaType: part.mediaType,
     providerOptions: fromRuntimeProviderOptions(part.providerOptions),
-  }
+  };
 }
 
-function toRuntimeAssistantPart(part: ProviderAssistantPart): RuntimeAssistantPart {
+function toRuntimeAssistantPart(
+  part: ProviderAssistantPart,
+): RuntimeAssistantPart {
   switch (part.type) {
     case "text":
       return {
         type: "text",
         text: part.text,
         providerOptions: toRuntimeProviderOptions(part.providerOptions),
-      }
+      };
     case "file":
       return {
         type: "file",
@@ -231,13 +240,13 @@ function toRuntimeAssistantPart(part: ProviderAssistantPart): RuntimeAssistantPa
         data: encodeDataContent(part.data),
         mediaType: part.mediaType,
         providerOptions: toRuntimeProviderOptions(part.providerOptions),
-      }
+      };
     case "reasoning":
       return {
         type: "reasoning",
         text: part.text,
         providerOptions: toRuntimeProviderOptions(part.providerOptions),
-      }
+      };
     case "tool-call":
       return {
         type: "tool-call",
@@ -246,7 +255,7 @@ function toRuntimeAssistantPart(part: ProviderAssistantPart): RuntimeAssistantPa
         input: encodeRuntimeWireValue(part.input),
         providerExecuted: part.providerExecuted,
         providerOptions: toRuntimeProviderOptions(part.providerOptions),
-      }
+      };
     case "tool-result":
       return {
         type: "tool-result",
@@ -254,20 +263,22 @@ function toRuntimeAssistantPart(part: ProviderAssistantPart): RuntimeAssistantPa
         toolName: part.toolName,
         output: toRuntimeToolResultOutput(part.output),
         providerOptions: toRuntimeProviderOptions(part.providerOptions),
-      }
+      };
     default:
-      return assertNever(part)
+      return assertNever(part);
   }
 }
 
-function fromRuntimeAssistantPart(part: RuntimeAssistantPart): ProviderAssistantPart {
+function fromRuntimeAssistantPart(
+  part: RuntimeAssistantPart,
+): ProviderAssistantPart {
   switch (part.type) {
     case "text":
       return {
         type: "text",
         text: part.text,
         providerOptions: fromRuntimeProviderOptions(part.providerOptions),
-      }
+      };
     case "file":
       return {
         type: "file",
@@ -275,13 +286,13 @@ function fromRuntimeAssistantPart(part: RuntimeAssistantPart): ProviderAssistant
         data: decodeDataContent(part.data),
         mediaType: part.mediaType,
         providerOptions: fromRuntimeProviderOptions(part.providerOptions),
-      }
+      };
     case "reasoning":
       return {
         type: "reasoning",
         text: part.text,
         providerOptions: fromRuntimeProviderOptions(part.providerOptions),
-      }
+      };
     case "tool-call":
       return {
         type: "tool-call",
@@ -290,7 +301,7 @@ function fromRuntimeAssistantPart(part: RuntimeAssistantPart): ProviderAssistant
         input: decodeRuntimeWireValue(part.input),
         providerExecuted: part.providerExecuted,
         providerOptions: fromRuntimeProviderOptions(part.providerOptions),
-      }
+      };
     case "tool-result":
       return {
         type: "tool-result",
@@ -298,9 +309,9 @@ function fromRuntimeAssistantPart(part: RuntimeAssistantPart): ProviderAssistant
         toolName: part.toolName,
         output: fromRuntimeToolResultOutput(part.output),
         providerOptions: fromRuntimeProviderOptions(part.providerOptions),
-      }
+      };
     default:
-      return assertNever(part)
+      return assertNever(part);
   }
 }
 
@@ -312,7 +323,7 @@ function toRuntimeToolPart(part: ProviderToolPart): RuntimeToolPart {
       toolName: part.toolName,
       output: toRuntimeToolResultOutput(part.output),
       providerOptions: toRuntimeProviderOptions(part.providerOptions),
-    }
+    };
   }
 
   if (part.type === "tool-approval-response") {
@@ -322,10 +333,10 @@ function toRuntimeToolPart(part: ProviderToolPart): RuntimeToolPart {
       approved: part.approved,
       reason: part.reason,
       providerOptions: toRuntimeProviderOptions(part.providerOptions),
-    }
+    };
   }
 
-  return assertNever(part)
+  return assertNever(part);
 }
 
 function fromRuntimeToolPart(part: RuntimeToolPart): ProviderToolPart {
@@ -336,7 +347,7 @@ function fromRuntimeToolPart(part: RuntimeToolPart): ProviderToolPart {
       toolName: part.toolName,
       output: fromRuntimeToolResultOutput(part.output),
       providerOptions: fromRuntimeProviderOptions(part.providerOptions),
-    }
+    };
   }
 
   if (part.type === "tool-approval-response") {
@@ -346,71 +357,75 @@ function fromRuntimeToolPart(part: RuntimeToolPart): ProviderToolPart {
       approved: part.approved,
       reason: part.reason,
       providerOptions: fromRuntimeProviderOptions(part.providerOptions),
-    }
+    };
   }
 
-  return assertNever(part)
+  return assertNever(part);
 }
 
-function toRuntimePromptMessage(message: ProviderPromptMessage): RuntimePromptMessage {
+function toRuntimePromptMessage(
+  message: ProviderPromptMessage,
+): RuntimePromptMessage {
   switch (message.role) {
     case "system":
       return {
         role: "system",
         content: message.content,
         providerOptions: toRuntimeProviderOptions(message.providerOptions),
-      }
+      };
     case "user":
       return {
         role: "user",
         content: message.content.map((part) => toRuntimeUserPart(part)),
         providerOptions: toRuntimeProviderOptions(message.providerOptions),
-      }
+      };
     case "assistant":
       return {
         role: "assistant",
         content: message.content.map((part) => toRuntimeAssistantPart(part)),
         providerOptions: toRuntimeProviderOptions(message.providerOptions),
-      }
+      };
     case "tool":
       return {
         role: "tool",
         content: message.content.map((part) => toRuntimeToolPart(part)),
         providerOptions: toRuntimeProviderOptions(message.providerOptions),
-      }
+      };
     default:
-      return assertNever(message)
+      return assertNever(message);
   }
 }
 
-function fromRuntimePromptMessage(message: RuntimePromptMessage): ProviderPromptMessage {
+function fromRuntimePromptMessage(
+  message: RuntimePromptMessage,
+): ProviderPromptMessage {
   switch (message.role) {
     case "system":
       return {
         role: "system",
         content: message.content,
         providerOptions: fromRuntimeProviderOptions(message.providerOptions),
-      }
+      };
     case "user":
       return {
         role: "user",
         content: message.content.map((part) => fromRuntimeUserPart(part)),
         providerOptions: fromRuntimeProviderOptions(message.providerOptions),
-      }
+      };
     case "assistant":
       return {
         role: "assistant",
         content: message.content.map((part) => fromRuntimeAssistantPart(part)),
         providerOptions: fromRuntimeProviderOptions(message.providerOptions),
-      }
+      };
     case "tool":
       return {
         role: "tool",
         content: message.content.map((part) => fromRuntimeToolPart(part)),
         providerOptions: fromRuntimeProviderOptions(message.providerOptions),
-      }
+      };
     default:
-      return assertNever(message)
+      return assertNever(message);
   }
 }
 
@@ -418,13 +433,13 @@ function toRuntimeResponseFormat(
   responseFormat: LanguageModelV3CallOptions["responseFormat"],
 ): RuntimeModelCallOptions["responseFormat"] {
   if (!responseFormat) {
-    return undefined
+    return undefined;
   }
 
   if (responseFormat.type === "text") {
     return {
       type: "text",
-    }
+    };
   }
 
   if (responseFormat.type === "json") {
@@ -435,39 +450,40 @@ function toRuntimeResponseFormat(
         : undefined,
       name: responseFormat.name,
       description: responseFormat.description,
-    }
+    };
   }
 
-  return assertNever(responseFormat)
+  return assertNever(responseFormat);
 }
 
 function fromRuntimeResponseFormat(
   responseFormat: RuntimeModelCallOptions["responseFormat"],
 ): Omit<LanguageModelV3CallOptions, "abortSignal">["responseFormat"] {
   if (!responseFormat) {
-    return undefined
+    return undefined;
   }
 
   if (responseFormat.type === "text") {
     return {
       type: "text",
-    }
+    };
   }
 
   if (responseFormat.type === "json") {
-    const decodedSchema = responseFormat.schema === undefined
-      ? undefined
-      : decodeRuntimeWireValue(responseFormat.schema)
+    const decodedSchema =
+      responseFormat.schema === undefined
+        ? undefined
+        : decodeRuntimeWireValue(responseFormat.schema);
 
     return {
       type: "json",
       schema: isRecord(decodedSchema) ? decodedSchema : undefined,
       name: responseFormat.name,
       description: responseFormat.description,
-    }
+    };
   }
 
-  return assertNever(responseFormat)
+  return assertNever(responseFormat);
 }
 
 export function toRuntimeModelCallOptions(
@@ -489,7 +505,7 @@ export function toRuntimeModelCallOptions(
     includeRawChunks: options.includeRawChunks,
     headers: options.headers ? normalizeHeaders(options.headers) : undefined,
     providerOptions: toRuntimeProviderOptions(options.providerOptions),
-  }
+  };
 }
 
 export function fromRuntimeModelCallOptions(
@@ -499,7 +515,9 @@ export function fromRuntimeModelCallOptions(
     prompt: options.prompt.map((message) => fromRuntimePromptMessage(message)),
     maxOutputTokens: options.maxOutputTokens,
     temperature: options.temperature,
-    stopSequences: options.stopSequences ? [...options.stopSequences] : undefined,
+    stopSequences: options.stopSequences
+      ? [...options.stopSequences]
+      : undefined,
     topP: options.topP,
     topK: options.topK,
     presencePenalty: options.presencePenalty,
@@ -511,5 +529,5 @@ export function fromRuntimeModelCallOptions(
     includeRawChunks: options.includeRawChunks,
     headers: options.headers ? { ...options.headers } : undefined,
     providerOptions: fromRuntimeProviderOptions(options.providerOptions),
-  }
+  };
 }

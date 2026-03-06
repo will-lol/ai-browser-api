@@ -1,1 +1,1 @@
-export { getRuntimeAdminRPC } from "./runtime-rpc-client"
+export { getRuntimeAdminRPC } from "./runtime-rpc-client";

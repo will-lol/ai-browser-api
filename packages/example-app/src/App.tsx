@@ -20,12 +20,12 @@ export function App() {
   const [models, setModels] = useState<ReadonlyArray<BridgeModelSummary>>([]);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [status, setStatus] = useState("Idle");
-  
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  
+
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const startupRefreshTriggeredRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -105,10 +105,10 @@ export function App() {
     e?.preventDefault();
     if (!input.trim() || isLoading || !selectedModelId) return;
 
-    const userMessage: Message = { 
-      id: Date.now().toString(), 
-      role: "user", 
-      content: input.trim() 
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: input.trim(),
     };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
@@ -117,11 +117,14 @@ export function App() {
     setError(null);
 
     const assistantMessageId = (Date.now() + 1).toString();
-    setMessages(prev => [...prev, { id: assistantMessageId, role: "assistant", content: "" }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantMessageId, role: "assistant", content: "" },
+    ]);
 
     try {
       const model = await loadModel(selectedModelId);
-      
+
       const streamResult = streamText({
         model,
         messages: newMessages,
@@ -131,18 +134,18 @@ export function App() {
       });
 
       for await (const chunk of streamResult.textStream) {
-        setMessages(prev => 
-          prev.map(msg => 
-            msg.id === assistantMessageId 
-              ? { ...msg, content: msg.content + chunk } 
-              : msg
-          )
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMessageId
+              ? { ...msg, content: msg.content + chunk }
+              : msg,
+          ),
         );
       }
     } catch (err) {
       pushError("stream.failed", err);
       setError(err instanceof Error ? err : new Error(String(err)));
-      setMessages(prev => {
+      setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (last.id === assistantMessageId && last.content === "") {
           return prev.slice(0, -1);
@@ -177,9 +180,13 @@ export function App() {
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-4 border-b border-[#223557] bg-[#101a2f] shrink-0">
         <div>
-          <h1 className="text-xl font-semibold m-0 tracking-wide">LLM Bridge</h1>
+          <h1 className="text-xl font-semibold m-0 tracking-wide">
+            LLM Bridge
+          </h1>
           <p className="text-sm text-[#94a7c4] mt-1 m-0">
-            {status === "Loading models..." ? "Loading..." : `${models.length} models connected`}
+            {status === "Loading models..."
+              ? "Loading..."
+              : `${models.length} models connected`}
           </p>
         </div>
 
@@ -191,7 +198,9 @@ export function App() {
             className="p-2 rounded-lg bg-[#0d1730] border border-[#334b75] text-[#e5edf8] hover:bg-[#223557] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="Refresh Models"
           >
-            <RefreshCw className={`w-5 h-5 ${status === "Loading models..." ? "animate-spin" : ""}`} />
+            <RefreshCw
+              className={`w-5 h-5 ${status === "Loading models..." ? "animate-spin" : ""}`}
+            />
           </button>
           <select
             className="px-4 py-2 rounded-lg bg-[#0d1730] border border-[#334b75] text-[#e5edf8] focus:outline-none focus:border-blue-500 min-w-[200px]"
@@ -219,7 +228,8 @@ export function App() {
             <Bot className="w-16 h-16 opacity-50" />
             <h2 className="text-xl font-medium">How can I help you today?</h2>
             <p className="text-sm opacity-75 text-center max-w-md">
-              Type a message below to start chatting. The AI SDK will stream the response directly via your local Bridge model.
+              Type a message below to start chatting. The AI SDK will stream the
+              response directly via your local Bridge model.
             </p>
           </div>
         ) : (
@@ -265,7 +275,7 @@ export function App() {
                 </div>
               </div>
             ))}
-            
+
             {/* Loading Indicator */}
             {isLoading && messages[messages.length - 1]?.role === "user" && (
               <div className="flex gap-4 md:gap-6 flex-row max-w-4xl mx-auto">
@@ -273,13 +283,22 @@ export function App() {
                   <Bot className="w-5 h-5" />
                 </div>
                 <div className="px-5 py-4 rounded-2xl bg-[#101a2f] border border-[#223557] rounded-tl-sm flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce" style={{ animationDelay: "0ms" }}></span>
-                  <span className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce" style={{ animationDelay: "150ms" }}></span>
-                  <span className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce" style={{ animationDelay: "300ms" }}></span>
+                  <span
+                    className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
+                    style={{ animationDelay: "0ms" }}
+                  ></span>
+                  <span
+                    className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
+                    style={{ animationDelay: "150ms" }}
+                  ></span>
+                  <span
+                    className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
+                    style={{ animationDelay: "300ms" }}
+                  ></span>
                 </div>
               </div>
             )}
-            
+
             {/* Error Message */}
             {error && (
               <div className="flex justify-center">
@@ -288,7 +307,7 @@ export function App() {
                 </div>
               </div>
             )}
-            
+
             <div ref={messagesEndRef} />
           </div>
         )}

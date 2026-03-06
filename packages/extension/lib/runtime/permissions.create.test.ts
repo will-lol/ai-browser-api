@@ -1,112 +1,127 @@
 // @ts-expect-error bun:test types are not part of this package's TypeScript environment.
-import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test"
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 
-const MAX_PENDING_REQUESTS = 3
-const MAX_PENDING_REQUESTS_PER_ORIGIN = 2
-const TEST_ORIGIN = "https://example.test"
+const MAX_PENDING_REQUESTS = 3;
+const MAX_PENDING_REQUESTS_PER_ORIGIN = 2;
+const TEST_ORIGIN = "https://example.test";
 
 type PendingRow = {
-  id: string
-  origin: string
-  modelId: string
-  modelName: string
-  provider: string
-  capabilities: string[]
-  requestedAt: number
-  dismissed: boolean
-  status: "pending" | "resolved"
-}
+  id: string;
+  origin: string;
+  modelId: string;
+  modelName: string;
+  provider: string;
+  capabilities: string[];
+  requestedAt: number;
+  dismissed: boolean;
+  status: "pending" | "resolved";
+};
 
 type PermissionRow = {
-  id: string
-  origin: string
-  modelId: string
-  status: "allowed" | "denied" | "pending"
-  capabilities: string[]
-  updatedAt: number
-}
+  id: string;
+  origin: string;
+  modelId: string;
+  status: "allowed" | "denied" | "pending";
+  capabilities: string[];
+  updatedAt: number;
+};
 
-const pendingRows: PendingRow[] = []
-const permissionRows = new Map<string, PermissionRow>()
-const originRows = new Map<string, { origin: string; enabled: boolean; updatedAt: number }>()
-const trustedTargetsById = new Map<string, {
-  modelId: string
-  modelName: string
-  provider: string
-  capabilities: string[]
-}>()
-const publishedEvents: Array<{
-  type: string
-  payload: {
-    origin: string
-    requestIds?: string[]
-    modelIds?: string[]
+const pendingRows: PendingRow[] = [];
+const permissionRows = new Map<string, PermissionRow>();
+const originRows = new Map<
+  string,
+  { origin: string; enabled: boolean; updatedAt: number }
+>();
+const trustedTargetsById = new Map<
+  string,
+  {
+    modelId: string;
+    modelName: string;
+    provider: string;
+    capabilities: string[];
   }
-}> = []
+>();
+const publishedEvents: Array<{
+  type: string;
+  payload: {
+    origin: string;
+    requestIds?: string[];
+    modelIds?: string[];
+  };
+}> = [];
 
-let afterCommitEffects: Array<() => unknown | Promise<unknown>> = []
-let idSequence = 0
-let nowValue = 100
+let afterCommitEffects: Array<() => unknown | Promise<unknown>> = [];
+let idSequence = 0;
+let nowValue = 100;
 
 function createCollection(rows: PendingRow[]) {
   return {
     filter(predicate: (row: PendingRow) => boolean) {
-      return createCollection(rows.filter(predicate))
+      return createCollection(rows.filter(predicate));
     },
     async toArray() {
-      return [...rows]
+      return [...rows];
     },
     async first() {
-      return rows[0]
+      return rows[0];
     },
     async count() {
-      return rows.length
+      return rows.length;
     },
-  }
+  };
 }
 
 mock.module("@/lib/runtime/constants", () => ({
   MAX_PENDING_REQUESTS,
   MAX_PENDING_REQUESTS_PER_ORIGIN,
   PENDING_REQUEST_TIMEOUT_MS: 30_000,
-}))
+}));
 
 mock.module("@/lib/runtime/db/runtime-db", () => ({
   runtimeDb: {
     origins: {
       get: async (origin: string) => originRows.get(origin),
-      put: async (row: { origin: string; enabled: boolean; updatedAt: number }) => {
-        originRows.set(row.origin, row)
+      put: async (row: {
+        origin: string;
+        enabled: boolean;
+        updatedAt: number;
+      }) => {
+        originRows.set(row.origin, row);
       },
     },
     permissions: {
       get: async (id: string) => permissionRows.get(id),
       put: async (row: PermissionRow) => {
-        permissionRows.set(row.id, row)
+        permissionRows.set(row.id, row);
       },
       delete: async (id: string) => {
-        permissionRows.delete(id)
+        permissionRows.delete(id);
       },
       where: (_field: string) => ({
         equals: (value: string) => ({
-          toArray: async () => Array.from(permissionRows.values()).filter((row) => row.origin === value),
+          toArray: async () =>
+            Array.from(permissionRows.values()).filter(
+              (row) => row.origin === value,
+            ),
         }),
       }),
     },
     pendingRequests: {
       get: async (id: string) => pendingRows.find((row) => row.id === id),
       put: async (row: PendingRow) => {
-        const existingIndex = pendingRows.findIndex((item) => item.id === row.id)
+        const existingIndex = pendingRows.findIndex(
+          (item) => item.id === row.id,
+        );
         if (existingIndex >= 0) {
-          pendingRows[existingIndex] = row
-          return
+          pendingRows[existingIndex] = row;
+          return;
         }
-        pendingRows.push(row)
+        pendingRows.push(row);
       },
       delete: async (id: string) => {
-        const index = pendingRows.findIndex((row) => row.id === id)
+        const index = pendingRows.findIndex((row) => row.id === id);
         if (index >= 0) {
-          pendingRows.splice(index, 1)
+          pendingRows.splice(index, 1);
         }
       },
       where: (field: "origin" | "status") => ({
@@ -115,85 +130,94 @@ mock.module("@/lib/runtime/db/runtime-db", () => ({
       }),
     },
   },
-}))
+}));
 
 mock.module("@/lib/runtime/db/runtime-db-types", () => ({
-  runtimePermissionKey: (origin: string, modelId: string) => `${origin}::${modelId}`,
-}))
+  runtimePermissionKey: (origin: string, modelId: string) =>
+    `${origin}::${modelId}`,
+}));
 
 mock.module("@/lib/runtime/db/runtime-db-tx", () => ({
   afterCommit: (effect: () => unknown | Promise<unknown>) => {
-    afterCommitEffects.push(effect)
+    afterCommitEffects.push(effect);
   },
   runTx: async (_tables: unknown[], fn: () => Promise<unknown>) => {
-    const result = await fn()
-    const effects = afterCommitEffects
-    afterCommitEffects = []
+    const result = await fn();
+    const effects = afterCommitEffects;
+    afterCommitEffects = [];
 
     for (const effect of effects) {
-      await effect()
+      await effect();
     }
 
-    return result
+    return result;
   },
-}))
+}));
 
 mock.module("@/lib/runtime/events/runtime-events", () => ({
   publishRuntimeEvent: async (event: {
-    type: string
+    type: string;
     payload: {
-      origin: string
-      requestIds?: string[]
-      modelIds?: string[]
-    }
+      origin: string;
+      requestIds?: string[];
+      modelIds?: string[];
+    };
   }) => {
-    publishedEvents.push(event)
+    publishedEvents.push(event);
   },
   subscribeRuntimeEvents: mock(() => () => undefined),
-}))
+}));
 
 mock.module("@/lib/runtime/permission-targets", () => ({
   resolveTrustedPermissionTargets: async (modelIds: string[]) =>
     new Map(
       modelIds.flatMap((modelId) => {
-        const target = trustedTargetsById.get(modelId)
-        return target ? [[modelId, target] as const] : []
+        const target = trustedTargetsById.get(modelId);
+        return target ? [[modelId, target] as const] : [];
       }),
     ),
-}))
+}));
 
 mock.module("@/lib/runtime/permission-wait", () => ({
   waitForPermissionDecisionEventDriven: mock(async () => "resolved"),
-}))
+}));
 
 mock.module("@/lib/runtime/util", () => ({
   getModelCapabilities: (modelId: string) => [`cap:${modelId}`],
   now: () => {
-    nowValue += 1
-    return nowValue
+    nowValue += 1;
+    return nowValue;
   },
   randomId: (prefix: string) => {
-    idSequence += 1
-    return `${prefix}_${idSequence}`
+    idSequence += 1;
+    return `${prefix}_${idSequence}`;
   },
-}))
+}));
 
-const { createPermissionRequest } = await import("./permissions")
+const { createPermissionRequest } = await import("./permissions");
 
-function setTrustedTarget(modelId: string, provider: string, capabilities: string[] = ["text"]) {
+function setTrustedTarget(
+  modelId: string,
+  provider: string,
+  capabilities: string[] = ["text"],
+) {
   trustedTargetsById.set(modelId, {
     modelId,
     modelName: `${modelId} name`,
     provider,
     capabilities,
-  })
+  });
 }
 
 function addPendingRow(row: PendingRow) {
-  pendingRows.push(row)
+  pendingRows.push(row);
 }
 
-function addPendingPermission(origin: string, modelId: string, status: PermissionRow["status"] = "pending") {
+function addPendingPermission(
+  origin: string,
+  modelId: string,
+  status: PermissionRow["status"] = "pending",
+) {
   permissionRows.set(`${origin}::${modelId}`, {
     id: `${origin}::${modelId}`,
     origin,
@@ -201,27 +225,27 @@ function addPendingPermission(origin: string, modelId: string, status: Permissio
     status,
     capabilities: [`cap:${modelId}`],
     updatedAt: 1,
-  })
+  });
 }
 
 beforeEach(() => {
-  pendingRows.length = 0
-  permissionRows.clear()
-  originRows.clear()
-  trustedTargetsById.clear()
-  publishedEvents.length = 0
-  afterCommitEffects = []
-  idSequence = 0
-  nowValue = 100
-})
+  pendingRows.length = 0;
+  permissionRows.clear();
+  originRows.clear();
+  trustedTargetsById.clear();
+  publishedEvents.length = 0;
+  afterCommitEffects = [];
+  idSequence = 0;
+  nowValue = 100;
+});
 
 afterAll(() => {
-  mock.restore()
-})
+  mock.restore();
+});
 
 describe("createPermissionRequest", () => {
   it("returns an existing duplicate pending request", async () => {
-    setTrustedTarget("openai/gpt-4o-mini", "openai")
+    setTrustedTarget("openai/gpt-4o-mini", "openai");
     addPendingRow({
       id: "prm_existing",
       origin: TEST_ORIGIN,
@@ -232,27 +256,27 @@ describe("createPermissionRequest", () => {
       requestedAt: 1,
       dismissed: false,
       status: "pending",
-    })
+    });
 
     const result = await createPermissionRequest({
       origin: TEST_ORIGIN,
       modelId: "openai/gpt-4o-mini",
       modelName: "spoofed",
       provider: "spoofed",
-    })
+    });
 
     expect(result).toEqual({
       status: "requested",
       request: pendingRows[0],
-    })
-    expect(pendingRows).toHaveLength(1)
-    expect(publishedEvents).toEqual([])
-  })
+    });
+    expect(pendingRows).toHaveLength(1);
+    expect(publishedEvents).toEqual([]);
+  });
 
   it("rejects requests that exceed the per-origin cap", async () => {
-    setTrustedTarget("openai/model-1", "openai")
-    setTrustedTarget("openai/model-2", "openai")
-    setTrustedTarget("openai/model-3", "openai")
+    setTrustedTarget("openai/model-1", "openai");
+    setTrustedTarget("openai/model-2", "openai");
+    setTrustedTarget("openai/model-3", "openai");
     addPendingRow({
       id: "existing_1",
       origin: TEST_ORIGIN,
@@ -263,7 +287,7 @@ describe("createPermissionRequest", () => {
       requestedAt: 1,
       dismissed: false,
       status: "pending",
-    })
+    });
     addPendingRow({
       id: "existing_2",
       origin: TEST_ORIGIN,
@@ -274,7 +298,7 @@ describe("createPermissionRequest", () => {
       requestedAt: 2,
       dismissed: false,
       status: "pending",
-    })
+    });
 
     await expect(
       createPermissionRequest({
@@ -283,16 +307,19 @@ describe("createPermissionRequest", () => {
         modelName: "Model 3",
         provider: "openai",
       }),
-    ).rejects.toThrow(/Too many pending permission requests for origin/)
+    ).rejects.toThrow(/Too many pending permission requests for origin/);
 
-    expect(pendingRows.map((row) => row.id)).toEqual(["existing_1", "existing_2"])
-  })
+    expect(pendingRows.map((row) => row.id)).toEqual([
+      "existing_1",
+      "existing_2",
+    ]);
+  });
 
   it("rejects when the global cap is full without evicting older requests", async () => {
-    setTrustedTarget("openai/model-1", "openai")
-    setTrustedTarget("openai/model-2", "openai")
-    setTrustedTarget("openai/model-3", "openai")
-    setTrustedTarget("openai/model-4", "openai")
+    setTrustedTarget("openai/model-1", "openai");
+    setTrustedTarget("openai/model-2", "openai");
+    setTrustedTarget("openai/model-3", "openai");
+    setTrustedTarget("openai/model-4", "openai");
     addPendingRow({
       id: "existing_1",
       origin: "https://one.test",
@@ -303,7 +330,7 @@ describe("createPermissionRequest", () => {
       requestedAt: 1,
       dismissed: false,
       status: "pending",
-    })
+    });
     addPendingRow({
       id: "existing_2",
       origin: "https://two.test",
@@ -314,7 +341,7 @@ describe("createPermissionRequest", () => {
       requestedAt: 2,
       dismissed: false,
       status: "pending",
-    })
+    });
     addPendingRow({
       id: "existing_3",
       origin: "https://three.test",
@@ -325,7 +352,7 @@ describe("createPermissionRequest", () => {
       requestedAt: 3,
       dismissed: false,
       status: "pending",
-    })
+    });
 
     await expect(
       createPermissionRequest({
@@ -334,15 +361,19 @@ describe("createPermissionRequest", () => {
         modelName: "Model 4",
         provider: "openai",
       }),
-    ).rejects.toThrow(/Too many pending permission requests$/)
+    ).rejects.toThrow(/Too many pending permission requests$/);
 
-    expect(pendingRows.map((row) => row.id)).toEqual(["existing_1", "existing_2", "existing_3"])
-  })
+    expect(pendingRows.map((row) => row.id)).toEqual([
+      "existing_1",
+      "existing_2",
+      "existing_3",
+    ]);
+  });
 
   it("sanitizes stale requests before checking caps", async () => {
-    setTrustedTarget("openai/model-1", "openai")
-    setTrustedTarget("openai/model-2", "openai")
-    setTrustedTarget("openai/model-4", "openai")
+    setTrustedTarget("openai/model-1", "openai");
+    setTrustedTarget("openai/model-2", "openai");
+    setTrustedTarget("openai/model-4", "openai");
     addPendingRow({
       id: "existing_1",
       origin: "https://one.test",
@@ -353,7 +384,7 @@ describe("createPermissionRequest", () => {
       requestedAt: 1,
       dismissed: false,
       status: "pending",
-    })
+    });
     addPendingRow({
       id: "existing_2",
       origin: "https://two.test",
@@ -364,7 +395,7 @@ describe("createPermissionRequest", () => {
       requestedAt: 2,
       dismissed: false,
       status: "pending",
-    })
+    });
     addPendingRow({
       id: "prm_stale",
       origin: "https://three.test",
@@ -375,19 +406,25 @@ describe("createPermissionRequest", () => {
       requestedAt: 3,
       dismissed: false,
       status: "pending",
-    })
-    addPendingPermission("https://three.test", "openai/model-3")
+    });
+    addPendingPermission("https://three.test", "openai/model-3");
 
     const result = await createPermissionRequest({
       origin: "https://four.test",
       modelId: "openai/model-4",
       modelName: "Model 4",
       provider: "openai",
-    })
+    });
 
-    expect(result.status).toBe("requested")
-    expect(pendingRows.map((row) => row.id)).toEqual(["existing_1", "existing_2", "prm_1"])
-    expect(permissionRows.has("https://three.test::openai/model-3")).toBe(false)
+    expect(result.status).toBe("requested");
+    expect(pendingRows.map((row) => row.id)).toEqual([
+      "existing_1",
+      "existing_2",
+      "prm_1",
+    ]);
+    expect(permissionRows.has("https://three.test::openai/model-3")).toBe(
+      false,
+    );
     expect(publishedEvents).toEqual([
       {
         type: "runtime.pending.changed",
@@ -417,6 +454,6 @@ describe("createPermissionRequest", () => {
           modelIds: ["openai/model-4"],
         },
       },
-    ])
-  })
-})
+    ]);
+  });
+});

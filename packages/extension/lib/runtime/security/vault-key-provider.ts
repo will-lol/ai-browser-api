@@ -1,16 +1,19 @@
-import { runtimeDb } from "@/lib/runtime/db/runtime-db"
-import type { RuntimeDbVaultKey } from "@/lib/runtime/db/runtime-db-types"
-import * as Context from "effect/Context"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
-import { VaultKeyUnavailableError } from "./vault-errors"
+import { runtimeDb } from "@/lib/runtime/db/runtime-db";
+import type { RuntimeDbVaultKey } from "@/lib/runtime/db/runtime-db-types";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import { VaultKeyUnavailableError } from "./vault-errors";
 
-export const AUTH_MASTER_KEY_ID = "auth-master-key" as const
-const AUTH_MASTER_KEY_VERSION = 1 as const
-const AUTH_MASTER_KEY_ALGORITHM = "AES-GCM" as const
+export const AUTH_MASTER_KEY_ID = "auth-master-key" as const;
+const AUTH_MASTER_KEY_VERSION = 1 as const;
+const AUTH_MASTER_KEY_ALGORITHM = "AES-GCM" as const;
 
 export interface VaultKeyProviderApi {
-  readonly getOrCreateAuthKey: Effect.Effect<CryptoKey, VaultKeyUnavailableError>
+  readonly getOrCreateAuthKey: Effect.Effect<
+    CryptoKey,
+    VaultKeyUnavailableError
+  >;
 }
 
 export class VaultKeyProvider extends Context.Tag(
@@ -18,11 +21,11 @@ export class VaultKeyProvider extends Context.Tag(
 )<VaultKeyProvider, VaultKeyProviderApi>() {}
 
 function isCryptoKey(value: unknown): value is CryptoKey {
-  return typeof CryptoKey !== "undefined" && value instanceof CryptoKey
+  return typeof CryptoKey !== "undefined" && value instanceof CryptoKey;
 }
 
 function createVaultKeyRow(key: CryptoKey): RuntimeDbVaultKey {
-  const timestamp = Date.now()
+  const timestamp = Date.now();
 
   return {
     id: AUTH_MASTER_KEY_ID,
@@ -31,11 +34,11 @@ function createVaultKeyRow(key: CryptoKey): RuntimeDbVaultKey {
     version: AUTH_MASTER_KEY_VERSION,
     createdAt: timestamp,
     updatedAt: timestamp,
-  }
+  };
 }
 
 export function makeVaultKeyProvider(): VaultKeyProviderApi {
-  let cachedAuthKey: CryptoKey | undefined
+  let cachedAuthKey: CryptoKey | undefined;
 
   const readStoredKey = Effect.tryPromise({
     try: () => runtimeDb.vaultKeys.get(AUTH_MASTER_KEY_ID),
@@ -56,21 +59,21 @@ export function makeVaultKeyProvider(): VaultKeyProviderApi {
               },
               false,
               ["encrypt", "decrypt"],
-            )
+            );
 
             if (!isCryptoKey(key)) {
-              throw new Error("Generated auth key is invalid")
+              throw new Error("Generated auth key is invalid");
             }
 
-            await runtimeDb.vaultKeys.put(createVaultKeyRow(key))
-            return key
+            await runtimeDb.vaultKeys.put(createVaultKeyRow(key));
+            return key;
           },
           catch: () =>
             new VaultKeyUnavailableError({
               operation: "createAuthKey",
               message: "Failed to create the auth vault key.",
             }),
-        })
+        });
       }
 
       if (!isCryptoKey(row.key)) {
@@ -79,29 +82,30 @@ export function makeVaultKeyProvider(): VaultKeyProviderApi {
             operation: "readAuthKey",
             message: "Stored auth vault key is invalid.",
           }),
-        )
+        );
       }
 
-      return Effect.succeed(row.key)
+      return Effect.succeed(row.key);
     }),
     Effect.tap((key) =>
       Effect.sync(() => {
-        cachedAuthKey = key
-      })),
-  )
+        cachedAuthKey = key;
+      }),
+    ),
+  );
 
   return {
     getOrCreateAuthKey: Effect.suspend(() => {
       if (cachedAuthKey) {
-        return Effect.succeed(cachedAuthKey)
+        return Effect.succeed(cachedAuthKey);
       }
 
-      return readStoredKey
+      return readStoredKey;
     }),
-  }
+  };
 }
 
 export const VaultKeyProviderLive = Layer.sync(
   VaultKeyProvider,
   makeVaultKeyProvider,
-)
+);

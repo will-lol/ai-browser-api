@@ -1,12 +1,9 @@
 export {
   fromRuntimeModelCallOptions,
   toRuntimeModelCallOptions,
-} from "./call-options"
+} from "./call-options";
 export {
   fromRuntimeGenerateResponse,
   toRuntimeGenerateResponse,
-} from "./generate-response"
-export {
-  fromRuntimeStreamPart,
-  toRuntimeStreamPart,
-} from "./stream-part"
+} from "./generate-response";
+export { fromRuntimeStreamPart, toRuntimeStreamPart } from "./stream-part";

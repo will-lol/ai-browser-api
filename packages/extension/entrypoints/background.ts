@@ -6,9 +6,7 @@ import {
 } from "@llm-bridge/runtime-core";
 import { browser } from "@wxt-dev/browser";
 import { defineBackground } from "wxt/utils/define-background";
-import {
-  MODELS_REFRESH_INTERVAL_MS,
-} from "@/lib/runtime/constants";
+import { MODELS_REFRESH_INTERVAL_MS } from "@/lib/runtime/constants";
 import {
   getModelsDevUpdatedAt,
   refreshModelsDevData,
@@ -93,9 +91,7 @@ async function scheduleModelsRefreshAlarm() {
   });
 }
 
-function iconColors(
-  iconState: IconState,
-): { dark: Rgb; light: Rgb } {
+function iconColors(iconState: IconState): { dark: Rgb; light: Rgb } {
   return iconState === "active" ? ACTIVE_ICON_COLORS : INACTIVE_ICON_COLORS;
 }
 
@@ -299,7 +295,8 @@ function startRuntimeCore(layers: ReturnType<typeof createRuntimeLayer>) {
         Effect.flatMap(RuntimeApplication, (app) => app.startup()).pipe(
           Effect.provide(layers.runtimeApplicationLayer),
         ),
-      ))
+      ),
+    )
     .then(() => sanitizePendingRequests())
     .catch((error) => {
       console.warn("runtime startup failed", error);

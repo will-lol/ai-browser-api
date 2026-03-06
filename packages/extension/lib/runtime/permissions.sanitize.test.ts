@@ -1,92 +1,101 @@
 // @ts-expect-error bun:test types are not part of this package's TypeScript environment.
-import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test"
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 
-const TEST_ORIGIN = "https://example.test"
-const STALE_MODEL_ID = "missing/model"
-const DISCONNECTED_MODEL_ID = "anthropic/claude-sonnet"
+const TEST_ORIGIN = "https://example.test";
+const STALE_MODEL_ID = "missing/model";
+const DISCONNECTED_MODEL_ID = "anthropic/claude-sonnet";
 
 const pendingRows: Array<{
-  id: string
-  origin: string
-  modelId: string
-  modelName: string
-  provider: string
-  capabilities: string[]
-  requestedAt: number
-  dismissed: boolean
-  status: "pending" | "resolved"
-}> = []
+  id: string;
+  origin: string;
+  modelId: string;
+  modelName: string;
+  provider: string;
+  capabilities: string[];
+  requestedAt: number;
+  dismissed: boolean;
+  status: "pending" | "resolved";
+}> = [];
 
-const permissionRows = new Map<string, {
-  id: string
-  origin: string
-  modelId: string
-  status: "allowed" | "denied" | "pending"
-  capabilities: string[]
-  updatedAt: number
-}>()
-
-const deletedRequestIds: string[] = []
-const deletedPermissionIds: string[] = []
-const publishedEvents: Array<{
-  type: string
-  payload: {
-    origin: string
-    requestIds?: string[]
-    modelIds?: string[]
+const permissionRows = new Map<
+  string,
+  {
+    id: string;
+    origin: string;
+    modelId: string;
+    status: "allowed" | "denied" | "pending";
+    capabilities: string[];
+    updatedAt: number;
   }
-}> = []
+>();
 
-let afterCommitEffects: Array<() => unknown | Promise<unknown>> = []
+const deletedRequestIds: string[] = [];
+const deletedPermissionIds: string[] = [];
+const publishedEvents: Array<{
+  type: string;
+  payload: {
+    origin: string;
+    requestIds?: string[];
+    modelIds?: string[];
+  };
+}> = [];
 
-const permissionsGetMock = mock(async (id: string) => permissionRows.get(id))
+let afterCommitEffects: Array<() => unknown | Promise<unknown>> = [];
+
+const permissionsGetMock = mock(async (id: string) => permissionRows.get(id));
 const permissionsDeleteMock = mock(async (id: string) => {
-  deletedPermissionIds.push(id)
-  permissionRows.delete(id)
-})
+  deletedPermissionIds.push(id);
+  permissionRows.delete(id);
+});
 
-const permissionsPutMock = mock(async (value: {
-  id: string
-  origin: string
-  modelId: string
-  status: "allowed" | "denied" | "pending"
-  capabilities: string[]
-  updatedAt: number
-}) => {
-  permissionRows.set(value.id, value)
-})
+const permissionsPutMock = mock(
+  async (value: {
+    id: string;
+    origin: string;
+    modelId: string;
+    status: "allowed" | "denied" | "pending";
+    capabilities: string[];
+    updatedAt: number;
+  }) => {
+    permissionRows.set(value.id, value);
+  },
+);
 
 const pendingDeleteMock = mock(async (requestId: string) => {
-  deletedRequestIds.push(requestId)
-  const index = pendingRows.findIndex((row) => row.id === requestId)
+  deletedRequestIds.push(requestId);
+  const index = pendingRows.findIndex((row) => row.id === requestId);
   if (index >= 0) {
-    pendingRows.splice(index, 1)
+    pendingRows.splice(index, 1);
   }
-})
+});
 
-const publishRuntimeEventMock = mock(async (event: {
-  type: string
-  payload: {
-    origin: string
-    requestIds?: string[]
-    modelIds?: string[]
-  }
-}) => {
-  publishedEvents.push(event)
-})
+const publishRuntimeEventMock = mock(
+  async (event: {
+    type: string;
+    payload: {
+      origin: string;
+      requestIds?: string[];
+      modelIds?: string[];
+    };
+  }) => {
+    publishedEvents.push(event);
+  },
+);
 
 mock.module("@/lib/runtime/constants", () => ({
   MAX_PENDING_REQUESTS: 32,
   MAX_PENDING_REQUESTS_PER_ORIGIN: 10,
   PENDING_REQUEST_TIMEOUT_MS: 30_000,
-}))
+}));
 
 mock.module("@/lib/runtime/db/runtime-db", () => ({
   runtimeDb: {
     pendingRequests: {
       where: (_field: string) => ({
         equals: (_value: string) => ({
-          filter: (predicate: (row: typeof pendingRows[number]) => boolean) => ({
+          filter: (
+            predicate: (row: (typeof pendingRows)[number]) => boolean,
+          ) => ({
             toArray: async () => pendingRows.filter(predicate),
           }),
         }),
@@ -99,74 +108,73 @@ mock.module("@/lib/runtime/db/runtime-db", () => ({
       put: permissionsPutMock,
     },
   },
-}))
+}));
 
 mock.module("@/lib/runtime/db/runtime-db-types", () => ({
-  runtimePermissionKey: (origin: string, modelId: string) => `${origin}::${modelId}`,
-}))
+  runtimePermissionKey: (origin: string, modelId: string) =>
+    `${origin}::${modelId}`,
+}));
 
 mock.module("@/lib/runtime/db/runtime-db-tx", () => ({
   afterCommit: (effect: () => unknown | Promise<unknown>) => {
-    afterCommitEffects.push(effect)
+    afterCommitEffects.push(effect);
   },
   runTx: async (_tables: unknown[], fn: () => Promise<unknown>) => {
-    const result = await fn()
-    const effects = afterCommitEffects
-    afterCommitEffects = []
+    const result = await fn();
+    const effects = afterCommitEffects;
+    afterCommitEffects = [];
 
     for (const effect of effects) {
-      await effect()
+      await effect();
     }
 
-    return result
+    return result;
   },
-}))
+}));
 
 mock.module("@/lib/runtime/events/runtime-events", () => ({
   publishRuntimeEvent: publishRuntimeEventMock,
   subscribeRuntimeEvents: mock(() => () => undefined),
-}))
+}));
 
 mock.module("@/lib/runtime/permission-wait", () => ({
-  mergePendingChangedRequestIds: (requestId: string, staleRequestIds: string[]) => [
-    requestId,
-    ...staleRequestIds,
-  ],
+  mergePendingChangedRequestIds: (
+    requestId: string,
+    staleRequestIds: string[],
+  ) => [requestId, ...staleRequestIds],
   waitForPermissionDecisionEventDriven: mock(async () => "resolved"),
-}))
+}));
 
 mock.module("@/lib/runtime/permission-targets", () => ({
   resolveTrustedPermissionTargets: mock(async () => new Map()),
-}))
+}));
 
 mock.module("@/lib/runtime/util", () => ({
   getModelCapabilities: (modelId: string) => [`cap:${modelId}`],
   now: () => 123,
   randomId: (prefix: string) => `${prefix}_1`,
-}))
+}));
 
-const {
-  listPendingRequests,
-  sanitizePendingPermissionRequests,
-} = await import("./permissions")
+const { listPendingRequests, sanitizePendingPermissionRequests } =
+  await import("./permissions");
 
 beforeEach(() => {
-  pendingRows.length = 0
-  permissionRows.clear()
-  deletedRequestIds.length = 0
-  deletedPermissionIds.length = 0
-  publishedEvents.length = 0
-  afterCommitEffects = []
-  permissionsGetMock.mockClear()
-  permissionsDeleteMock.mockClear()
-  permissionsPutMock.mockClear()
-  pendingDeleteMock.mockClear()
-  publishRuntimeEventMock.mockClear()
-})
+  pendingRows.length = 0;
+  permissionRows.clear();
+  deletedRequestIds.length = 0;
+  deletedPermissionIds.length = 0;
+  publishedEvents.length = 0;
+  afterCommitEffects = [];
+  permissionsGetMock.mockClear();
+  permissionsDeleteMock.mockClear();
+  permissionsPutMock.mockClear();
+  pendingDeleteMock.mockClear();
+  publishRuntimeEventMock.mockClear();
+});
 
 afterAll(() => {
-  mock.restore()
-})
+  mock.restore();
+});
 
 describe("sanitizePendingPermissionRequests", () => {
   it("removes unresolved pending requests and deletes pending permission state", async () => {
@@ -180,7 +188,7 @@ describe("sanitizePendingPermissionRequests", () => {
       requestedAt: 1,
       dismissed: false,
       status: "pending",
-    })
+    });
     permissionRows.set(`${TEST_ORIGIN}::${STALE_MODEL_ID}`, {
       id: `${TEST_ORIGIN}::${STALE_MODEL_ID}`,
       origin: TEST_ORIGIN,
@@ -188,14 +196,14 @@ describe("sanitizePendingPermissionRequests", () => {
       status: "pending",
       capabilities: ["vision"],
       updatedAt: 1,
-    })
+    });
 
-    const removedRequestIds = await sanitizePendingPermissionRequests()
+    const removedRequestIds = await sanitizePendingPermissionRequests();
 
-    expect(removedRequestIds).toEqual(["prm_stale"])
-    expect(Array.from(permissionRows.values())).toEqual([])
-    expect(deletedPermissionIds).toEqual([`${TEST_ORIGIN}::${STALE_MODEL_ID}`])
-    expect(deletedRequestIds).toEqual(["prm_stale"])
+    expect(removedRequestIds).toEqual(["prm_stale"]);
+    expect(Array.from(permissionRows.values())).toEqual([]);
+    expect(deletedPermissionIds).toEqual([`${TEST_ORIGIN}::${STALE_MODEL_ID}`]);
+    expect(deletedRequestIds).toEqual(["prm_stale"]);
     expect(publishedEvents).toEqual([
       {
         type: "runtime.pending.changed",
@@ -211,9 +219,9 @@ describe("sanitizePendingPermissionRequests", () => {
           modelIds: [STALE_MODEL_ID],
         },
       },
-    ])
-    expect(await listPendingRequests()).toEqual([])
-  })
+    ]);
+    expect(await listPendingRequests()).toEqual([]);
+  });
 
   it("removes disconnected-provider requests without deleting non-pending permissions", async () => {
     pendingRows.push({
@@ -226,7 +234,7 @@ describe("sanitizePendingPermissionRequests", () => {
       requestedAt: 1,
       dismissed: false,
       status: "pending",
-    })
+    });
     permissionRows.set(`${TEST_ORIGIN}::${DISCONNECTED_MODEL_ID}`, {
       id: `${TEST_ORIGIN}::${DISCONNECTED_MODEL_ID}`,
       origin: TEST_ORIGIN,
@@ -234,21 +242,23 @@ describe("sanitizePendingPermissionRequests", () => {
       status: "allowed",
       capabilities: ["text"],
       updatedAt: 1,
-    })
+    });
 
-    const removedRequestIds = await sanitizePendingPermissionRequests()
+    const removedRequestIds = await sanitizePendingPermissionRequests();
 
-    expect(removedRequestIds).toEqual(["prm_disconnected"])
-    expect(Array.from(permissionRows.values())).toEqual([{
-      id: `${TEST_ORIGIN}::${DISCONNECTED_MODEL_ID}`,
-      origin: TEST_ORIGIN,
-      modelId: DISCONNECTED_MODEL_ID,
-      status: "allowed",
-      capabilities: ["text"],
-      updatedAt: 1,
-    }])
-    expect(deletedPermissionIds).toEqual([])
-    expect(deletedRequestIds).toEqual(["prm_disconnected"])
+    expect(removedRequestIds).toEqual(["prm_disconnected"]);
+    expect(Array.from(permissionRows.values())).toEqual([
+      {
+        id: `${TEST_ORIGIN}::${DISCONNECTED_MODEL_ID}`,
+        origin: TEST_ORIGIN,
+        modelId: DISCONNECTED_MODEL_ID,
+        status: "allowed",
+        capabilities: ["text"],
+        updatedAt: 1,
+      },
+    ]);
+    expect(deletedPermissionIds).toEqual([]);
+    expect(deletedRequestIds).toEqual(["prm_disconnected"]);
     expect(publishedEvents).toEqual([
       {
         type: "runtime.pending.changed",
@@ -264,6 +274,6 @@ describe("sanitizePendingPermissionRequests", () => {
           modelIds: [DISCONNECTED_MODEL_ID],
         },
       },
-    ])
-  })
-})
+    ]);
+  });
+});

@@ -1,8 +1,8 @@
-import assert from "node:assert/strict"
-import { describe, it } from "node:test"
-import { anthropicPlugin } from "@/lib/runtime/plugins/anthropic"
-import { googlePlugin } from "@/lib/runtime/plugins/google"
-import { openaiPlugin } from "@/lib/runtime/plugins/openai"
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { anthropicPlugin } from "@/lib/runtime/plugins/anthropic";
+import { googlePlugin } from "@/lib/runtime/plugins/google";
+import { openaiPlugin } from "@/lib/runtime/plugins/openai";
 import {
   type AuthContext,
   type ChatTransformContext,
@@ -11,7 +11,7 @@ import {
   type RuntimeAdapterState,
   type RuntimeAdapterValidationState,
   type RuntimePlugin,
-} from "@/lib/runtime/plugin-manager"
+} from "@/lib/runtime/plugin-manager";
 
 function createAdapterContext(): RuntimeAdapterContext {
   return {
@@ -73,7 +73,7 @@ function createAdapterContext(): RuntimeAdapterContext {
         },
       },
     },
-  }
+  };
 }
 
 function createAdapterState(): RuntimeAdapterState {
@@ -81,7 +81,7 @@ function createAdapterState(): RuntimeAdapterState {
     factory: {
       npm: "@ai-sdk/google",
       factory: (() => {
-        throw new Error("not used in unit test")
+        throw new Error("not used in unit test");
       }) as RuntimeAdapterState["factory"]["factory"],
     },
     transport: {
@@ -103,12 +103,12 @@ function createAdapterState(): RuntimeAdapterState {
         fromBase: true,
       },
     },
-  }
+  };
 }
 
 function createChatContext(input: {
-  providerID: string
-  modelID: string
+  providerID: string;
+  modelID: string;
 }): ChatTransformContext {
   return {
     providerID: input.providerID,
@@ -116,14 +116,14 @@ function createChatContext(input: {
     origin: "https://example.test",
     sessionID: "session-1",
     requestID: "request-1",
-  }
+  };
 }
 
 function createAuthContext(providerID = "google"): AuthContext {
   return {
     providerID,
     provider: createAdapterContext().provider,
-  }
+  };
 }
 
 describe("PluginManager adapter hooks", () => {
@@ -147,14 +147,14 @@ describe("PluginManager adapter hooks", () => {
                     fromA: true,
                   },
                 },
-              }
+              };
             },
             async cacheKeyParts() {
               return {
                 nested: {
                   fromA: true,
                 },
-              }
+              };
             },
           },
         },
@@ -177,7 +177,7 @@ describe("PluginManager adapter hooks", () => {
                     fromB: true,
                   },
                 },
-              }
+              };
             },
             async cacheKeyParts() {
               return {
@@ -185,31 +185,34 @@ describe("PluginManager adapter hooks", () => {
                 nested: {
                   fromB: true,
                 },
-              }
+              };
             },
           },
         },
       },
-    ]
+    ];
 
-    const manager = new PluginManager(plugins)
-    const next = await manager.applyAdapterState(createAdapterContext(), createAdapterState())
+    const manager = new PluginManager(plugins);
+    const next = await manager.applyAdapterState(
+      createAdapterContext(),
+      createAdapterState(),
+    );
 
-    assert.equal(next.transport.baseURL, "https://example.test/v2")
-    assert.equal(next.transport.authType, "bearer")
+    assert.equal(next.transport.baseURL, "https://example.test/v2");
+    assert.equal(next.transport.authType, "bearer");
     assert.deepEqual(next.transport.headers, {
       "x-base": "1",
       "x-a": "a",
       "x-b": "b",
       "x-override": "b",
-    })
+    });
     assert.deepEqual(next.transport.metadata, {
       nested: {
         base: true,
         fromA: true,
         fromB: true,
       },
-    })
+    });
     assert.deepEqual(next.cacheKeyParts, {
       base: true,
       scalar: "plugin-b",
@@ -218,8 +221,8 @@ describe("PluginManager adapter hooks", () => {
         fromA: true,
         fromB: true,
       },
-    })
-  })
+    });
+  });
 
   it("merges factory options with last-writer scalar semantics", async () => {
     const plugins: RuntimePlugin[] = [
@@ -236,7 +239,7 @@ describe("PluginManager adapter hooks", () => {
                   shared: "a",
                 },
                 scalar: "a",
-              }
+              };
             },
           },
         },
@@ -254,20 +257,23 @@ describe("PluginManager adapter hooks", () => {
                   shared: "b",
                 },
                 scalar: "b",
-              }
+              };
             },
           },
         },
       },
-    ]
+    ];
 
-    const manager = new PluginManager(plugins)
-    const options = await manager.applyAdapterFactoryOptions(createAdapterContext(), {
-      nested: {
-        base: true,
+    const manager = new PluginManager(plugins);
+    const options = await manager.applyAdapterFactoryOptions(
+      createAdapterContext(),
+      {
+        nested: {
+          base: true,
+        },
+        scalar: "base",
       },
-      scalar: "base",
-    })
+    );
 
     assert.deepEqual(options, {
       nested: {
@@ -277,8 +283,8 @@ describe("PluginManager adapter hooks", () => {
         shared: "b",
       },
       scalar: "b",
-    })
-  })
+    });
+  });
 
   it("propagates adapter validation failures", async () => {
     const plugins: RuntimePlugin[] = [
@@ -289,96 +295,128 @@ describe("PluginManager adapter hooks", () => {
         hooks: {
           adapter: {
             async validate() {
-              throw new Error("adapter validation failed")
+              throw new Error("adapter validation failed");
             },
           },
         },
       },
-    ]
+    ];
 
-    const manager = new PluginManager(plugins)
+    const manager = new PluginManager(plugins);
     const state: RuntimeAdapterValidationState = {
       ...createAdapterState(),
       factoryOptions: {},
-    }
+    };
 
     await assert.rejects(
       () => manager.validateAdapterState(createAdapterContext(), state),
       /adapter validation failed/,
-    )
-  })
-})
+    );
+  });
+});
 
 describe("PluginManager request options", () => {
   it("does not inject implicit provider defaults for google, anthropic, or openai", async () => {
-    const manager = new PluginManager([googlePlugin, anthropicPlugin, openaiPlugin])
+    const manager = new PluginManager([
+      googlePlugin,
+      anthropicPlugin,
+      openaiPlugin,
+    ]);
 
     const googleOptions = {
       model: "gemini-2.0-flash",
-    }
+    };
     const anthropicOptions = {
       model: "claude-3-5-sonnet-20241022",
-    }
+    };
     const openaiOptions = {
       model: "gpt-5",
-    }
+    };
 
     assert.deepEqual(
-      await manager.applyRequestOptions(createChatContext({ providerID: "google", modelID: "gemini-2.0-flash" }), googleOptions),
+      await manager.applyRequestOptions(
+        createChatContext({
+          providerID: "google",
+          modelID: "gemini-2.0-flash",
+        }),
+        googleOptions,
+      ),
       googleOptions,
-    )
+    );
     assert.deepEqual(
       await manager.applyRequestOptions(
-        createChatContext({ providerID: "anthropic", modelID: "claude-3-5-sonnet-20241022" }),
+        createChatContext({
+          providerID: "anthropic",
+          modelID: "claude-3-5-sonnet-20241022",
+        }),
         anthropicOptions,
       ),
       anthropicOptions,
-    )
+    );
     assert.deepEqual(
-      await manager.applyRequestOptions(createChatContext({ providerID: "openai", modelID: "gpt-5" }), openaiOptions),
+      await manager.applyRequestOptions(
+        createChatContext({ providerID: "openai", modelID: "gpt-5" }),
+        openaiOptions,
+      ),
       openaiOptions,
-    )
-  })
+    );
+  });
 
   it("preserves explicit caller request options", async () => {
-    const manager = new PluginManager([googlePlugin, anthropicPlugin, openaiPlugin])
+    const manager = new PluginManager([
+      googlePlugin,
+      anthropicPlugin,
+      openaiPlugin,
+    ]);
     const googleOptions = {
       model: "gemini-2.0-flash",
       thinkingConfig: {
         includeThoughts: false,
       },
-    }
+    };
     const anthropicOptions = {
       model: "claude-3-5-sonnet-20241022",
       thinking: {
         type: "disabled",
       },
-    }
+    };
     const openaiOptions = {
       model: "gpt-5",
       store: true,
       reasoning: {
         effort: "high",
       },
-    }
+    };
 
     assert.deepEqual(
-      await manager.applyRequestOptions(createChatContext({ providerID: "google", modelID: "gemini-2.0-flash" }), googleOptions),
+      await manager.applyRequestOptions(
+        createChatContext({
+          providerID: "google",
+          modelID: "gemini-2.0-flash",
+        }),
+        googleOptions,
+      ),
       googleOptions,
-    )
+    );
     assert.deepEqual(
       await manager.applyRequestOptions(
-        createChatContext({ providerID: "anthropic", modelID: "claude-3-5-sonnet-20241022" }),
+        createChatContext({
+          providerID: "anthropic",
+          modelID: "claude-3-5-sonnet-20241022",
+        }),
         anthropicOptions,
       ),
       anthropicOptions,
-    )
+    );
     assert.deepEqual(
-      await manager.applyRequestOptions(createChatContext({ providerID: "openai", modelID: "gpt-5" }), openaiOptions),
+      await manager.applyRequestOptions(
+        createChatContext({ providerID: "openai", modelID: "gpt-5" }),
+        openaiOptions,
+      ),
       openaiOptions,
-    )
-  })
-})
+    );
+  });
+});
 
 describe("PluginManager auth flow instructions", () => {
   it("forwards authFlow.publish payloads through authorize callback", async () => {
@@ -402,36 +440,39 @@ describe("PluginManager auth flow instructions", () => {
                     code: "ABCD-1234",
                     url: "https://example.test/device",
                     autoOpened: true,
-                  })
+                  });
 
                   return {
                     type: "oauth",
                     access: "access-token",
                     refresh: "refresh-token",
-                  }
+                  };
                 },
               },
-            ]
+            ];
           },
         },
       },
-    }
+    };
 
-    const manager = new PluginManager([plugin])
-    const authContext = createAuthContext("google")
-    const resolved = await manager.resolveAuthMethod(authContext, "instruction-plugin:oauth-device")
-    assert.ok(resolved)
+    const manager = new PluginManager([plugin]);
+    const authContext = createAuthContext("google");
+    const resolved = await manager.resolveAuthMethod(
+      authContext,
+      "instruction-plugin:oauth-device",
+    );
+    assert.ok(resolved);
 
-    let publishedInstruction: Record<string, unknown> | undefined
+    let publishedInstruction: Record<string, unknown> | undefined;
     await manager.authorize(
       authContext,
       resolved,
       {},
       undefined,
       async (instruction) => {
-        publishedInstruction = instruction
+        publishedInstruction = instruction;
       },
-    )
+    );
 
     assert.deepEqual(publishedInstruction, {
       kind: "device_code",
@@ -439,6 +480,6 @@ describe("PluginManager auth flow instructions", () => {
       code: "ABCD-1234",
       url: "https://example.test/device",
       autoOpened: true,
-    })
-  })
-})
+    });
+  });
+});

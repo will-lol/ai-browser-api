@@ -1,82 +1,79 @@
-import * as Context from "effect/Context"
-import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
-import { pipe } from "effect/Function"
-import * as Layer from "effect/Layer"
-import * as Scope from "effect/Scope"
-import {
-  AuthVaultStore,
-  makeAuthVaultStore,
-} from "./auth-vault-store"
-import { makeSecretVault, SecretVault } from "./secret-vault"
-import { makeVaultKeyProvider, VaultKeyProvider } from "./vault-key-provider"
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import { pipe } from "effect/Function";
+import * as Layer from "effect/Layer";
+import * as Scope from "effect/Scope";
+import { AuthVaultStore, makeAuthVaultStore } from "./auth-vault-store";
+import { makeSecretVault, SecretVault } from "./secret-vault";
+import { makeVaultKeyProvider, VaultKeyProvider } from "./vault-key-provider";
 
 export const RuntimeSecurityLayer = Layer.effectContext(
   Effect.sync(() => {
-    const keyProvider = makeVaultKeyProvider()
-    const secretVault = makeSecretVault(keyProvider)
-    const authVaultStore = makeAuthVaultStore(secretVault)
+    const keyProvider = makeVaultKeyProvider();
+    const secretVault = makeSecretVault(keyProvider);
+    const authVaultStore = makeAuthVaultStore(secretVault);
 
     return pipe(
       Context.make(VaultKeyProvider, keyProvider),
       Context.add(SecretVault, secretVault),
       Context.add(AuthVaultStore, authVaultStore),
-    )
+    );
   }),
-)
+);
 
 type RuntimeSecurityContext = Context.Context<
   VaultKeyProvider | SecretVault | AuthVaultStore
->
+>;
 
 type RuntimeSecurityRuntime = {
-  readonly scope: Scope.CloseableScope
-  readonly context: RuntimeSecurityContext
-}
+  readonly scope: Scope.CloseableScope;
+  readonly context: RuntimeSecurityContext;
+};
 
-let runtimeSecurityPromise: Promise<RuntimeSecurityRuntime> | null = null
+let runtimeSecurityPromise: Promise<RuntimeSecurityRuntime> | null = null;
 
 async function getRuntimeSecurityRuntime() {
   if (runtimeSecurityPromise) {
-    return runtimeSecurityPromise
+    return runtimeSecurityPromise;
   }
 
   runtimeSecurityPromise = Effect.runPromise(
     Effect.gen(function* () {
-      const scope = yield* Scope.make()
-      const context = yield* Layer.buildWithScope(RuntimeSecurityLayer, scope)
+      const scope = yield* Scope.make();
+      const context = yield* Layer.buildWithScope(RuntimeSecurityLayer, scope);
 
       return {
         scope,
         context,
-      } satisfies RuntimeSecurityRuntime
+      } satisfies RuntimeSecurityRuntime;
     }),
   ).catch((error) => {
-    runtimeSecurityPromise = null
-    throw error
-  })
+    runtimeSecurityPromise = null;
+    throw error;
+  });
 
-  return runtimeSecurityPromise
+  return runtimeSecurityPromise;
 }
 
 export async function initializeRuntimeSecurityLayer() {
-  await getRuntimeSecurityRuntime()
+  await getRuntimeSecurityRuntime();
 }
 
 export async function runSecurityEffect<A, E>(
   effect: Effect.Effect<A, E, VaultKeyProvider | SecretVault | AuthVaultStore>,
 ): Promise<A> {
-  const runtime = await getRuntimeSecurityRuntime()
-  return Effect.runPromise(effect.pipe(Effect.provide(runtime.context)))
+  const runtime = await getRuntimeSecurityRuntime();
+  return Effect.runPromise(effect.pipe(Effect.provide(runtime.context)));
 }
 
 export async function disposeRuntimeSecurityLayerForTests() {
-  if (!runtimeSecurityPromise) return
+  if (!runtimeSecurityPromise) return;
 
-  const runtime = await runtimeSecurityPromise
-  runtimeSecurityPromise = null
+  const runtime = await runtimeSecurityPromise;
+  runtimeSecurityPromise = null;
 
   await Effect.runPromise(
     Scope.close(runtime.scope, Exit.succeed(undefined)),
-  ).catch(() => undefined)
+  ).catch(() => undefined);
 }

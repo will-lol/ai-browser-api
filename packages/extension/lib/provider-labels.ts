@@ -8,8 +8,8 @@ export const PROVIDER_LABELS: Record<string, string> = {
   xai: "xAI",
   deepseek: "DeepSeek",
   perplexity: "Perplexity",
-}
+};
 
 export function getProviderLabel(providerId: string) {
-  return PROVIDER_LABELS[providerId] ?? providerId
+  return PROVIDER_LABELS[providerId] ?? providerId;
 }

@@ -1,4 +1,4 @@
-import * as Schema from "effect/Schema"
+import * as Schema from "effect/Schema";
 
 export class PermissionDeniedError extends Schema.TaggedError<PermissionDeniedError>(
   "PermissionDeniedError",
@@ -85,35 +85,35 @@ export const RuntimeRpcErrorSchema = Schema.Union(
   RuntimeAuthProviderError,
   RuntimeInternalError,
   RuntimeValidationError,
-)
+);
 
-export type RuntimeRpcError = Schema.Schema.Type<typeof RuntimeRpcErrorSchema>
+export type RuntimeRpcError = Schema.Schema.Type<typeof RuntimeRpcErrorSchema>;
 
 export function isRuntimeRpcError(error: unknown): error is RuntimeRpcError {
   return (
-    error instanceof PermissionDeniedError
-    || error instanceof ModelNotFoundError
-    || error instanceof ProviderNotConnectedError
-    || error instanceof AuthFlowExpiredError
-    || error instanceof TransportProtocolError
-    || error instanceof RuntimeAuthorizationError
-    || error instanceof RuntimeUpstreamServiceError
-    || error instanceof RuntimeAuthProviderError
-    || error instanceof RuntimeInternalError
-    || error instanceof RuntimeValidationError
-  )
+    error instanceof PermissionDeniedError ||
+    error instanceof ModelNotFoundError ||
+    error instanceof ProviderNotConnectedError ||
+    error instanceof AuthFlowExpiredError ||
+    error instanceof TransportProtocolError ||
+    error instanceof RuntimeAuthorizationError ||
+    error instanceof RuntimeUpstreamServiceError ||
+    error instanceof RuntimeAuthProviderError ||
+    error instanceof RuntimeInternalError ||
+    error instanceof RuntimeValidationError
+  );
 }
 
 export function toRuntimeRpcError(error: unknown): RuntimeRpcError {
-  if (isRuntimeRpcError(error)) return error
+  if (isRuntimeRpcError(error)) return error;
 
   if (error instanceof TypeError) {
     return new RuntimeValidationError({
       message: "Invalid runtime input",
-    })
+    });
   }
 
   return new RuntimeInternalError({
     message: "Internal runtime error",
-  })
+  });
 }

@@ -1,11 +1,11 @@
-import assert from "node:assert/strict"
-import { describe, it } from "node:test"
-import { copilotAuthPlugin } from "@/lib/runtime/plugins/copilot"
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { copilotAuthPlugin } from "@/lib/runtime/plugins/copilot";
 
 describe("copilot loader transport", () => {
   it("returns github.com copilot bearer transport with default base url", async () => {
-    const loader = copilotAuthPlugin.hooks.auth?.loader
-    assert.ok(loader)
+    const loader = copilotAuthPlugin.hooks.auth?.loader;
+    assert.ok(loader);
 
     const output = await loader(
       {
@@ -38,16 +38,16 @@ describe("copilot loader transport", () => {
           options: {},
         },
       },
-    )
+    );
 
-    assert.equal(output?.transport?.authType, "bearer")
-    assert.equal(output?.transport?.apiKey, "access-token")
-    assert.equal(output?.transport?.baseURL, "https://api.githubcopilot.com")
-  })
+    assert.equal(output?.transport?.authType, "bearer");
+    assert.equal(output?.transport?.apiKey, "access-token");
+    assert.equal(output?.transport?.baseURL, "https://api.githubcopilot.com");
+  });
 
   it("returns enterprise copilot bearer transport for enterprise metadata", async () => {
-    const loader = copilotAuthPlugin.hooks.auth?.loader
-    assert.ok(loader)
+    const loader = copilotAuthPlugin.hooks.auth?.loader;
+    assert.ok(loader);
 
     const output = await loader(
       {
@@ -81,10 +81,13 @@ describe("copilot loader transport", () => {
           options: {},
         },
       },
-    )
+    );
 
-    assert.equal(output?.transport?.authType, "bearer")
-    assert.equal(output?.transport?.apiKey, "enterprise-access-token")
-    assert.equal(output?.transport?.baseURL, "https://copilot-api.company.ghe.com")
-  })
-})
+    assert.equal(output?.transport?.authType, "bearer");
+    assert.equal(output?.transport?.apiKey, "enterprise-access-token");
+    assert.equal(
+      output?.transport?.baseURL,
+      "https://copilot-api.company.ghe.com",
+    );
+  });
+});

@@ -1,1 +1,1 @@
-export * from "./runtime-event-bus"
+export * from "./runtime-event-bus";

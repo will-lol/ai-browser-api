@@ -1,12 +1,15 @@
-import assert from "node:assert/strict"
-import { describe, it } from "node:test"
-import type { RuntimeAdapterValidationState } from "@/lib/runtime/plugin-manager"
-import { geminiOAuthPlugin, resolveGeminiProjectContext } from "@/lib/runtime/plugins/gemini"
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type { RuntimeAdapterValidationState } from "@/lib/runtime/plugin-manager";
+import {
+  geminiOAuthPlugin,
+  resolveGeminiProjectContext,
+} from "@/lib/runtime/plugins/gemini";
 
 describe("resolveGeminiProjectContext", () => {
   it("uses configured project without loading managed project", async () => {
-    let loadCalls = 0
-    let onboardCalls = 0
+    let loadCalls = 0;
+    let onboardCalls = 0;
 
     const result = await resolveGeminiProjectContext(
       "access-token",
@@ -16,26 +19,26 @@ describe("resolveGeminiProjectContext", () => {
       },
       {
         loadCodeAssist: async () => {
-          loadCalls += 1
-          return null
+          loadCalls += 1;
+          return null;
         },
         onboardCodeAssist: async () => {
-          onboardCalls += 1
-          return undefined
+          onboardCalls += 1;
+          return undefined;
         },
       },
-    )
+    );
 
     assert.deepEqual(result, {
       projectId: "configured-project",
       managedProjectId: "managed-project",
-    })
-    assert.equal(loadCalls, 0)
-    assert.equal(onboardCalls, 0)
-  })
+    });
+    assert.equal(loadCalls, 0);
+    assert.equal(onboardCalls, 0);
+  });
 
   it("discovers managed project from loadCodeAssist", async () => {
-    let onboardCalls = 0
+    let onboardCalls = 0;
 
     const result = await resolveGeminiProjectContext(
       "access-token",
@@ -45,22 +48,22 @@ describe("resolveGeminiProjectContext", () => {
           cloudaicompanionProject: { id: "managed-project-123" },
         }),
         onboardCodeAssist: async () => {
-          onboardCalls += 1
-          return undefined
+          onboardCalls += 1;
+          return undefined;
         },
       },
-    )
+    );
 
     assert.deepEqual(result, {
       projectId: "managed-project-123",
       managedProjectId: "managed-project-123",
-    })
-    assert.equal(onboardCalls, 0)
-  })
+    });
+    assert.equal(onboardCalls, 0);
+  });
 
   it("runs onboarding flow when no project is available", async () => {
-    let onboardTier: string | undefined
-    let onboardProjectId: string | undefined
+    let onboardTier: string | undefined;
+    let onboardProjectId: string | undefined;
 
     const result = await resolveGeminiProjectContext(
       "access-token",
@@ -70,20 +73,20 @@ describe("resolveGeminiProjectContext", () => {
           allowedTiers: [{ id: "free-tier" }],
         }),
         onboardCodeAssist: async (_token, tierId, projectId) => {
-          onboardTier = tierId
-          onboardProjectId = projectId
-          return "managed-project-456"
+          onboardTier = tierId;
+          onboardProjectId = projectId;
+          return "managed-project-456";
         },
       },
-    )
+    );
 
-    assert.equal(onboardTier, "free-tier")
-    assert.equal(onboardProjectId, undefined)
+    assert.equal(onboardTier, "free-tier");
+    assert.equal(onboardProjectId, undefined);
     assert.deepEqual(result, {
       projectId: "managed-project-456",
       managedProjectId: "managed-project-456",
-    })
-  })
+    });
+  });
 
   it("fails with actionable error when project cannot be resolved", async () => {
     await assert.rejects(
@@ -96,7 +99,8 @@ describe("resolveGeminiProjectContext", () => {
               currentTier: { id: "standard-tier" },
               ineligibleTiers: [
                 {
-                  reasonMessage: "Project onboarding is disabled for this account.",
+                  reasonMessage:
+                    "Project onboarding is disabled for this account.",
                 },
               ],
             }),
@@ -104,14 +108,14 @@ describe("resolveGeminiProjectContext", () => {
           },
         ),
       /Google Gemini requires a Google Cloud project/,
-    )
-  })
-})
+    );
+  });
+});
 
 describe("gemini adapter hooks", () => {
   it("loader returns structured transport state for oauth auth", async () => {
-    const loader = geminiOAuthPlugin.hooks.auth?.loader
-    assert.ok(loader)
+    const loader = geminiOAuthPlugin.hooks.auth?.loader;
+    assert.ok(loader);
 
     const output = await loader(
       {
@@ -145,20 +149,20 @@ describe("gemini adapter hooks", () => {
           options: {},
         },
       },
-    )
+    );
 
-    assert.deepEqual(output?.requestOptions ?? {}, {})
-    assert.equal(output?.transport?.authType, "bearer")
-    assert.equal(output?.transport?.apiKey, "oauth-access")
+    assert.deepEqual(output?.requestOptions ?? {}, {});
+    assert.equal(output?.transport?.authType, "bearer");
+    assert.equal(output?.transport?.apiKey, "oauth-access");
     assert.equal(
       (output?.transport?.metadata as Record<string, unknown>)?.geminiProjectId,
       "configured-project",
-    )
-  })
+    );
+  });
 
   it("validate fails when gemini project resolution produced an error", async () => {
-    const validate = geminiOAuthPlugin.hooks.adapter?.validate
-    assert.ok(validate)
+    const validate = geminiOAuthPlugin.hooks.adapter?.validate;
+    assert.ok(validate);
 
     const context = {
       providerID: "google",
@@ -228,13 +232,13 @@ describe("gemini adapter hooks", () => {
           },
         },
       },
-    }
+    };
 
     const state: RuntimeAdapterValidationState = {
       factory: {
         npm: "@ai-sdk/google",
         factory: (() => {
-          throw new Error("not used")
+          throw new Error("not used");
         }) as RuntimeAdapterValidationState["factory"]["factory"],
       },
       transport: {
@@ -247,11 +251,11 @@ describe("gemini adapter hooks", () => {
       },
       cacheKeyParts: {},
       factoryOptions: {},
-    }
+    };
 
     await assert.rejects(
       () => validate(context as never, state),
       /project resolution failed/,
-    )
-  })
-})
+    );
+  });
+});

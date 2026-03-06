@@ -3,10 +3,12 @@ export const extensionQueryKeys = {
   providers: () => extensionQueryKeys.providersRoot,
 
   modelsRoot: ["models"] as const,
-  models: (input: {
-    connectedOnly?: boolean
-    providerID?: string
-  } = {}) =>
+  models: (
+    input: {
+      connectedOnly?: boolean;
+      providerID?: string;
+    } = {},
+  ) =>
     [
       ...extensionQueryKeys.modelsRoot,
       input.connectedOnly === true,
@@ -28,4 +30,4 @@ export const extensionQueryKeys = {
   authFlowRoot: ["authFlow"] as const,
   authFlow: (providerID: string) =>
     [...extensionQueryKeys.authFlowRoot, providerID] as const,
-}
+};

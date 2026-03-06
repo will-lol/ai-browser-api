@@ -1,43 +1,49 @@
-import assert from "node:assert/strict"
-import { describe, it } from "node:test"
-import type { FromClientEncoded } from "@effect/rpc/RpcMessage"
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type { FromClientEncoded } from "@effect/rpc/RpcMessage";
 import {
   RuntimeAdminRpcGroup,
   RuntimeCreatePermissionRequestInputSchema,
   RuntimePublicRpcGroup,
-} from "@llm-bridge/contracts"
-import * as Effect from "effect/Effect"
-import * as Schema from "effect/Schema"
+} from "@llm-bridge/contracts";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import {
   authorizeRuntimeRpcConnect,
   authorizeRuntimeRpcRequest,
   getRuntimeRpcAllowedTags,
-} from "./runtime-rpc-server"
+} from "./runtime-rpc-server";
 
-const EXTENSION_ID = "test-extension"
-const EXTENSION_URL = "https://extension.test/"
-const PUBLIC_ORIGIN = "https://example.test"
+const EXTENSION_ID = "test-extension";
+const EXTENSION_URL = "https://extension.test/";
+const PUBLIC_ORIGIN = "https://example.test";
 
-function makeRequest(tag: string, payload: Record<string, unknown>): FromClientEncoded {
+function makeRequest(
+  tag: string,
+  payload: Record<string, unknown>,
+): FromClientEncoded {
   return {
     _tag: "Request",
     id: "req_1",
     tag,
     payload,
     headers: {},
-  } as const as FromClientEncoded
+  } as const as FromClientEncoded;
 }
 
 describe("runtime rpc server policy", () => {
   it("derives allowed tags from the bound rpc group", () => {
-    const publicTags = getRuntimeRpcAllowedTags(RuntimePublicRpcGroup)
-    const adminTags = getRuntimeRpcAllowedTags(RuntimeAdminRpcGroup)
+    const publicTags = getRuntimeRpcAllowedTags(RuntimePublicRpcGroup);
+    const adminTags = getRuntimeRpcAllowedTags(RuntimeAdminRpcGroup);
 
-    assert.deepEqual(publicTags, new Set(RuntimePublicRpcGroup.requests.keys()))
-    assert.deepEqual(adminTags, new Set(RuntimeAdminRpcGroup.requests.keys()))
-    assert.equal(publicTags.has("listProviders"), false)
-    assert.equal(adminTags.has("listProviders"), true)
-  })
+    assert.deepEqual(
+      publicTags,
+      new Set(RuntimePublicRpcGroup.requests.keys()),
+    );
+    assert.deepEqual(adminTags, new Set(RuntimeAdminRpcGroup.requests.keys()));
+    assert.equal(publicTags.has("listProviders"), false);
+    assert.equal(adminTags.has("listProviders"), true);
+  });
 
   it("rejects public requests when the payload origin does not match the sender origin", async () => {
     const context = await Effect.runPromise(
@@ -53,7 +59,7 @@ describe("runtime rpc server policy", () => {
         extensionID: EXTENSION_ID,
         extensionURL: EXTENSION_URL,
       }),
-    )
+    );
 
     await assert.rejects(
       Effect.runPromise(
@@ -66,8 +72,8 @@ describe("runtime rpc server policy", () => {
         }),
       ),
       /RPC origin does not match caller sender origin/,
-    )
-  })
+    );
+  });
 
   it("rejects admin-only tags on the public port using the derived tag set", async () => {
     const context = await Effect.runPromise(
@@ -83,7 +89,7 @@ describe("runtime rpc server policy", () => {
         extensionID: EXTENSION_ID,
         extensionURL: EXTENSION_URL,
       }),
-    )
+    );
 
     await assert.rejects(
       Effect.runPromise(
@@ -96,8 +102,8 @@ describe("runtime rpc server policy", () => {
         }),
       ),
       /RPC method is not available for this caller/,
-    )
-  })
+    );
+  });
 
   it("lets malformed public requestPermission through policy and leaves rejection to schema validation", async () => {
     const context = await Effect.runPromise(
@@ -113,14 +119,14 @@ describe("runtime rpc server policy", () => {
         extensionID: EXTENSION_ID,
         extensionURL: EXTENSION_URL,
       }),
-    )
+    );
 
     const malformedPayload = {
       origin: PUBLIC_ORIGIN,
       action: "resolve",
       requestId: "prm_1",
       decision: "allowed",
-    } as const
+    } as const;
 
     await Effect.runPromise(
       authorizeRuntimeRpcRequest({
@@ -128,13 +134,12 @@ describe("runtime rpc server policy", () => {
         context,
         message: makeRequest("requestPermission", malformedPayload),
       }),
-    )
+    );
 
-    const decodePublic = Schema.decodeUnknownSync(RuntimeCreatePermissionRequestInputSchema)
+    const decodePublic = Schema.decodeUnknownSync(
+      RuntimeCreatePermissionRequestInputSchema,
+    );
 
-    assert.throws(
-      () => decodePublic(malformedPayload),
-      /create/,
-    )
-  })
-})
+    assert.throws(() => decodePublic(malformedPayload), /create/);
+  });
+});

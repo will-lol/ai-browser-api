@@ -1,17 +1,17 @@
-import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
-import type { RuntimePermissionDecision } from "@llm-bridge/contracts"
-import { getProviderLabel } from "@/lib/provider-labels"
-import { usePermissionUpdateMutation } from "@/lib/extension-query-hooks"
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import type { RuntimePermissionDecision } from "@llm-bridge/contracts";
+import { getProviderLabel } from "@/lib/provider-labels";
+import { usePermissionUpdateMutation } from "@/lib/extension-query-hooks";
 
 interface ModelRowProps {
-  id: string
-  name: string
-  provider: string
-  capabilities: ReadonlyArray<string>
-  permission: RuntimePermissionDecision
-  origin: string
-  disabled?: boolean
+  id: string;
+  name: string;
+  provider: string;
+  capabilities: ReadonlyArray<string>;
+  permission: RuntimePermissionDecision;
+  origin: string;
+  disabled?: boolean;
 }
 
 export function ModelRow({
@@ -23,9 +23,9 @@ export function ModelRow({
   origin,
   disabled = false,
 }: ModelRowProps) {
-  const updatePermissionMutation = usePermissionUpdateMutation(origin)
-  const isAllowed = permission === "allowed"
-  const controlsDisabled = disabled || updatePermissionMutation.isPending
+  const updatePermissionMutation = usePermissionUpdateMutation(origin);
+  const isAllowed = permission === "allowed";
+  const controlsDisabled = disabled || updatePermissionMutation.isPending;
 
   return (
     <label
@@ -63,12 +63,12 @@ export function ModelRow({
           updatePermissionMutation.mutate({
             modelId: id,
             status: checked ? "allowed" : "denied",
-          })
+          });
         }}
         disabled={controlsDisabled}
         className="shrink-0 justify-self-end"
         aria-label={`${isAllowed ? "Revoke" : "Grant"} access to ${name}`}
       />
     </label>
-  )
+  );
 }

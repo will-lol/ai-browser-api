@@ -26,7 +26,10 @@ import type {
 } from "@ai-sdk/provider";
 import * as RpcClient from "@effect/rpc/RpcClient";
 import { RpcClientError } from "@effect/rpc/RpcClientError";
-import type { FromClientEncoded, FromServerEncoded } from "@effect/rpc/RpcMessage";
+import type {
+  FromClientEncoded,
+  FromServerEncoded,
+} from "@effect/rpc/RpcMessage";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -151,7 +154,6 @@ function closeConnection(
       } catch {
         // ignored
       }
-
     },
     catch: () => undefined,
   }).pipe(Effect.orElseSucceed(() => undefined));
@@ -339,9 +341,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
                 requestId,
                 sessionID: requestId,
               }),
-            ).catch(
-              () => undefined,
-            );
+            ).catch(() => undefined);
           };
 
           abortSignal?.addEventListener("abort", onAbort, { once: true });
@@ -396,9 +396,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
                 requestId,
                 sessionID: requestId,
               }),
-            ).catch(
-              () => undefined,
-            );
+            ).catch(() => undefined);
           };
 
           abortSignal?.addEventListener("abort", onAbort, { once: true });

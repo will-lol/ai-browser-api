@@ -1,16 +1,16 @@
-import assert from "node:assert/strict"
-import { describe, it } from "node:test"
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import type {
   JSONValue,
   JSONObject,
   LanguageModelV3CallOptions,
   LanguageModelV3GenerateResult,
   LanguageModelV3StreamPart,
-} from "@ai-sdk/provider"
+} from "@ai-sdk/provider";
 import {
   encodeRuntimeWireValue,
   type RuntimeModelCallOptions,
-} from "@llm-bridge/contracts"
+} from "@llm-bridge/contracts";
 import {
   fromRuntimeGenerateResponse,
   fromRuntimeModelCallOptions,
@@ -18,14 +18,14 @@ import {
   toRuntimeGenerateResponse,
   toRuntimeModelCallOptions,
   toRuntimeStreamPart,
-} from "./index"
+} from "./index";
 
 function toJsonObject(value: Record<string, unknown>): JSONObject {
-  return value as unknown as JSONObject
+  return value as unknown as JSONObject;
 }
 
 function toJsonValue(value: unknown): JSONValue {
-  return value as JSONValue
+  return value as JSONValue;
 }
 
 function sanitize(value: unknown): unknown {
@@ -33,21 +33,21 @@ function sanitize(value: unknown): unknown {
     return {
       __type: "url",
       href: value.toString(),
-    }
+    };
   }
 
   if (value instanceof Uint8Array) {
     return {
       __type: "uint8array",
       data: Array.from(value),
-    }
+    };
   }
 
   if (value instanceof Date) {
     return {
       __type: "date",
       iso: value.toISOString(),
-    }
+    };
   }
 
   if (value instanceof Error) {
@@ -55,48 +55,54 @@ function sanitize(value: unknown): unknown {
       __type: "error",
       name: value.name,
       message: value.message,
-    }
+    };
   }
 
   if (Array.isArray(value)) {
-    return value.map((entry) => sanitize(entry))
+    return value.map((entry) => sanitize(entry));
   }
 
   if (typeof value === "object" && value !== null) {
-    const output: Record<string, unknown> = {}
+    const output: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
-      if (entry === undefined) continue
-      output[key] = sanitize(entry)
+      if (entry === undefined) continue;
+      output[key] = sanitize(entry);
     }
-    return output
+    return output;
   }
 
-  return value
+  return value;
 }
 
-type ProviderCallOptionsRoundtrip = Omit<LanguageModelV3CallOptions, "abortSignal">
+type ProviderCallOptionsRoundtrip = Omit<
+  LanguageModelV3CallOptions,
+  "abortSignal"
+>;
 type ProviderAssistantMessage = Extract<
   ProviderCallOptionsRoundtrip["prompt"][number],
   { role: "assistant" }
->
+>;
 type ProviderAssistantToolCallPart = Extract<
   ProviderAssistantMessage["content"][number],
   { type: "tool-call" }
->
+>;
 type ProviderFunctionTool = Extract<
   NonNullable<ProviderCallOptionsRoundtrip["tools"]>[number],
   { type: "function" }
->
+>;
 type ProviderAssistantContentToolResultPart = Extract<
   ProviderAssistantMessage["content"][number],
   { type: "tool-result" }
 > & {
   output: Extract<
-    Extract<ProviderAssistantMessage["content"][number], { type: "tool-result" }>["output"],
+    Extract<
+      ProviderAssistantMessage["content"][number],
+      { type: "tool-result" }
+    >["output"],
     { type: "content" }
-  >
-}
-type FinishStreamPart = Extract<LanguageModelV3StreamPart, { type: "finish" }>
+  >;
+};
+type FinishStreamPart = Extract<LanguageModelV3StreamPart, { type: "finish" }>;
 
 const providerCallOptions = {
   prompt: [
@@ -368,12 +374,17 @@ const providerCallOptions = {
       },
     }),
   },
-} as unknown as LanguageModelV3CallOptions
-const providerPromptMessages = providerCallOptions.prompt as ProviderCallOptionsRoundtrip["prompt"]
-const providerAssistantMessage = providerPromptMessages[2] as ProviderAssistantMessage
-const providerAssistantContentToolResult = providerAssistantMessage.content[9] as ProviderAssistantContentToolResultPart
-const providerTools = providerCallOptions.tools as NonNullable<ProviderCallOptionsRoundtrip["tools"]>
-const providerFunctionTool = providerTools[0] as ProviderFunctionTool
+} as unknown as LanguageModelV3CallOptions;
+const providerPromptMessages =
+  providerCallOptions.prompt as ProviderCallOptionsRoundtrip["prompt"];
+const providerAssistantMessage =
+  providerPromptMessages[2] as ProviderAssistantMessage;
+const providerAssistantContentToolResult = providerAssistantMessage
+  .content[9] as ProviderAssistantContentToolResultPart;
+const providerTools = providerCallOptions.tools as NonNullable<
+  ProviderCallOptionsRoundtrip["tools"]
+>;
+const providerFunctionTool = providerTools[0] as ProviderFunctionTool;
 
 const normalizedProviderCallOptions = {
   ...providerCallOptions,
@@ -471,7 +482,7 @@ const normalizedProviderCallOptions = {
       },
     }),
   },
-} as unknown as Omit<LanguageModelV3CallOptions, "abortSignal">
+} as unknown as Omit<LanguageModelV3CallOptions, "abortSignal">;
 
 const runtimeCallOptions = {
   prompt: [
@@ -495,7 +506,7 @@ const runtimeCallOptions = {
   responseFormat: {
     type: "text",
   },
-} satisfies RuntimeModelCallOptions
+} satisfies RuntimeModelCallOptions;
 
 const generateResult = {
   content: [
@@ -547,7 +558,7 @@ const generateResult = {
       type: "tool-call",
       toolCallId: "tool-call-9",
       toolName: "lookup",
-      input: "{\"query\":\"value\"}",
+      input: '{"query":"value"}',
       providerExecuted: true,
       dynamic: true,
     },
@@ -620,7 +631,7 @@ const generateResult = {
       message: "other warning",
     },
   ],
-} as unknown as LanguageModelV3GenerateResult
+} as unknown as LanguageModelV3GenerateResult;
 
 const normalizedGenerateResult = {
   ...generateResult,
@@ -650,7 +661,7 @@ const normalizedGenerateResult = {
       request: "metadata",
     }),
   },
-} as unknown as LanguageModelV3GenerateResult
+} as unknown as LanguageModelV3GenerateResult;
 
 const streamParts = [
   {
@@ -696,7 +707,7 @@ const streamParts = [
   {
     type: "tool-input-delta",
     id: "tool-1",
-    delta: "{\"query\":\"value\"}",
+    delta: '{"query":"value"}',
   },
   {
     type: "tool-input-end",
@@ -711,7 +722,7 @@ const streamParts = [
     type: "tool-call",
     toolCallId: "tool-call-10",
     toolName: "lookup",
-    input: "{\"query\":\"value\"}",
+    input: '{"query":"value"}',
     providerExecuted: true,
     dynamic: true,
   },
@@ -809,8 +820,8 @@ const streamParts = [
     type: "error",
     error: new TypeError("stream error"),
   },
-] as unknown as Array<LanguageModelV3StreamPart>
-const finishStreamPart = streamParts[18] as FinishStreamPart
+] as unknown as Array<LanguageModelV3StreamPart>;
+const finishStreamPart = streamParts[18] as FinishStreamPart;
 
 const normalizedStreamParts = [
   {
@@ -842,18 +853,21 @@ const normalizedStreamParts = [
     },
   },
   ...streamParts.slice(19),
-] as unknown as Array<LanguageModelV3StreamPart>
+] as unknown as Array<LanguageModelV3StreamPart>;
 
 describe("bridge codecs", () => {
   it("roundtrips provider call options and preserves expected normalization", () => {
     const roundtrip = fromRuntimeModelCallOptions(
       toRuntimeModelCallOptions(providerCallOptions),
-    )
+    );
 
-    assert.deepEqual(sanitize(roundtrip), sanitize(normalizedProviderCallOptions))
+    assert.deepEqual(
+      sanitize(roundtrip),
+      sanitize(normalizedProviderCallOptions),
+    );
     assert.deepEqual(roundtrip.headers, {
       authorization: "Bearer token",
-    })
+    });
     assert.deepEqual(roundtrip.providerOptions, {
       openai: toJsonObject({
         keep: "present",
@@ -861,14 +875,14 @@ describe("bridge codecs", () => {
           on: true,
         },
       }),
-    })
+    });
     assert.deepEqual(roundtrip.prompt[0]?.providerOptions, {
       openai: toJsonObject({
         cache: "on",
       }),
-    })
-    const functionTool = roundtrip.tools?.[0]
-    assert.equal(functionTool?.type, "function")
+    });
+    const functionTool = roundtrip.tools?.[0];
+    assert.equal(functionTool?.type, "function");
     if (functionTool?.type === "function") {
       assert.deepEqual(functionTool.inputExamples, [
         {
@@ -876,10 +890,10 @@ describe("bridge codecs", () => {
             value: "sample",
           }),
         },
-      ])
+      ]);
     }
 
-    const assistantMessage = roundtrip.prompt[2] as ProviderAssistantMessage
+    const assistantMessage = roundtrip.prompt[2] as ProviderAssistantMessage;
     assert.deepEqual(assistantMessage?.content[5], {
       type: "tool-result",
       toolCallId: "tool-call-2",
@@ -892,27 +906,29 @@ describe("bridge codecs", () => {
         providerOptions: undefined,
       },
       providerOptions: undefined,
-    })
-    const toolCallInput = assistantMessage?.content[3] as ProviderAssistantToolCallPart | undefined
-    assert.equal(toolCallInput?.type, "tool-call")
+    });
+    const toolCallInput = assistantMessage?.content[3] as
+      | ProviderAssistantToolCallPart
+      | undefined;
+    assert.equal(toolCallInput?.type, "tool-call");
     if (toolCallInput?.type === "tool-call") {
-      const toolCallInputValue = toolCallInput.input as Record<string, unknown>
-      assert.equal("optional" in toolCallInputValue, true)
-      assert.equal(toolCallInputValue.optional, undefined)
+      const toolCallInputValue = toolCallInput.input as Record<string, unknown>;
+      assert.equal("optional" in toolCallInputValue, true);
+      assert.equal(toolCallInputValue.optional, undefined);
     }
 
-    const providerTool = roundtrip.tools?.[1]
-    assert.equal(providerTool?.type, "provider")
+    const providerTool = roundtrip.tools?.[1];
+    assert.equal(providerTool?.type, "provider");
     if (providerTool?.type === "provider") {
-      assert.equal("missing" in providerTool.args, true)
-      assert.equal(providerTool.args.missing, undefined)
+      assert.equal("missing" in providerTool.args, true);
+      assert.equal(providerTool.args.missing, undefined);
     }
-  })
+  });
 
   it("normalizes runtime provider tool ids when decoding call options", () => {
     const roundtrip = toRuntimeModelCallOptions(
       fromRuntimeModelCallOptions(runtimeCallOptions),
-    )
+    );
 
     assert.deepEqual(
       sanitize(roundtrip),
@@ -925,85 +941,96 @@ describe("bridge codecs", () => {
           },
         ],
       } satisfies RuntimeModelCallOptions),
-    )
-    assert.equal(roundtrip.tools?.[0]?.type, "provider")
+    );
+    assert.equal(roundtrip.tools?.[0]?.type, "provider");
     if (roundtrip.tools?.[0]?.type === "provider") {
-      assert.equal(roundtrip.tools[0].id, "bridge.lookup")
+      assert.equal(roundtrip.tools[0].id, "bridge.lookup");
     }
-  })
+  });
 
   it("roundtrips generate responses and preserves expected normalization", () => {
     const roundtrip = fromRuntimeGenerateResponse(
       toRuntimeGenerateResponse(generateResult),
-    )
+    );
 
-    assert.deepEqual(sanitize(roundtrip), sanitize(normalizedGenerateResult))
+    assert.deepEqual(sanitize(roundtrip), sanitize(normalizedGenerateResult));
     assert.deepEqual(roundtrip.providerMetadata, {
       openai: toJsonObject({
         request: "metadata",
       }),
-    })
-    assert.deepEqual(roundtrip.usage.raw, toJsonObject({
-      measured: true,
-    }))
-    const toolResult = roundtrip.content[8]
-    assert.equal(toolResult?.type, "tool-result")
+    });
+    assert.deepEqual(
+      roundtrip.usage.raw,
+      toJsonObject({
+        measured: true,
+      }),
+    );
+    const toolResult = roundtrip.content[8];
+    assert.equal(toolResult?.type, "tool-result");
     if (toolResult?.type === "tool-result") {
-      assert.deepEqual(toolResult.result, {})
+      assert.deepEqual(toolResult.result, {});
     }
-    assert.equal(roundtrip.request !== undefined, true)
-    assert.equal(roundtrip.request?.body !== undefined, true)
+    assert.equal(roundtrip.request !== undefined, true);
+    assert.equal(roundtrip.request?.body !== undefined, true);
     if (roundtrip.request?.body && typeof roundtrip.request.body === "object") {
-      assert.equal("optional" in roundtrip.request.body, true)
+      assert.equal("optional" in roundtrip.request.body, true);
       assert.equal(
         (roundtrip.request.body as Record<string, unknown>).optional,
         undefined,
-      )
+      );
     }
-  })
+  });
 
   it("roundtrips stream parts and preserves expected normalization", () => {
     const roundtrip = streamParts.map((part) =>
-      fromRuntimeStreamPart(toRuntimeStreamPart(part)))
+      fromRuntimeStreamPart(toRuntimeStreamPart(part)),
+    );
 
-    assert.deepEqual(sanitize(roundtrip), sanitize(normalizedStreamParts))
-    const firstPart = roundtrip[0]
-    assert.equal(firstPart?.type, "text-start")
+    assert.deepEqual(sanitize(roundtrip), sanitize(normalizedStreamParts));
+    const firstPart = roundtrip[0];
+    assert.equal(firstPart?.type, "text-start");
     if (firstPart?.type === "text-start") {
       assert.deepEqual(firstPart.providerMetadata, {
         openai: toJsonObject({
           keep: "text-start",
         }),
-      })
+      });
     }
 
-    const streamToolResult = roundtrip[11]
-    assert.equal(streamToolResult?.type, "tool-result")
+    const streamToolResult = roundtrip[11];
+    assert.equal(streamToolResult?.type, "tool-result");
     if (streamToolResult?.type === "tool-result") {
-      assert.deepEqual(streamToolResult.result, {})
+      assert.deepEqual(streamToolResult.result, {});
     }
 
-    const finishPart = roundtrip[18]
-    assert.equal(finishPart?.type, "finish")
+    const finishPart = roundtrip[18];
+    assert.equal(finishPart?.type, "finish");
     if (finishPart?.type === "finish") {
-      assert.deepEqual(finishPart.usage.raw, toJsonObject({
-        keep: true,
-      }))
+      assert.deepEqual(
+        finishPart.usage.raw,
+        toJsonObject({
+          keep: true,
+        }),
+      );
       assert.deepEqual(finishPart.providerMetadata, {
         openai: toJsonObject({
           keep: "finish",
         }),
-      })
+      });
     }
 
-    const rawPart = roundtrip[19]
-    assert.equal(rawPart?.type, "raw")
-    if (rawPart?.type === "raw" && typeof rawPart.rawValue === "object" && rawPart.rawValue !== null) {
-      assert.equal("optional" in rawPart.rawValue, true)
+    const rawPart = roundtrip[19];
+    assert.equal(rawPart?.type, "raw");
+    if (
+      rawPart?.type === "raw" &&
+      typeof rawPart.rawValue === "object" &&
+      rawPart.rawValue !== null
+    ) {
+      assert.equal("optional" in rawPart.rawValue, true);
       assert.equal(
         (rawPart.rawValue as Record<string, unknown>).optional,
         undefined,
-      )
+      );
     }
-  })
-})
+  });
+});

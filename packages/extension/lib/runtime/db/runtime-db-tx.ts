@@ -1,28 +1,28 @@
-import Dexie, { type Table, type Transaction } from "dexie"
-import { runtimeDb } from "@/lib/runtime/db/runtime-db"
+import Dexie, { type Table, type Transaction } from "dexie";
+import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 
-type TxMode = "r" | "rw"
-type TxEffect = () => void | Promise<void>
+type TxMode = "r" | "rw";
+type TxEffect = () => void | Promise<void>;
 
-const effectsByTransaction = new WeakMap<Transaction, TxEffect[]>()
+const effectsByTransaction = new WeakMap<Transaction, TxEffect[]>();
 
 export function afterCommit(effect: TxEffect) {
-  const transaction = Dexie.currentTransaction
+  const transaction = Dexie.currentTransaction;
   if (!transaction) {
-    throw new Error("afterCommit must be called inside runTx")
+    throw new Error("afterCommit must be called inside runTx");
   }
 
-  const effects = effectsByTransaction.get(transaction) ?? []
-  effects.push(effect)
-  effectsByTransaction.set(transaction, effects)
+  const effects = effectsByTransaction.get(transaction) ?? [];
+  effects.push(effect);
+  effectsByTransaction.set(transaction, effects);
 }
 
 async function drainAfterCommitEffects(effects: ReadonlyArray<TxEffect>) {
   for (const effect of effects) {
     try {
-      await effect()
+      await effect();
     } catch (error) {
-      console.warn("runTx afterCommit effect failed", error)
+      console.warn("runTx afterCommit effect failed", error);
     }
   }
 }
@@ -31,47 +31,45 @@ export async function runTx<T>(
   mode: TxMode,
   tables: Array<Table>,
   fn: () => Promise<T> | T,
-): Promise<T>
+): Promise<T>;
 export async function runTx<T>(
   tables: Array<Table>,
   fn: () => Promise<T> | T,
-): Promise<T>
+): Promise<T>;
 export async function runTx<T>(
   modeOrTables: TxMode | Array<Table>,
-  maybeTablesOrFn:
-    | Array<Table>
-    | (() => Promise<T> | T),
+  maybeTablesOrFn: Array<Table> | (() => Promise<T> | T),
   maybeFn?: () => Promise<T> | T,
 ): Promise<T> {
-  const mode: TxMode = Array.isArray(modeOrTables) ? "rw" : modeOrTables
+  const mode: TxMode = Array.isArray(modeOrTables) ? "rw" : modeOrTables;
   const tables = Array.isArray(modeOrTables)
     ? modeOrTables
-    : (maybeTablesOrFn as Array<Table>)
+    : (maybeTablesOrFn as Array<Table>);
   const fn = (Array.isArray(modeOrTables) ? maybeTablesOrFn : maybeFn) as () =>
     | Promise<T>
-    | T
+    | T;
 
-  let transactionRef: Transaction | undefined
+  let transactionRef: Transaction | undefined;
 
   const result = await runtimeDb.transaction(mode, tables, async () => {
-    const transaction = Dexie.currentTransaction
-    if (!transaction) throw new Error("Dexie transaction unavailable")
+    const transaction = Dexie.currentTransaction;
+    if (!transaction) throw new Error("Dexie transaction unavailable");
 
-    transactionRef = transaction
-    effectsByTransaction.set(transaction, [])
+    transactionRef = transaction;
+    effectsByTransaction.set(transaction, []);
 
-    return fn()
-  })
+    return fn();
+  });
 
-  if (!transactionRef) return result
+  if (!transactionRef) return result;
 
-  const effects = effectsByTransaction.get(transactionRef) ?? []
-  effectsByTransaction.delete(transactionRef)
+  const effects = effectsByTransaction.get(transactionRef) ?? [];
+  effectsByTransaction.delete(transactionRef);
 
   // Transaction success is defined by commit outcome only.
   if (effects.length > 0) {
-    void drainAfterCommitEffects(effects)
+    void drainAfterCommitEffects(effects);
   }
 
-  return result
+  return result;
 }
