@@ -8,14 +8,16 @@ import type {
   RuntimeDbPendingRequest,
   RuntimeDbPermission,
   RuntimeDbProvider,
+  RuntimeDbVaultKey,
 } from "@/lib/runtime/db/runtime-db-types"
 
-const RUNTIME_DB_NAME = "llm-bridge-runtime-db-v2"
+export const RUNTIME_DB_NAME = "llm-bridge-runtime-db-v3"
 
 export class RuntimeDb extends Dexie {
   providers!: EntityTable<RuntimeDbProvider, "id">
   models!: EntityTable<RuntimeDbModel, "id">
   auth!: EntityTable<RuntimeDbAuth, "providerID">
+  vaultKeys!: EntityTable<RuntimeDbVaultKey, "id">
   origins!: EntityTable<RuntimeDbOrigin, "origin">
   permissions!: EntityTable<RuntimeDbPermission, "id">
   pendingRequests!: EntityTable<RuntimeDbPendingRequest, "id">
@@ -28,7 +30,8 @@ export class RuntimeDb extends Dexie {
     this.version(1).stores({
       providers: "id, connected, updatedAt, name",
       models: "id, providerID, updatedAt",
-      auth: "providerID, updatedAt",
+      auth: "providerID, recordType, updatedAt",
+      vaultKeys: "id, updatedAt",
       origins: "origin, enabled, updatedAt",
       permissions: "id, [origin+modelId], origin, modelId, status, updatedAt",
       pendingRequests: "id, origin, status, dismissed, requestedAt, modelId",

@@ -1,6 +1,3 @@
-import type {
-  AuthRecord,
-} from "@/lib/runtime/auth-store"
 import type { RuntimeConfig } from "@/lib/runtime/config-store"
 import type { PermissionRequest, PermissionStatus } from "@/lib/runtime/permissions"
 import type { ProviderInfo, ProviderModelInfo } from "@/lib/runtime/provider-registry"
@@ -26,7 +23,20 @@ export interface RuntimeDbModel {
 
 export interface RuntimeDbAuth {
   providerID: string
-  record: AuthRecord
+  recordType: "api" | "oauth"
+  version: number
+  iv: Uint8Array
+  ciphertext: ArrayBuffer
+  createdAt: number
+  updatedAt: number
+}
+
+export interface RuntimeDbVaultKey {
+  id: "auth-master-key"
+  key: CryptoKey
+  algorithm: "AES-GCM"
+  version: number
+  createdAt: number
   updatedAt: number
 }
 

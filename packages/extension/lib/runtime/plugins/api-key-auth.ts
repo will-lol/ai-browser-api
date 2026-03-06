@@ -19,7 +19,7 @@ export const apiKeyAuthPlugin: RuntimePlugin = {
                 label: ctx.provider.env[0] ?? `${ctx.providerID.toUpperCase()}_API_KEY`,
                 placeholder: "Paste API key",
                 required: true,
-                description: "Stored encrypted in extension local storage.",
+                description: "Stored by the extension using a browser-managed non-exportable key.",
               },
             ],
             async authorize(input) {

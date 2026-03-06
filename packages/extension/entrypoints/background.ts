@@ -22,6 +22,7 @@ import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 import { subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events";
 import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager";
 import { makeRuntimeCoreInfrastructureLayer } from "@/lib/runtime-app/runtime-adapters";
+import { initializeRuntimeSecurityLayer } from "@/lib/runtime/security/runtime-security";
 import {
   RuntimeAdminRpcHandlersLive,
   RuntimePublicRpcHandlersLive,
@@ -292,11 +293,13 @@ async function sanitizePendingRequests() {
 }
 
 function startRuntimeCore(layers: ReturnType<typeof createRuntimeLayer>) {
-  const startup = Effect.runPromise(
-    Effect.flatMap(RuntimeApplication, (app) => app.startup()).pipe(
-      Effect.provide(layers.runtimeApplicationLayer),
-    ),
-  )
+  const startup = initializeRuntimeSecurityLayer()
+    .then(() =>
+      Effect.runPromise(
+        Effect.flatMap(RuntimeApplication, (app) => app.startup()).pipe(
+          Effect.provide(layers.runtimeApplicationLayer),
+        ),
+      ))
     .then(() => sanitizePendingRequests())
     .catch((error) => {
       console.warn("runtime startup failed", error);

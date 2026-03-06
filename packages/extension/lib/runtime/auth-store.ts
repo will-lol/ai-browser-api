@@ -1,125 +1,57 @@
-import { runtimeDb } from "@/lib/runtime/db/runtime-db"
-import { afterCommit, runTx } from "@/lib/runtime/db/runtime-db-tx"
-import { publishRuntimeEvent } from "@/lib/runtime/events/runtime-events"
-import { now } from "@/lib/runtime/util"
+import { RuntimeInternalError } from "@llm-bridge/contracts"
+import * as Effect from "effect/Effect"
+import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-types"
+import { AuthVaultStore } from "@/lib/runtime/security/auth-vault-store"
+import { runSecurityEffect } from "@/lib/runtime/security/runtime-security"
 
-export type AuthRecord =
-  | {
-      type: "api"
-      key: string
-      metadata?: Record<string, string>
-      createdAt: number
-      updatedAt: number
-    }
-  | {
-      type: "oauth"
-      access: string
-      refresh?: string
-      expiresAt?: number
-      accountId?: string
-      metadata?: Record<string, string>
-      createdAt: number
-      updatedAt: number
-    }
+export type { AuthRecord, AuthResult } from "@/lib/runtime/auth-types"
 
-export type AuthResult =
-  | { type: "api"; key: string; metadata?: Record<string, string> }
-  | {
-      type: "oauth"
-      access: string
-      refresh?: string
-      expiresAt?: number
-      accountId?: string
-      metadata?: Record<string, string>
-    }
+function authStoreInternalError(message: string) {
+  return new RuntimeInternalError({
+    operation: "auth-store",
+    message,
+  })
+}
 
 export async function getAuth(providerID: string) {
-  return runtimeDb.auth.get(providerID).then((row) => row?.record)
+  return runSecurityEffect(
+    Effect.flatMap(AuthVaultStore, (store) => store.getAuth(providerID)).pipe(
+      Effect.mapError(() =>
+        authStoreInternalError(
+          `Failed to load auth for provider ${providerID}.`,
+        )),
+    ),
+  )
 }
 
 export async function listAuth() {
-  const rows = await runtimeDb.auth.toArray()
-  return Object.fromEntries(rows.map((row) => [row.providerID, row.record] as const))
+  return runSecurityEffect(
+    Effect.flatMap(AuthVaultStore, (store) => store.listAuth).pipe(
+      Effect.mapError(() =>
+        authStoreInternalError("Failed to list stored provider auth."),
+      ),
+    ),
+  )
 }
 
 export async function setAuth(providerID: string, value: AuthResult) {
-  const existing = await getAuth(providerID)
-  const createdAt = existing?.createdAt ?? now()
-  const updatedAt = now()
-
-  const auth: AuthRecord =
-    value.type === "api"
-      ? {
-          type: "api",
-          key: value.key,
-          metadata: value.metadata,
-          createdAt,
-          updatedAt,
-        }
-      : {
-          type: "oauth",
-          access: value.access,
-          refresh: value.refresh,
-          expiresAt: value.expiresAt,
-          accountId: value.accountId,
-          metadata: value.metadata,
-          createdAt,
-          updatedAt,
-        }
-
-  await runTx([runtimeDb.auth, runtimeDb.providers], async () => {
-    await runtimeDb.auth.put({
-      providerID,
-      record: auth,
-      updatedAt,
-    })
-
-    const provider = await runtimeDb.providers.get(providerID)
-    if (provider) {
-      await runtimeDb.providers.put({
-        ...provider,
-        connected: true,
-        updatedAt,
-      })
-    }
-
-    afterCommit(async () => {
-      await publishRuntimeEvent({
-        type: "runtime.auth.changed",
-        payload: { providerID },
-      })
-      await publishRuntimeEvent({
-        type: "runtime.providers.changed",
-        payload: { providerIDs: [providerID] },
-      })
-    })
-  })
-
-  return auth
+  return runSecurityEffect(
+    Effect.flatMap(AuthVaultStore, (store) => store.setAuth(providerID, value)).pipe(
+      Effect.mapError(() =>
+        authStoreInternalError(
+          `Failed to persist auth for provider ${providerID}.`,
+        )),
+    ),
+  )
 }
 
 export async function removeAuth(providerID: string) {
-  await runTx([runtimeDb.auth, runtimeDb.providers], async () => {
-    await runtimeDb.auth.delete(providerID)
-
-    const provider = await runtimeDb.providers.get(providerID)
-    if (provider) {
-      await runtimeDb.providers.put({
-        ...provider,
-        connected: false,
-        updatedAt: now(),
-      })
-    }
-
-    afterCommit(async () => {
-      await publishRuntimeEvent({
-        type: "runtime.auth.changed",
-        payload: { providerID },
-      })
-      await publishRuntimeEvent({
-        type: "runtime.providers.changed",
-        payload: { providerIDs: [providerID] },
-      })
-    })
-  })
+  await runSecurityEffect(
+    Effect.flatMap(AuthVaultStore, (store) => store.removeAuth(providerID)).pipe(
+      Effect.mapError(() =>
+        authStoreInternalError(
+          `Failed to remove auth for provider ${providerID}.`,
+        )),
+    ),
+  )
 }
