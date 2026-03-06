@@ -1,4 +1,5 @@
 import {
+  ModelNotFoundError,
   decodeRuntimeWireValue,
   encodeRuntimeWireValue,
   encodeSupportedUrls,
@@ -43,6 +44,7 @@ import {
   type RuntimeLanguageModelCallOptions,
 } from "@/lib/runtime/ai/language-model-runtime"
 import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager"
+import { resolveTrustedPermissionTarget } from "@/lib/runtime/permission-targets"
 import { parseProviderModel } from "@/lib/runtime/util"
 import {
   getOriginState,
@@ -864,6 +866,19 @@ export function makeRuntimeCoreInfrastructureLayer() {
 
   const MetaRepoLive = Layer.succeed(MetaRepository, {
     parseProviderModel: (modelID: string) => parseProviderModel(modelID),
+    resolvePermissionTarget: (modelID: string) =>
+      toEffect(async () => {
+        await ensureProviderCatalog()
+        const target = await resolveTrustedPermissionTarget(modelID)
+        if (target) {
+          return target
+        }
+
+        throw new ModelNotFoundError({
+          modelId: modelID,
+          message: `Model ${modelID} was not found`,
+        })
+      }),
   })
 
   const ModelExecutionRepoLive = Layer.succeed(ModelExecutionRepository, {

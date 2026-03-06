@@ -158,9 +158,9 @@ function createRuntimeApplication(
                 id: "prm_1",
                 origin: input.origin,
                 modelId: input.modelId,
-                modelName: input.modelName,
-                provider: input.provider,
-                capabilities: input.capabilities ?? [],
+                modelName: "GPT-4o mini",
+                provider: "openai",
+                capabilities: ["text"],
                 requestedAt: 1,
                 dismissed: false,
                 status: "pending" as const,
@@ -286,9 +286,6 @@ describe("runtime rpc handlers", () => {
         action: "create",
         origin: TEST_ORIGIN,
         modelId: TEST_MODEL_ID,
-        modelName: "GPT-4o mini",
-        provider: "openai",
-        capabilities: ["text"],
       })),
       new RegExp(`Origin ${TEST_ORIGIN} is disabled`),
     )
@@ -305,9 +302,6 @@ describe("runtime rpc handlers", () => {
       action: "create",
       origin: TEST_ORIGIN,
       modelId: TEST_MODEL_ID,
-      modelName: "GPT-4o mini",
-      provider: "openai",
-      capabilities: ["text"],
     }))
 
     assert.equal(result.status, "requested")
@@ -339,8 +333,6 @@ describe("runtime rpc handlers", () => {
         action: "create",
         origin: TEST_ORIGIN,
         modelId: TEST_MODEL_ID,
-        modelName: "GPT-4o mini",
-        provider: "openai",
       })),
       /Unexpected permission response for create action/,
     )

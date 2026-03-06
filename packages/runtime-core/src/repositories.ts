@@ -27,6 +27,13 @@ import * as Context from "effect/Context"
 
 type AppEffect<A> = Effect.Effect<A, RuntimeRpcError>
 
+export interface ResolvedPermissionTarget {
+  modelId: string
+  modelName: string
+  provider: string
+  capabilities: ReadonlyArray<string>
+}
+
 export interface ProvidersRepositoryApi {
   listProviders: () => AppEffect<ReadonlyArray<RuntimeProviderSummary>>
 }
@@ -131,6 +138,7 @@ export interface MetaRepositoryApi {
     providerID: string
     modelID: string
   }
+  resolvePermissionTarget: (modelID: string) => AppEffect<ResolvedPermissionTarget>
 }
 
 export class MetaRepository extends Context.Tag("@llm-bridge/runtime-core/MetaRepository")<

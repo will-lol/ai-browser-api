@@ -186,12 +186,13 @@ export const PermissionServiceLive = Layer.effect(
         const permission = yield* permissions.getModelPermission(origin, modelID)
         if (permission === "allowed") return
 
-        const parsed = meta.parseProviderModel(modelID)
+        const target = yield* meta.resolvePermissionTarget(modelID)
         const result = yield* permissions.createPermissionRequest({
           origin,
-          modelId: modelID,
-          provider: parsed.providerID,
-          modelName: parsed.modelID,
+          modelId: target.modelId,
+          provider: target.provider,
+          modelName: target.modelName,
+          capabilities: target.capabilities,
         })
 
         if (result.status === "alreadyAllowed") {
@@ -201,7 +202,7 @@ export const PermissionServiceLive = Layer.effect(
         const waitResult = yield* permissions.waitForPermissionDecision(result.request.id, undefined, signal)
         if (waitResult === "timeout") {
           return yield* new AuthFlowExpiredError({
-            providerID: parsed.providerID,
+            providerID: target.provider,
             message: "Permission request timed out",
           })
         }
@@ -234,12 +235,13 @@ export const PermissionServiceLive = Layer.effect(
             return yield* permissions.dismissPermissionRequest(input.requestId)
           }
           case "create": {
+            const target = yield* meta.resolvePermissionTarget(input.modelId)
             return yield* permissions.createPermissionRequest({
               origin: input.origin,
-              modelId: input.modelId,
-              modelName: input.modelName,
-              provider: input.provider,
-              capabilities: input.capabilities,
+              modelId: target.modelId,
+              modelName: target.modelName,
+              provider: target.provider,
+              capabilities: target.capabilities,
             })
           }
         }

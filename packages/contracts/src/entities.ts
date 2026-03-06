@@ -232,9 +232,6 @@ export const RuntimeRequestPermissionInputSchema = Schema.Union(
     origin: Schema.String,
     action: Schema.Literal("create"),
     modelId: Schema.String,
-    modelName: Schema.String,
-    provider: Schema.String,
-    capabilities: Schema.optional(Schema.Array(Schema.String)),
   }),
   Schema.Struct({
     origin: Schema.String,
@@ -254,9 +251,6 @@ export const RuntimeCreatePermissionRequestInputSchema = Schema.Struct({
   origin: Schema.String,
   action: Schema.Literal("create"),
   modelId: Schema.String,
-  modelName: Schema.String,
-  provider: Schema.String,
-  capabilities: Schema.optional(Schema.Array(Schema.String)),
 })
 export type RuntimeCreatePermissionRequestInput = Schema.Schema.Type<
   typeof RuntimeCreatePermissionRequestInputSchema
@@ -872,10 +866,7 @@ export const RuntimeAbortModelCallInputSchema = Schema.Struct({
 export type RuntimeAbortModelCallInput = Schema.Schema.Type<typeof RuntimeAbortModelCallInputSchema>
 
 export const BridgePermissionRequestSchema = Schema.Struct({
-  modelId: Schema.optional(Schema.String),
-  modelName: Schema.optional(Schema.String),
-  provider: Schema.optional(Schema.String),
-  capabilities: Schema.optional(Schema.Array(Schema.String)),
+  modelId: Schema.String,
 })
 export type BridgePermissionRequest = Schema.Schema.Type<typeof BridgePermissionRequestSchema>
 

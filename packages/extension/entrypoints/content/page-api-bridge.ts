@@ -28,14 +28,6 @@ function nextBridgeRequestId() {
   return `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
 }
 
-function parseProviderModel(modelId: string) {
-  const [providerID, ...rest] = modelId.split("/")
-  return {
-    providerID,
-    modelID: rest.join("/"),
-  }
-}
-
 function normalizeModelCallInput(input: BridgeModelCallRequest) {
   const requestId = input.requestId ?? nextBridgeRequestId()
   const sessionID = input.sessionID ?? requestId
@@ -81,15 +73,10 @@ function createPageBridgeHandlers() {
 
     requestPermission: (input) =>
       fromPromise(async () => {
-        const modelId = input.modelId ?? "openai/gpt-4o-mini"
-        const parsed = parseProviderModel(modelId)
         const result = await runtime.requestPermission({
           action: "create",
           origin: window.location.origin,
-          modelId,
-          modelName: input.modelName ?? parsed.modelID,
-          provider: input.provider ?? parsed.providerID,
-          capabilities: input.capabilities,
+          modelId: input.modelId,
         })
 
         if (!("status" in result)) {

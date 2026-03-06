@@ -115,7 +115,7 @@ export interface BridgeClientApi {
     modelId: string,
   ) => Effect.Effect<LanguageModelV3, RuntimeRpcError>;
   requestPermission: (
-    payload?: BridgePermissionRequest,
+    payload: BridgePermissionRequest,
   ) => Effect.Effect<BridgePermissionResult, RuntimeRpcError>;
   readonly destroy: Effect.Effect<void, never>;
 }
@@ -1192,7 +1192,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
         Effect.map((response) => response.models),
       );
 
-      const requestPermission = (payload: BridgePermissionRequest = {}) =>
+      const requestPermission = (payload: BridgePermissionRequest) =>
         ensureConnection.pipe(
           Effect.flatMap((current) =>
             normalizeRpcError(current.client.requestPermission(payload)),

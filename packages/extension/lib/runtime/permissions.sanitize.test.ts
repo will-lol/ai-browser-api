@@ -1,0 +1,201 @@
+// @ts-expect-error bun:test types are not part of this package's TypeScript environment.
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test"
+
+const TEST_ORIGIN = "https://example.test"
+const STALE_MODEL_ID = "missing/model"
+
+const pendingRows: Array<{
+  id: string
+  origin: string
+  modelId: string
+  modelName: string
+  provider: string
+  capabilities: string[]
+  requestedAt: number
+  dismissed: boolean
+  status: "pending" | "resolved"
+}> = []
+
+const permissionWrites: Array<{
+  id: string
+  origin: string
+  modelId: string
+  status: "allowed" | "denied" | "pending"
+  capabilities: string[]
+  updatedAt: number
+}> = []
+
+const deletedRequestIds: string[] = []
+const publishedEvents: Array<{
+  type: string
+  payload: {
+    origin: string
+    requestIds?: string[]
+    modelIds?: string[]
+  }
+}> = []
+
+let afterCommitEffects: Array<() => unknown | Promise<unknown>> = []
+
+const permissionsPutMock = mock(async (value: {
+  id: string
+  origin: string
+  modelId: string
+  status: "allowed" | "denied" | "pending"
+  capabilities: string[]
+  updatedAt: number
+}) => {
+  permissionWrites.push(value)
+})
+
+const pendingDeleteMock = mock(async (requestId: string) => {
+  deletedRequestIds.push(requestId)
+  const index = pendingRows.findIndex((row) => row.id === requestId)
+  if (index >= 0) {
+    pendingRows.splice(index, 1)
+  }
+})
+
+const publishRuntimeEventMock = mock(async (event: {
+  type: string
+  payload: {
+    origin: string
+    requestIds?: string[]
+    modelIds?: string[]
+  }
+}) => {
+  publishedEvents.push(event)
+})
+
+mock.module("@/lib/runtime/constants", () => ({
+  MAX_PENDING_REQUESTS: 32,
+  PENDING_REQUEST_TIMEOUT_MS: 30_000,
+}))
+
+mock.module("@/lib/runtime/db/runtime-db", () => ({
+  runtimeDb: {
+    pendingRequests: {
+      where: (_field: string) => ({
+        equals: (_value: string) => ({
+          filter: (predicate: (row: typeof pendingRows[number]) => boolean) => ({
+            toArray: async () => pendingRows.filter(predicate),
+          }),
+        }),
+      }),
+      delete: pendingDeleteMock,
+    },
+    permissions: {
+      put: permissionsPutMock,
+    },
+  },
+}))
+
+mock.module("@/lib/runtime/db/runtime-db-types", () => ({
+  runtimePermissionKey: (origin: string, modelId: string) => `${origin}::${modelId}`,
+}))
+
+mock.module("@/lib/runtime/db/runtime-db-tx", () => ({
+  afterCommit: (effect: () => unknown | Promise<unknown>) => {
+    afterCommitEffects.push(effect)
+  },
+  runTx: async (_tables: unknown[], fn: () => Promise<unknown>) => {
+    const result = await fn()
+    const effects = afterCommitEffects
+    afterCommitEffects = []
+
+    for (const effect of effects) {
+      await effect()
+    }
+
+    return result
+  },
+}))
+
+mock.module("@/lib/runtime/events/runtime-events", () => ({
+  publishRuntimeEvent: publishRuntimeEventMock,
+  subscribeRuntimeEvents: mock(() => () => undefined),
+}))
+
+mock.module("@/lib/runtime/permission-wait", () => ({
+  mergePendingChangedRequestIds: (requestId: string, staleRequestIds: string[]) => [
+    requestId,
+    ...staleRequestIds,
+  ],
+  waitForPermissionDecisionEventDriven: mock(async () => "resolved"),
+}))
+
+mock.module("@/lib/runtime/permission-targets", () => ({
+  resolveTrustedPermissionTargets: mock(async () => new Map()),
+}))
+
+mock.module("@/lib/runtime/util", () => ({
+  getModelCapabilities: (modelId: string) => [`cap:${modelId}`],
+  now: () => 123,
+  randomId: (prefix: string) => `${prefix}_1`,
+}))
+
+const {
+  listPendingRequests,
+  sanitizePendingPermissionRequests,
+} = await import("./permissions")
+
+beforeEach(() => {
+  pendingRows.length = 0
+  permissionWrites.length = 0
+  deletedRequestIds.length = 0
+  publishedEvents.length = 0
+  afterCommitEffects = []
+  permissionsPutMock.mockClear()
+  pendingDeleteMock.mockClear()
+  publishRuntimeEventMock.mockClear()
+})
+
+afterAll(() => {
+  mock.restore()
+})
+
+describe("sanitizePendingPermissionRequests", () => {
+  it("removes unresolved pending requests and denies their permissions", async () => {
+    pendingRows.push({
+      id: "prm_stale",
+      origin: TEST_ORIGIN,
+      modelId: STALE_MODEL_ID,
+      modelName: "Spoofed model",
+      provider: "spoofed-provider",
+      capabilities: ["vision"],
+      requestedAt: 1,
+      dismissed: false,
+      status: "pending",
+    })
+
+    const removedRequestIds = await sanitizePendingPermissionRequests()
+
+    expect(removedRequestIds).toEqual(["prm_stale"])
+    expect(permissionWrites).toEqual([{
+      id: `${TEST_ORIGIN}::${STALE_MODEL_ID}`,
+      origin: TEST_ORIGIN,
+      modelId: STALE_MODEL_ID,
+      status: "denied",
+      capabilities: ["vision"],
+      updatedAt: 123,
+    }])
+    expect(deletedRequestIds).toEqual(["prm_stale"])
+    expect(publishedEvents).toEqual([
+      {
+        type: "runtime.pending.changed",
+        payload: {
+          origin: TEST_ORIGIN,
+          requestIds: ["prm_stale"],
+        },
+      },
+      {
+        type: "runtime.permissions.changed",
+        payload: {
+          origin: TEST_ORIGIN,
+          modelIds: [STALE_MODEL_ID],
+        },
+      },
+    ])
+    expect(await listPendingRequests()).toEqual([])
+  })
+})

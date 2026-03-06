@@ -17,6 +17,7 @@ import {
   ensureProviderCatalog,
   refreshProviderCatalog,
 } from "@/lib/runtime/provider-registry";
+import { sanitizePendingPermissionRequests } from "@/lib/runtime/permissions";
 import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 import { subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events";
 import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager";
@@ -282,14 +283,24 @@ function createRuntimeLayer() {
   };
 }
 
+async function sanitizePendingRequests() {
+  try {
+    await sanitizePendingPermissionRequests();
+  } catch (error) {
+    console.warn("pending request sanitation failed", error);
+  }
+}
+
 function startRuntimeCore(layers: ReturnType<typeof createRuntimeLayer>) {
-  void Effect.runPromise(
+  const startup = Effect.runPromise(
     Effect.flatMap(RuntimeApplication, (app) => app.startup()).pipe(
       Effect.provide(layers.runtimeApplicationLayer),
     ),
-  ).catch((error) => {
-    console.warn("runtime startup failed", error);
-  });
+  )
+    .then(() => sanitizePendingRequests())
+    .catch((error) => {
+      console.warn("runtime startup failed", error);
+    });
 
   void registerRuntimeRpcServer({
     publicLayer: layers.runtimePublicRpcHandlersLayer,
@@ -297,6 +308,8 @@ function startRuntimeCore(layers: ReturnType<typeof createRuntimeLayer>) {
   }).catch((error) => {
     console.warn("runtime rpc server failed", error);
   });
+
+  return startup;
 }
 
 export default defineBackground(() => {
@@ -307,21 +320,26 @@ export default defineBackground(() => {
   void scheduleModelsRefreshAlarm();
   void ensureProviderCatalog();
 
-  startRuntimeCore(runtimeLayer);
-  void updateActionState();
+  void startRuntimeCore(runtimeLayer).finally(() => {
+    void updateActionState();
+  });
 
   browser.runtime.onInstalled.addListener(() => {
     void refreshModelsSnapshotOnce();
     void refreshProviderCatalog();
     void scheduleModelsRefreshAlarm();
-    void updateActionState();
+    void sanitizePendingRequests().finally(() => {
+      void updateActionState();
+    });
   });
 
   browser.runtime.onStartup.addListener(() => {
     void refreshModelsSnapshotOnce();
     void refreshProviderCatalog();
     void scheduleModelsRefreshAlarm();
-    void updateActionState();
+    void sanitizePendingRequests().finally(() => {
+      void updateActionState();
+    });
   });
 
   browser.tabs?.onActivated.addListener(() => {

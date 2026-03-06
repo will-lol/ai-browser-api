@@ -8,6 +8,7 @@ import {
   waitForPermissionDecisionEventDriven,
   type PermissionDecisionWaitResult,
 } from "@/lib/runtime/permission-wait"
+import { resolveTrustedPermissionTargets } from "@/lib/runtime/permission-targets"
 import { getModelCapabilities, now, randomId } from "@/lib/runtime/util"
 
 export type PermissionStatus = "allowed" | "denied" | "pending"
@@ -291,6 +292,73 @@ export async function listPendingRequests(origin?: string) {
     .toArray()
 
   return rows
+}
+
+export async function sanitizePendingPermissionRequests() {
+  const rows = await listPendingRequests()
+  if (rows.length === 0) {
+    return []
+  }
+
+  const trustedTargets = await resolveTrustedPermissionTargets(
+    rows.map((row) => row.modelId),
+  )
+  const staleRows = rows.filter((row) => !trustedTargets.has(row.modelId))
+
+  if (staleRows.length === 0) {
+    return []
+  }
+
+  const pendingChanged = new Map<string, string[]>()
+  const permissionChanged = new Map<string, Set<string>>()
+  const updatedAt = now()
+
+  await runTx([runtimeDb.pendingRequests, runtimeDb.permissions], async () => {
+    for (const row of staleRows) {
+      await runtimeDb.permissions.put({
+        id: runtimePermissionKey(row.origin, row.modelId),
+        origin: row.origin,
+        modelId: row.modelId,
+        status: "denied",
+        capabilities: row.capabilities,
+        updatedAt,
+      })
+
+      await runtimeDb.pendingRequests.delete(row.id)
+
+      const requestIds = pendingChanged.get(row.origin) ?? []
+      requestIds.push(row.id)
+      pendingChanged.set(row.origin, requestIds)
+
+      const modelIds = permissionChanged.get(row.origin) ?? new Set<string>()
+      modelIds.add(row.modelId)
+      permissionChanged.set(row.origin, modelIds)
+    }
+
+    afterCommit(async () => {
+      for (const [origin, requestIds] of pendingChanged) {
+        await publishRuntimeEvent({
+          type: "runtime.pending.changed",
+          payload: {
+            origin,
+            requestIds,
+          },
+        })
+      }
+
+      for (const [origin, modelIds] of permissionChanged) {
+        await publishRuntimeEvent({
+          type: "runtime.permissions.changed",
+          payload: {
+            origin,
+            modelIds: Array.from(modelIds),
+          },
+        })
+      }
+    })
+  })
+
+  return staleRows.map((row) => row.id)
 }
 
 export async function waitForPermissionDecision(

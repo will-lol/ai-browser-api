@@ -1,4 +1,5 @@
 import { runtimeDb } from "@/lib/runtime/db/runtime-db"
+import { resolveTrustedPermissionTargets } from "@/lib/runtime/permission-targets"
 import {
   listModelRows,
   listProviderRows,
@@ -83,5 +84,22 @@ export async function listPermissionsForOrigin(origin: string) {
 }
 
 export async function listPendingRequestsForOrigin(origin: string) {
-  return listPendingRequests(origin)
+  const rows = await listPendingRequests(origin)
+  if (rows.length === 0) return []
+
+  const trustedTargets = await resolveTrustedPermissionTargets(
+    rows.map((row) => row.modelId),
+  )
+
+  return rows.flatMap((row) => {
+    const target = trustedTargets.get(row.modelId)
+    if (!target) return []
+
+    return [{
+      ...row,
+      modelName: target.modelName,
+      provider: target.provider,
+      capabilities: target.capabilities,
+    }]
+  })
 }

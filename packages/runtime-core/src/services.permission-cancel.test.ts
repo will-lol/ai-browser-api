@@ -1,6 +1,6 @@
 // @ts-expect-error bun:test types are not part of this package's TypeScript environment.
 import { describe, expect, it } from "bun:test"
-import { RuntimeValidationError } from "@llm-bridge/contracts"
+import { ModelNotFoundError, RuntimeValidationError } from "@llm-bridge/contracts"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type {
@@ -115,6 +115,23 @@ async function createModelExecutionService(input: {
       providerID: modelID.split("/")[0] ?? "provider",
       modelID: modelID.split("/")[1] ?? modelID,
     }),
+    resolvePermissionTarget: (modelID: string) => {
+      if (modelID !== TEST_MODEL_ID) {
+        return Effect.fail(
+          new ModelNotFoundError({
+            modelId: modelID,
+            message: `Model ${modelID} was not found`,
+          }),
+        )
+      }
+
+      return Effect.succeed({
+        modelId: TEST_MODEL_ID,
+        modelName: "model",
+        provider: "provider",
+        capabilities: [],
+      })
+    },
   } satisfies MetaRepositoryApi
 
   const modelRepo = {
