@@ -1,5 +1,6 @@
 import {
   ModelNotFoundError,
+  ProviderNotConnectedError,
   decodeRuntimeWireValue,
   encodeRuntimeWireValue,
   encodeSupportedUrls,
@@ -869,9 +870,15 @@ export function makeRuntimeCoreInfrastructureLayer() {
     resolvePermissionTarget: (modelID: string) =>
       toEffect(async () => {
         await ensureProviderCatalog()
-        const target = await resolveTrustedPermissionTarget(modelID)
-        if (target) {
-          return target
+        const resolution = await resolveTrustedPermissionTarget(modelID)
+        if (resolution.status === "resolved") {
+          return resolution.target
+        }
+        if (resolution.status === "disconnected") {
+          throw new ProviderNotConnectedError({
+            providerID: resolution.provider,
+            message: `Provider ${resolution.provider} is not connected`,
+          })
         }
 
         throw new ModelNotFoundError({

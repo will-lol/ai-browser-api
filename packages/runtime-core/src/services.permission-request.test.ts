@@ -1,6 +1,6 @@
 // @ts-expect-error bun:test types are not part of this package's TypeScript environment.
 import { describe, expect, it } from "bun:test"
-import { ModelNotFoundError } from "@llm-bridge/contracts"
+import { ModelNotFoundError, ProviderNotConnectedError } from "@llm-bridge/contracts"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type {
@@ -182,6 +182,28 @@ describe("PermissionService trusted permission targets", () => {
     expect(createdRequests).toEqual([])
   })
 
+  it("propagates disconnected providers for explicit create requests", async () => {
+    const { service, createdRequests } = await createPermissionService({
+      resolvePermissionTarget: (_modelID: string) =>
+        Effect.fail(new ProviderNotConnectedError({
+          providerID: "openai",
+          message: "Provider openai is not connected",
+        })),
+    })
+
+    await expect(
+      Effect.runPromise(
+        service.requestPermission({
+          origin: TEST_ORIGIN,
+          action: "create",
+          modelId: TEST_MODEL_ID,
+        }),
+      ),
+    ).rejects.toThrow(/Provider openai is not connected/)
+
+    expect(createdRequests).toEqual([])
+  })
+
   it("uses the same trusted metadata for implicit permission prompts", async () => {
     const { service, createdRequests, resolvedModels } = await createPermissionService()
 
@@ -195,5 +217,21 @@ describe("PermissionService trusted permission targets", () => {
       provider: TRUSTED_TARGET.provider,
       capabilities: TRUSTED_TARGET.capabilities,
     }])
+  })
+
+  it("propagates disconnected providers for implicit permission prompts", async () => {
+    const { service, createdRequests } = await createPermissionService({
+      resolvePermissionTarget: (_modelID: string) =>
+        Effect.fail(new ProviderNotConnectedError({
+          providerID: "openai",
+          message: "Provider openai is not connected",
+        })),
+    })
+
+    await expect(
+      Effect.runPromise(service.ensureRequestAllowed(TEST_ORIGIN, TEST_MODEL_ID)),
+    ).rejects.toThrow(/Provider openai is not connected/)
+
+    expect(createdRequests).toEqual([])
   })
 })

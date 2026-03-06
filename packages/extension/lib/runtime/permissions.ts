@@ -1,10 +1,14 @@
-import { MAX_PENDING_REQUESTS, PENDING_REQUEST_TIMEOUT_MS } from "@/lib/runtime/constants"
+import { RuntimeValidationError } from "@llm-bridge/contracts"
+import {
+  MAX_PENDING_REQUESTS,
+  MAX_PENDING_REQUESTS_PER_ORIGIN,
+  PENDING_REQUEST_TIMEOUT_MS,
+} from "@/lib/runtime/constants"
 import { runtimeDb } from "@/lib/runtime/db/runtime-db"
 import { runtimePermissionKey } from "@/lib/runtime/db/runtime-db-types"
 import { afterCommit, runTx } from "@/lib/runtime/db/runtime-db-tx"
 import { publishRuntimeEvent, subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events"
 import {
-  mergePendingChangedRequestIds,
   waitForPermissionDecisionEventDriven,
   type PermissionDecisionWaitResult,
 } from "@/lib/runtime/permission-wait"
@@ -130,6 +134,8 @@ export async function createPermissionRequest(input: {
   modelName: string
   capabilities?: string[]
 }): Promise<CreatePermissionRequestResult> {
+  await sanitizePendingPermissionRequests()
+
   const permission = await getModelPermission(input.origin, input.modelId)
   if (permission === "allowed") {
     return {
@@ -137,61 +143,75 @@ export async function createPermissionRequest(input: {
     }
   }
 
-  const duplicate = await runtimeDb.pendingRequests
-    .where("origin")
-    .equals(input.origin)
-    .filter((item) => item.modelId === input.modelId && item.status === "pending" && !item.dismissed)
-    .first()
-  if (duplicate) {
-    return {
-      status: "requested",
-      request: duplicate,
-    }
-  }
-
   const capabilities = input.capabilities ?? getModelCapabilities(input.modelId)
-
-  const request: PermissionRequest = {
-    id: randomId("prm"),
-    origin: input.origin,
-    modelId: input.modelId,
-    provider: input.provider,
-    modelName: input.modelName,
-    capabilities,
-    requestedAt: now(),
-    dismissed: false,
-    status: "pending",
-  }
-
-  let staleRequestIds: string[] = []
+  let result: CreatePermissionRequestResult | undefined
 
   await runTx([runtimeDb.pendingRequests, runtimeDb.permissions], async () => {
+    const duplicate = await runtimeDb.pendingRequests
+      .where("origin")
+      .equals(input.origin)
+      .filter((item) => item.modelId === input.modelId && item.status === "pending" && !item.dismissed)
+      .first()
+    if (duplicate) {
+      result = {
+        status: "requested",
+        request: duplicate,
+      }
+      return
+    }
+
+    const originPendingCount = await runtimeDb.pendingRequests
+      .where("origin")
+      .equals(input.origin)
+      .filter((item) => item.status === "pending" && !item.dismissed)
+      .count()
+    if (originPendingCount >= MAX_PENDING_REQUESTS_PER_ORIGIN) {
+      throw new RuntimeValidationError({
+        message: `Too many pending permission requests for origin ${input.origin}`,
+      })
+    }
+
+    const totalPendingCount = await runtimeDb.pendingRequests
+      .where("status")
+      .equals("pending")
+      .filter((item) => !item.dismissed)
+      .count()
+    if (totalPendingCount >= MAX_PENDING_REQUESTS) {
+      throw new RuntimeValidationError({
+        message: "Too many pending permission requests",
+      })
+    }
+
+    const updatedAt = now()
+    const request: PermissionRequest = {
+      id: randomId("prm"),
+      origin: input.origin,
+      modelId: input.modelId,
+      provider: input.provider,
+      modelName: input.modelName,
+      capabilities,
+      requestedAt: updatedAt,
+      dismissed: false,
+      status: "pending",
+    }
+
     await runtimeDb.permissions.put({
       id: runtimePermissionKey(input.origin, input.modelId),
       origin: input.origin,
       modelId: input.modelId,
       status: "pending",
       capabilities,
-      updatedAt: now(),
+      updatedAt,
     })
 
     await runtimeDb.pendingRequests.put(request)
-
-    const all = await runtimeDb.pendingRequests.orderBy("requestedAt").toArray()
-    const overflow = all.length - MAX_PENDING_REQUESTS
-    if (overflow > 0) {
-      staleRequestIds = all.slice(0, overflow).map((item) => item.id)
-      if (staleRequestIds.length > 0) {
-        await runtimeDb.pendingRequests.bulkDelete(staleRequestIds)
-      }
-    }
 
     afterCommit(async () => {
       await publishRuntimeEvent({
         type: "runtime.pending.changed",
         payload: {
           origin: input.origin,
-          requestIds: mergePendingChangedRequestIds(request.id, staleRequestIds),
+          requestIds: [request.id],
         },
       })
       await publishRuntimeEvent({
@@ -202,12 +222,20 @@ export async function createPermissionRequest(input: {
         },
       })
     })
+
+    result = {
+      status: "requested",
+      request,
+    }
   })
 
-  return {
-    status: "requested",
-    request,
+  if (result) {
+    return result
   }
+
+  throw new RuntimeValidationError({
+    message: "Permission request creation did not complete",
+  })
 }
 
 export async function dismissPermissionRequest(requestId: string) {
@@ -311,19 +339,12 @@ export async function sanitizePendingPermissionRequests() {
 
   const pendingChanged = new Map<string, string[]>()
   const permissionChanged = new Map<string, Set<string>>()
-  const updatedAt = now()
-
   await runTx([runtimeDb.pendingRequests, runtimeDb.permissions], async () => {
     for (const row of staleRows) {
-      await runtimeDb.permissions.put({
-        id: runtimePermissionKey(row.origin, row.modelId),
-        origin: row.origin,
-        modelId: row.modelId,
-        status: "denied",
-        capabilities: row.capabilities,
-        updatedAt,
-      })
-
+      const permission = await runtimeDb.permissions.get(runtimePermissionKey(row.origin, row.modelId))
+      if (permission?.status === "pending") {
+        await runtimeDb.permissions.delete(permission.id)
+      }
       await runtimeDb.pendingRequests.delete(row.id)
 
       const requestIds = pendingChanged.get(row.origin) ?? []

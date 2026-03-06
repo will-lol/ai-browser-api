@@ -1,5 +1,5 @@
 // @ts-expect-error bun:test types are not part of this package's TypeScript environment.
-import { beforeEach, describe, expect, it, mock } from "bun:test"
+import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test"
 
 const TEST_ORIGIN = "https://example.test"
 const TRUSTED_MODEL_ID = "openai/gpt-4o-mini"
@@ -25,15 +25,25 @@ const modelRowsById = new Map<string, {
     name: string
   }
 }>()
+const providerRowsById = new Map<string, {
+  id: string
+  connected: boolean
+}>()
 
 const bulkGetMock = mock(async (modelIds: string[]) =>
   modelIds.map((modelId) => modelRowsById.get(modelId)),
+)
+const providersBulkGetMock = mock(async (providerIds: string[]) =>
+  providerIds.map((providerId) => providerRowsById.get(providerId)),
 )
 
 mock.module("@/lib/runtime/db/runtime-db", () => ({
   runtimeDb: {
     models: {
       bulkGet: bulkGetMock,
+    },
+    providers: {
+      bulkGet: providersBulkGetMock,
     },
     pendingRequests: {
       where: (_field: string) => ({
@@ -53,12 +63,17 @@ mock.module("@/lib/runtime/provider-registry", () => ({
 }))
 
 const { listPendingRequestsForOrigin } = await import("@/lib/runtime/query-service")
-mock.restore()
 
 beforeEach(() => {
   pendingRows.length = 0
   modelRowsById.clear()
+  providerRowsById.clear()
   bulkGetMock.mockClear()
+  providersBulkGetMock.mockClear()
+})
+
+afterAll(() => {
+  mock.restore()
 })
 
 describe("listPendingRequestsForOrigin", () => {
@@ -96,6 +111,22 @@ describe("listPendingRequestsForOrigin", () => {
         name: "GPT-4o mini",
       },
     })
+    modelRowsById.set(STALE_MODEL_ID, {
+      id: STALE_MODEL_ID,
+      providerID: "ghost-provider",
+      capabilities: ["vision"],
+      info: {
+        name: "Ghost model",
+      },
+    })
+    providerRowsById.set("openai", {
+      id: "openai",
+      connected: true,
+    })
+    providerRowsById.set("ghost-provider", {
+      id: "ghost-provider",
+      connected: false,
+    })
 
     const result = await listPendingRequestsForOrigin(TEST_ORIGIN)
 
@@ -111,5 +142,6 @@ describe("listPendingRequestsForOrigin", () => {
       status: "pending",
     }])
     expect(bulkGetMock).toHaveBeenCalledWith([TRUSTED_MODEL_ID, STALE_MODEL_ID])
+    expect(providersBulkGetMock).toHaveBeenCalledWith(["openai", "ghost-provider"])
   })
 })
