@@ -24,6 +24,7 @@ import {
   type RuntimeWireUrl,
   type PageBridgePortControlMessage,
 } from "@llm-bridge/contracts";
+import { makeResettableConnectionLifecycle } from "@llm-bridge/runtime-core";
 import type {
   JSONValue,
   JSONObject,
@@ -44,12 +45,10 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import { makeResettableConnectionLifecycle } from "./bridge-connection-lifecycle";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const CONNECTION_INVALIDATED_MESSAGE =
   "Bridge connection was destroyed while connecting";
-let nextBridgeConnectionId = 0;
 
 type PageBridgeClient = Effect.Effect.Success<
   ReturnType<typeof RpcClient.make<PageBridgeRpc>>
@@ -907,10 +906,10 @@ function closeConnection(
 }
 
 function createConnection(
+  connectionId: number,
   options: BridgeClientOptions,
 ): Effect.Effect<BridgeConnection, RuntimeRpcError> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const connectionId = ++nextBridgeConnectionId;
 
   return Effect.tryPromise({
     try: async () => {
@@ -1023,7 +1022,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
         BridgeConnection,
         RuntimeRpcError
       >({
-        create: createConnection(options),
+        create: (connectionId) => createConnection(connectionId, options),
         close: (connection, reason) =>
           closeConnection(connection, {
             reason,

@@ -1,4 +1,5 @@
 export * from "./plugin-adapter"
 export * from "./repositories"
+export * from "./resettable-connection-lifecycle"
 export * from "./runtime-application"
 export * from "./services"
