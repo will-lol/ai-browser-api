@@ -30,8 +30,15 @@ const TEST_MODELS: ReadonlyArray<RuntimeModelSummary> = [
 type Trace = {
   ensureOriginEnabled: string[]
   listModels: Array<{
+    origin?: string
     connectedOnly?: boolean
     providerID?: string
+  }>
+  acquireModel: Array<{
+    origin: string
+    requestID: string
+    sessionID: string
+    modelID: string
   }>
   requestPermission: Array<{
     action: "create" | "resolve" | "dismiss"
@@ -57,6 +64,7 @@ function createRuntimeApplication(
   const trace: Trace = {
     ensureOriginEnabled: [],
     listModels: [],
+    acquireModel: [],
     requestPermission: [],
     startProviderAuthFlow: [],
   }
@@ -69,6 +77,7 @@ function createRuntimeApplication(
       }),
     listProviders: () => Effect.succeed([]),
     listModels: (input: {
+      origin?: string
       connectedOnly?: boolean
       providerID?: string
     }) =>
@@ -201,15 +210,18 @@ function createRuntimeApplication(
             })
             return {
               requestId: input.requestId,
-            }
+          }
         }
       }),
     acquireModel: (input) =>
-      Effect.succeed({
-        specificationVersion: "v3" as const,
-        provider: "openai",
-        modelId: input.modelID,
-        supportedUrls: {},
+      Effect.sync(() => {
+        trace.acquireModel.push(input)
+        return {
+          specificationVersion: "v3" as const,
+          provider: "openai",
+          modelId: input.modelID,
+          supportedUrls: {},
+        }
       }),
     modelDoGenerate: () =>
       Effect.succeed({
@@ -388,6 +400,37 @@ describe("runtime rpc handlers", () => {
     assert.deepEqual(trace.listModels, [{
       connectedOnly: true,
       providerID: undefined,
+    }])
+  })
+
+  it("keeps shared acquireModel behavior aligned across public and admin handlers", async () => {
+    const publicRuntime = createRuntimeApplication()
+    const adminRuntime = createRuntimeApplication()
+    const publicHandlers = await loadPublicHandlers(publicRuntime.runtimeApplication)
+    const adminHandlers = await loadAdminHandlers(adminRuntime.runtimeApplication)
+
+    const request = {
+      origin: TEST_ORIGIN,
+      requestId: "req_1",
+      sessionID: "session_1",
+      modelId: TEST_MODEL_ID,
+    } as const
+
+    const publicResult = await Effect.runPromise(publicHandlers.acquireModel(request))
+    const adminResult = await Effect.runPromise(adminHandlers.acquireModel(request))
+
+    assert.deepEqual(publicResult, adminResult)
+    assert.deepEqual(publicRuntime.trace.acquireModel, [{
+      origin: TEST_ORIGIN,
+      requestID: "req_1",
+      sessionID: "session_1",
+      modelID: TEST_MODEL_ID,
+    }])
+    assert.deepEqual(adminRuntime.trace.acquireModel, [{
+      origin: TEST_ORIGIN,
+      requestID: "req_1",
+      sessionID: "session_1",
+      modelID: TEST_MODEL_ID,
     }])
   })
 

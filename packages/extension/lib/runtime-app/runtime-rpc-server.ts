@@ -1,5 +1,6 @@
 import { browser } from "@wxt-dev/browser"
 import type * as Rpc from "@effect/rpc/Rpc"
+import type * as RpcGroup from "@effect/rpc/RpcGroup"
 import * as RpcServer from "@effect/rpc/RpcServer"
 import type { FromClientEncoded, FromServerEncoded } from "@effect/rpc/RpcMessage"
 import type * as Layer from "effect/Layer"
@@ -22,9 +23,9 @@ import {
 
 type RuntimePort = ReturnType<typeof browser.runtime.connect>
 type RuntimeSender = RuntimePort["sender"]
-type RuntimeRole = "public" | "admin"
+export type RuntimeRole = "public" | "admin"
 
-type AuthorizedContext = {
+export type RuntimeAuthorizedContext = {
   readonly role: RuntimeRole
   readonly sender: RuntimeSender
   readonly senderOrigin?: string
@@ -34,51 +35,21 @@ type RpcAccessPolicy = {
   readonly authorizeConnect: (input: {
     role: RuntimeRole
     port: RuntimePort
-  }) => Effect.Effect<AuthorizedContext, RuntimeRpcError>
+  }) => Effect.Effect<RuntimeAuthorizedContext, RuntimeRpcError>
   readonly authorizeRequest: (input: {
-    context: AuthorizedContext
+    allowedTags: ReadonlySet<string>
+    context: RuntimeAuthorizedContext
     message: FromClientEncoded
   }) => Effect.Effect<void, RuntimeRpcError>
 }
 
 type RuntimePortSession = {
   readonly role: RuntimeRole
-  readonly authorizedContext: AuthorizedContext
+  readonly authorizedContext: RuntimeAuthorizedContext
   readonly port: RuntimePort
   readonly onMessage: Parameters<RuntimePort["onMessage"]["addListener"]>[0]
   readonly onDisconnect: Parameters<RuntimePort["onDisconnect"]["addListener"]>[0]
 }
-
-const PublicRpcTags = new Set([
-  "listModels",
-  "getOriginState",
-  "listPending",
-  "requestPermission",
-  "acquireModel",
-  "modelDoGenerate",
-  "modelDoStream",
-  "abortModelCall",
-])
-
-const AdminRpcTags = new Set([
-  "listProviders",
-  "listModels",
-  "listConnectedModels",
-  "getOriginState",
-  "listPermissions",
-  "listPending",
-  "openProviderAuthWindow",
-  "getProviderAuthFlow",
-  "startProviderAuthFlow",
-  "cancelProviderAuthFlow",
-  "disconnectProvider",
-  "updatePermission",
-  "requestPermission",
-  "acquireModel",
-  "modelDoGenerate",
-  "modelDoStream",
-  "abortModelCall",
-])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -108,103 +79,127 @@ function getPayloadOrigin(message: FromClientEncoded) {
   return typeof origin === "string" ? origin : undefined
 }
 
-const RuntimeRpcAccessPolicy: RpcAccessPolicy = {
-  authorizeConnect: ({ role, port }) =>
-    Effect.gen(function*() {
-      const sender = port.sender
-      if (!sender || sender.id !== browser.runtime.id) {
+function canAccessRuntimeRpcTag(tag: string, allowedTags: ReadonlySet<string>) {
+  return allowedTags.has(tag)
+}
+
+export function getRuntimeRpcAllowedTags<Rpcs extends Rpc.Any>(
+  rpcGroup: RpcGroup.RpcGroup<Rpcs>,
+) {
+  return new Set(rpcGroup.requests.keys())
+}
+
+export function authorizeRuntimeRpcConnect(input: {
+  role: RuntimeRole
+  sender: RuntimeSender | null | undefined
+  extensionID: string
+  extensionURL: string
+}) {
+  return Effect.gen(function*() {
+    const sender = input.sender
+    if (!sender || sender.id !== input.extensionID) {
+      return yield* Effect.fail(
+        toRuntimeAuthorizationError("connect", "Caller is not part of this extension"),
+      )
+    }
+
+    const senderUrl = typeof sender.url === "string" ? sender.url : ""
+    if (!senderUrl) {
+      return yield* Effect.fail(
+        toRuntimeAuthorizationError("connect", "Caller URL is unavailable"),
+      )
+    }
+
+    const senderOrigin = yield* parseOrigin(senderUrl)
+    const extensionOrigin = yield* parseOrigin(input.extensionURL)
+
+    if (input.role === "public") {
+      if (!sender.tab || typeof sender.tab.id !== "number") {
         return yield* Effect.fail(
-          toRuntimeAuthorizationError("connect", "Caller is not part of this extension"),
+          toRuntimeAuthorizationError("connect", "Public RPC requires a tab-scoped sender"),
         )
       }
 
-      const senderUrl = typeof sender.url === "string" ? sender.url : ""
-      if (!senderUrl) {
+      if (senderOrigin === extensionOrigin) {
         return yield* Effect.fail(
-          toRuntimeAuthorizationError("connect", "Caller URL is unavailable"),
-        )
-      }
-
-      const senderOrigin = yield* parseOrigin(senderUrl)
-      const extensionOrigin = yield* parseOrigin(browser.runtime.getURL("/"))
-
-      if (role === "public") {
-        if (!sender.tab || typeof sender.tab.id !== "number") {
-          return yield* Effect.fail(
-            toRuntimeAuthorizationError("connect", "Public RPC requires a tab-scoped sender"),
-          )
-        }
-
-        if (senderOrigin === extensionOrigin) {
-          return yield* Effect.fail(
-            toRuntimeAuthorizationError("connect", "Public RPC rejects extension-origin callers"),
-          )
-        }
-
-        return {
-          role,
-          sender,
-          senderOrigin,
-        } as const
-      }
-
-      if (senderOrigin !== extensionOrigin) {
-        return yield* Effect.fail(
-          toRuntimeAuthorizationError("connect", "Admin RPC is extension-only"),
+          toRuntimeAuthorizationError("connect", "Public RPC rejects extension-origin callers"),
         )
       }
 
       return {
-        role,
+        role: input.role,
         sender,
         senderOrigin,
       } as const
-    }),
-  authorizeRequest: ({ context, message }) =>
-    Effect.gen(function*() {
-      if (message._tag !== "Request") {
-        return
-      }
+    }
 
-      const allowed = context.role === "public" ? PublicRpcTags : AdminRpcTags
-      if (!allowed.has(message.tag)) {
-        return yield* Effect.fail(
-          toRuntimeAuthorizationError(message.tag, "RPC method is not available for this caller"),
-        )
-      }
+    if (senderOrigin !== extensionOrigin) {
+      return yield* Effect.fail(
+        toRuntimeAuthorizationError("connect", "Admin RPC is extension-only"),
+      )
+    }
 
-      if (context.role !== "public") {
-        return
-      }
-
-      const origin = getPayloadOrigin(message)
-      if (!origin || origin !== context.senderOrigin) {
-        return yield* Effect.fail(
-          toRuntimeAuthorizationError(message.tag, "RPC origin does not match caller sender origin"),
-        )
-      }
-
-      if (message.tag === "requestPermission" && isRecord(message.payload)) {
-        if (message.payload.action !== "create") {
-          return yield* Effect.fail(
-            toRuntimeAuthorizationError(message.tag, "Public caller can only create permission requests"),
-          )
-        }
-      }
-    }),
+    return {
+      role: input.role,
+      sender,
+      senderOrigin,
+    } as const
+  })
 }
 
-type RuntimeServerOptions = {
+export function authorizeRuntimeRpcRequest(input: {
+  allowedTags: ReadonlySet<string>
+  context: RuntimeAuthorizedContext
+  message: FromClientEncoded
+}) {
+  return Effect.gen(function*() {
+    if (input.message._tag !== "Request") {
+      return
+    }
+
+    if (!canAccessRuntimeRpcTag(input.message.tag, input.allowedTags)) {
+      return yield* Effect.fail(
+        toRuntimeAuthorizationError(input.message.tag, "RPC method is not available for this caller"),
+      )
+    }
+
+    if (input.context.role !== "public") {
+      return
+    }
+
+    const origin = getPayloadOrigin(input.message)
+    if (!origin || origin !== input.context.senderOrigin) {
+      return yield* Effect.fail(
+        toRuntimeAuthorizationError(input.message.tag, "RPC origin does not match caller sender origin"),
+      )
+    }
+  })
+}
+
+const RuntimeRpcAccessPolicy: RpcAccessPolicy = {
+  authorizeConnect: ({ role, port }) =>
+    authorizeRuntimeRpcConnect({
+      role,
+      sender: port.sender,
+      extensionID: browser.runtime.id,
+      extensionURL: browser.runtime.getURL("/"),
+    }),
+  authorizeRequest: authorizeRuntimeRpcRequest,
+}
+
+type RuntimeServerOptions<Rpcs extends Rpc.Any> = {
   readonly role: RuntimeRole
   readonly portName: string
   readonly policy: RpcAccessPolicy
+  readonly rpcGroup: RpcGroup.RpcGroup<Rpcs>
 }
 
-function protocolForRole(
-  options: RuntimeServerOptions,
+function protocolForRole<Rpcs extends Rpc.Any>(
+  options: RuntimeServerOptions<Rpcs>,
 ) {
   return RpcServer.Protocol.make((writeRequest) =>
     Effect.gen(function*() {
+      const allowedTags = getRuntimeRpcAllowedTags(options.rpcGroup)
       const disconnects = yield* Mailbox.make<number>()
       let nextClientId = 0
       const sessions = new Map<number, RuntimePortSession>()
@@ -239,7 +234,7 @@ function protocolForRole(
       const onConnect: Parameters<typeof browser.runtime.onConnect.addListener>[0] = (port) => {
         if (port.name !== options.portName) return
 
-        let authorizedContext: AuthorizedContext
+        let authorizedContext: RuntimeAuthorizedContext
         try {
           authorizedContext = Effect.runSync(options.policy.authorizeConnect({
             role: options.role,
@@ -259,6 +254,7 @@ function protocolForRole(
         const onMessage: Parameters<typeof port.onMessage.addListener>[0] = (payload: FromClientEncoded) => {
           void Effect.runPromise(
             options.policy.authorizeRequest({
+              allowedTags,
               context: authorizedContext,
               message: payload,
             }).pipe(
@@ -356,6 +352,7 @@ export async function registerRuntimeRpcServer<PE, AE>(input: {
       role: "public",
       portName: RUNTIME_PUBLIC_RPC_PORT_NAME,
       policy,
+      rpcGroup: RuntimePublicRpcGroup,
     }).pipe(Scope.extend(scope)),
   )
 
@@ -364,6 +361,7 @@ export async function registerRuntimeRpcServer<PE, AE>(input: {
       role: "admin",
       portName: RUNTIME_ADMIN_RPC_PORT_NAME,
       policy,
+      rpcGroup: RuntimeAdminRpcGroup,
     }).pipe(Scope.extend(scope)),
   )
 
