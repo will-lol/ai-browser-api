@@ -35,6 +35,7 @@
     "@effect/rpc": "^0.73.2",
     "@gitlab/gitlab-ai-provider": "^3.6.0",
     "@hookform/resolvers": "^5.2.2",
+    "@llm-bridge/bridge-codecs": "workspace:*",
     "@llm-bridge/contracts": "workspace:*",
     "@llm-bridge/runtime-core": "workspace:*",
     "@llm-bridge/runtime-events": "workspace:*",

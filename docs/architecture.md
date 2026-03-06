@@ -4,6 +4,9 @@
 
 - `@llm-bridge/contracts`
   - Owns all boundary contracts: Effect schemas, RPC groups, event schemas, tagged errors.
+- `@llm-bridge/bridge-codecs`
+  - Owns pure AI SDK v3 `<->` runtime wire codecs shared by the browser client and extension runtime adapters.
+  - Depends on `@llm-bridge/contracts` and `@ai-sdk/provider`.
 - `@llm-bridge/runtime-core`
   - Pure application logic using Effect services and layers.
   - Depends on `@llm-bridge/contracts` only.
@@ -24,10 +27,11 @@
 
 - Allowed:
   - `contracts -> effect, @effect/rpc`
+  - `bridge-codecs -> contracts, @ai-sdk/provider`
   - `runtime-core -> contracts, effect`
   - `runtime-events -> contracts, effect`
-  - `extension -> runtime-core, runtime-events, contracts, browser infra`
-  - `client -> contracts, effect, @effect/rpc`
+  - `extension -> bridge-codecs, runtime-core, runtime-events, contracts, browser infra`
+  - `client -> bridge-codecs, contracts, effect, @effect/rpc`
 - Disallowed:
   - Cross-package imports targeting another package's `src` internals.
 

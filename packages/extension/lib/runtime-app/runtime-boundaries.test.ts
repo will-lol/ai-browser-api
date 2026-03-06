@@ -21,6 +21,15 @@ describe("runtime ownership boundaries", () => {
     assert.equal(existsSync(modelServicePath), false)
   })
 
+  it("consumes shared bridge codecs instead of local protocol translators", () => {
+    const source = readFileSync(runtimeAdaptersPath, "utf8")
+
+    assert.equal(source.includes("@llm-bridge/bridge-codecs"), true)
+    assert.equal(source.includes("function decodeCallOptions("), false)
+    assert.equal(source.includes("function toGenerateResponse("), false)
+    assert.equal(source.includes("function mapStreamPart("), false)
+  })
+
   it("keeps auth-flow manager free of catalog refresh side-effects", () => {
     const source = readFileSync(authFlowManagerPath, "utf8")
     assert.equal(source.includes("refreshProviderCatalogForProvider"), false)

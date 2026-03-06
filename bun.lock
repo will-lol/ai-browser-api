@@ -12,6 +12,19 @@
         "typescript-eslint": "^8.56.1",
       },
     },
+    "packages/bridge-codecs": {
+      "name": "@llm-bridge/bridge-codecs",
+      "version": "0.1.0",
+      "dependencies": {
+        "@ai-sdk/provider": "^3.0.8",
+        "@llm-bridge/contracts": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^22.19.13",
+        "tsdown": "^0.20.3",
+        "typescript": "5.9.3",
+      },
+    },
     "packages/client": {
       "name": "@llm-bridge/client",
       "version": "0.1.0",
@@ -19,6 +32,7 @@
         "@ai-sdk/provider": "^3.0.8",
         "@effect/platform": "^0.93.2",
         "@effect/rpc": "^0.73.2",
+        "@llm-bridge/bridge-codecs": "workspace:*",
         "@llm-bridge/contracts": "workspace:*",
         "@llm-bridge/runtime-core": "workspace:*",
         "effect": "^3.18.4",
@@ -87,6 +101,7 @@
         "@effect/rpc": "^0.73.2",
         "@gitlab/gitlab-ai-provider": "^3.6.0",
         "@hookform/resolvers": "^5.2.2",
+        "@llm-bridge/bridge-codecs": "workspace:*",
         "@llm-bridge/contracts": "workspace:*",
         "@llm-bridge/runtime-core": "workspace:*",
         "@llm-bridge/runtime-events": "workspace:*",
@@ -382,6 +397,8 @@
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "3.1.2", "@jridgewell/sourcemap-codec": "1.5.5" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
+
+    "@llm-bridge/bridge-codecs": ["@llm-bridge/bridge-codecs@workspace:packages/bridge-codecs"],
 
     "@llm-bridge/client": ["@llm-bridge/client@workspace:packages/client"],
 
