@@ -104,15 +104,30 @@ export function isRuntimeRpcError(error: unknown): error is RuntimeRpcError {
   );
 }
 
+function logUnknownRuntimeRpcError(error: unknown) {
+  console.error("[runtime-rpc] normalizing unknown error to RuntimeInternalError", {
+    error,
+    name: error instanceof Error ? error.name : undefined,
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  });
+}
+
 export function toRuntimeRpcError(error: unknown): RuntimeRpcError {
   if (isRuntimeRpcError(error)) return error;
 
   if (error instanceof TypeError) {
+    console.error("[runtime-rpc] normalizing TypeError to RuntimeValidationError", {
+      error,
+      message: error.message,
+      stack: error.stack,
+    });
     return new RuntimeValidationError({
       message: "Invalid runtime input",
     });
   }
 
+  logUnknownRuntimeRpcError(error);
   return new RuntimeInternalError({
     message: "Internal runtime error",
   });

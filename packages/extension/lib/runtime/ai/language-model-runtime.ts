@@ -65,6 +65,23 @@ type PreparedCallOptions = {
 const providerSDKCache = new Map<string, ReturnType<RuntimeProviderFactory>>();
 const languageModelCache = new Map<string, LanguageModelV3>();
 
+function logRuntimeModelDebug(event: string, details?: unknown) {
+  console.log(`[language-model-runtime] ${event}`, details);
+}
+
+function logRuntimeModelError(
+  event: string,
+  error: unknown,
+  details?: unknown,
+) {
+  console.error(`[language-model-runtime] ${event}`, {
+    details,
+    error,
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  });
+}
+
 function pickFactory(moduleValue: Record<string, unknown>) {
   const match = Object.entries(moduleValue).find(
     ([key, value]) => key.startsWith("create") && typeof value === "function",
@@ -716,25 +733,52 @@ export async function runLanguageModelGenerate(input: {
   options: RuntimeLanguageModelCallOptions;
   signal?: AbortSignal;
 }): Promise<LanguageModelV3GenerateResult> {
-  const runtime = await resolveModelRuntimeContext(input.modelID);
-  const { context, prepared } = await prepareCallOptions({
-    runtime,
+  logRuntimeModelDebug("generate.started", {
+    modelID: input.modelID,
     origin: input.origin,
-    sessionID: input.sessionID,
     requestID: input.requestID,
-    options: input.options,
+    sessionID: input.sessionID,
   });
 
-  const languageModel = await getLanguageModel({
-    runtime,
-    context,
-    transportPatch: prepared.transport,
-    staticHeaders: toHeaderRecord(prepared.callOptions.headers),
-  });
-  return languageModel.doGenerate({
-    ...prepared.callOptions,
-    abortSignal: input.signal,
-  });
+  try {
+    const runtime = await resolveModelRuntimeContext(input.modelID);
+    const { context, prepared } = await prepareCallOptions({
+      runtime,
+      origin: input.origin,
+      sessionID: input.sessionID,
+      requestID: input.requestID,
+      options: input.options,
+    });
+
+    const languageModel = await getLanguageModel({
+      runtime,
+      context,
+      transportPatch: prepared.transport,
+      staticHeaders: toHeaderRecord(prepared.callOptions.headers),
+    });
+    const result = await languageModel.doGenerate({
+      ...prepared.callOptions,
+      abortSignal: input.signal,
+    });
+
+    logRuntimeModelDebug("generate.succeeded", {
+      modelID: input.modelID,
+      origin: input.origin,
+      requestID: input.requestID,
+      sessionID: input.sessionID,
+      providerID: runtime.providerID,
+      providerModelID: runtime.modelID,
+    });
+    return result;
+  } catch (error) {
+    logRuntimeModelError("generate.failed", error, {
+      modelID: input.modelID,
+      origin: input.origin,
+      requestID: input.requestID,
+      sessionID: input.sessionID,
+    });
+    throw error;
+  }
 }
 
 export async function runLanguageModelStream(input: {
@@ -745,24 +789,50 @@ export async function runLanguageModelStream(input: {
   options: RuntimeLanguageModelCallOptions;
   signal?: AbortSignal;
 }): Promise<ReadableStream<LanguageModelV3StreamPart>> {
-  const runtime = await resolveModelRuntimeContext(input.modelID);
-  const { context, prepared } = await prepareCallOptions({
-    runtime,
+  logRuntimeModelDebug("stream.started", {
+    modelID: input.modelID,
     origin: input.origin,
-    sessionID: input.sessionID,
     requestID: input.requestID,
-    options: input.options,
+    sessionID: input.sessionID,
   });
 
-  const languageModel = await getLanguageModel({
-    runtime,
-    context,
-    transportPatch: prepared.transport,
-    staticHeaders: toHeaderRecord(prepared.callOptions.headers),
-  });
-  const result = await languageModel.doStream({
-    ...prepared.callOptions,
-    abortSignal: input.signal,
-  });
-  return result.stream;
+  try {
+    const runtime = await resolveModelRuntimeContext(input.modelID);
+    const { context, prepared } = await prepareCallOptions({
+      runtime,
+      origin: input.origin,
+      sessionID: input.sessionID,
+      requestID: input.requestID,
+      options: input.options,
+    });
+
+    const languageModel = await getLanguageModel({
+      runtime,
+      context,
+      transportPatch: prepared.transport,
+      staticHeaders: toHeaderRecord(prepared.callOptions.headers),
+    });
+    const result = await languageModel.doStream({
+      ...prepared.callOptions,
+      abortSignal: input.signal,
+    });
+
+    logRuntimeModelDebug("stream.succeeded", {
+      modelID: input.modelID,
+      origin: input.origin,
+      requestID: input.requestID,
+      sessionID: input.sessionID,
+      providerID: runtime.providerID,
+      providerModelID: runtime.modelID,
+    });
+    return result.stream;
+  } catch (error) {
+    logRuntimeModelError("stream.failed", error, {
+      modelID: input.modelID,
+      origin: input.origin,
+      requestID: input.requestID,
+      sessionID: input.sessionID,
+    });
+    throw error;
+  }
 }

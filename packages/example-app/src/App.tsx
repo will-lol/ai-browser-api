@@ -30,10 +30,16 @@ export function App() {
   const startupRefreshTriggeredRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const pushDebug = useCallback((event: string, details?: unknown) => {
+    console.log(`[example-app] ${new Date().toISOString()} ${event}`, details);
+  }, []);
+
   const pushError = useCallback((event: string, error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    const line = `[example-app] ${new Date().toISOString()} ${event} ${message}`;
-    console.error(line);
+    console.error(`[example-app] ${new Date().toISOString()} ${event}`, {
+      error,
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
   }, []);
 
   const runBridge = useCallback(
@@ -44,10 +50,12 @@ export function App() {
 
   const refreshModels = useCallback(async () => {
     if (refreshInFlightRef.current) {
+      pushDebug("refreshModels.reusedInFlight");
       return refreshInFlightRef.current;
     }
 
     setStatus("Loading models...");
+    pushDebug("refreshModels.started");
 
     const refreshTask = (async () => {
       try {
@@ -60,10 +68,15 @@ export function App() {
         );
 
         setModels(googleModels);
+        pushDebug("refreshModels.loaded", {
+          count: googleModels.length,
+          modelIds: googleModels.map((model) => model.id),
+        });
 
         if (googleModels.length === 0) {
           setSelectedModelId("");
           setStatus("No connected Google models.");
+          pushDebug("refreshModels.empty");
           return;
         }
 
@@ -105,10 +118,11 @@ export function App() {
     e?.preventDefault();
     if (!input.trim() || isLoading || !selectedModelId) return;
 
+    const prompt = input.trim();
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: input.trim(),
+      content: prompt,
     };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
@@ -123,7 +137,17 @@ export function App() {
     ]);
 
     try {
+      pushDebug("stream.started", {
+        selectedModelId,
+        promptLength: prompt.length,
+        messageCount: newMessages.length,
+      });
       const model = await loadModel(selectedModelId);
+      pushDebug("stream.modelLoaded", {
+        selectedModelId,
+        provider: model.provider,
+        modelId: model.modelId,
+      });
 
       const streamResult = streamText({
         model,
@@ -142,6 +166,10 @@ export function App() {
           ),
         );
       }
+      pushDebug("stream.completed", {
+        selectedModelId,
+        assistantMessageId,
+      });
     } catch (err) {
       pushError("stream.failed", err);
       setError(err instanceof Error ? err : new Error(String(err)));

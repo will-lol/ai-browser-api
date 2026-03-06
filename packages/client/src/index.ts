@@ -83,6 +83,19 @@ function createAbortError() {
   return error;
 }
 
+function logBridgeDebug(event: string, details?: unknown) {
+  console.log(`[bridge-client] ${event}`, details);
+}
+
+function logBridgeError(event: string, error: unknown, details?: unknown) {
+  console.error(`[bridge-client] ${event}`, {
+    details,
+    error,
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  });
+}
+
 function waitForBridgeReady(timeoutMs: number) {
   return new Promise<void>((resolve, reject) => {
     if (typeof window === "undefined") {
@@ -330,6 +343,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
           sequence += 1;
           const requestId = nextRequestId(sequence);
           const abortSignal = options.abortSignal;
+          logBridgeDebug("doGenerate.started", { modelId, requestId });
 
           if (abortSignal?.aborted) {
             throw createAbortError();
@@ -359,7 +373,14 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
               ),
             );
 
+            logBridgeDebug("doGenerate.succeeded", { modelId, requestId });
             return fromRuntimeGenerateResponse(response);
+          } catch (error) {
+            logBridgeError("doGenerate.failed", error, {
+              modelId,
+              requestId,
+            });
+            throw error;
           } finally {
             abortSignal?.removeEventListener("abort", onAbort);
           }
@@ -368,69 +389,95 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
           sequence += 1;
           const requestId = nextRequestId(sequence);
           const abortSignal = options.abortSignal;
+          logBridgeDebug("doStream.started", { modelId, requestId });
 
           if (abortSignal?.aborted) {
             throw createAbortError();
           }
 
-          const current = await Effect.runPromise(ensureConnection);
-          const runtimeStream = await Effect.runPromise(
-            Effect.scoped(
-              Stream.toReadableStreamEffect(
-                normalizeRpcStreamError(
-                  current.client.modelDoStream({
-                    requestId,
-                    sessionID: requestId,
-                    modelId,
-                    options: toRuntimeModelCallOptions(options),
-                  }),
-                ),
-              ),
-            ),
-          );
-
-          const reader = runtimeStream.getReader();
-          const onAbort = () => {
-            void Effect.runPromise(
-              abortRequest({
-                requestId,
-                sessionID: requestId,
-              }),
-            ).catch(() => undefined);
-          };
-
-          abortSignal?.addEventListener("abort", onAbort, { once: true });
-
-          const cleanup = () => {
-            abortSignal?.removeEventListener("abort", onAbort);
-          };
-
-          return {
-            stream: new ReadableStream<LanguageModelV3StreamPart>({
-              async pull(controller) {
-                const next = await reader.read();
-                if (next.done) {
-                  cleanup();
-                  controller.close();
-                  return;
-                }
-                controller.enqueue(fromRuntimeStreamPart(next.value));
-              },
-              async cancel() {
-                try {
-                  await reader.cancel();
-                } finally {
-                  cleanup();
-                  void Effect.runPromise(
-                    abortRequest({
+          try {
+            const current = await Effect.runPromise(ensureConnection);
+            const runtimeStream = await Effect.runPromise(
+              Effect.scoped(
+                Stream.toReadableStreamEffect(
+                  normalizeRpcStreamError(
+                    current.client.modelDoStream({
                       requestId,
                       sessionID: requestId,
+                      modelId,
+                      options: toRuntimeModelCallOptions(options),
                     }),
-                  ).catch(() => undefined);
-                }
-              },
-            }),
-          };
+                  ),
+                ),
+              ),
+            );
+
+            const reader = runtimeStream.getReader();
+            const onAbort = () => {
+              void Effect.runPromise(
+                abortRequest({
+                  requestId,
+                  sessionID: requestId,
+                }),
+              ).catch(() => undefined);
+            };
+
+            abortSignal?.addEventListener("abort", onAbort, { once: true });
+
+            const cleanup = () => {
+              abortSignal?.removeEventListener("abort", onAbort);
+            };
+
+            return {
+              stream: new ReadableStream<LanguageModelV3StreamPart>({
+                async pull(controller) {
+                  try {
+                    const next = await reader.read();
+                    if (next.done) {
+                      cleanup();
+                      logBridgeDebug("doStream.completed", {
+                        modelId,
+                        requestId,
+                      });
+                      controller.close();
+                      return;
+                    }
+                    controller.enqueue(fromRuntimeStreamPart(next.value));
+                  } catch (error) {
+                    cleanup();
+                    logBridgeError("doStream.pullFailed", error, {
+                      modelId,
+                      requestId,
+                    });
+                    throw error;
+                  }
+                },
+                async cancel() {
+                  try {
+                    logBridgeDebug("doStream.canceled", {
+                      modelId,
+                      requestId,
+                    });
+                    await reader.cancel();
+                  } finally {
+                    cleanup();
+                    void Effect.runPromise(
+                      abortRequest({
+                        requestId,
+                        sessionID: requestId,
+                      }),
+                    ).catch(() => undefined);
+                  }
+                },
+              }),
+            };
+          } catch (error) {
+            logBridgeError("doStream.failed", error, {
+              modelId,
+              requestId,
+            });
+            throw error;
+          }
         },
       });
 
