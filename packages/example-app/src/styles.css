@@ -1,89 +1,33 @@
-:root {
-  color-scheme: dark;
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  background: #0b1220;
-  color: #e5edf8;
+@import "tailwindcss";
+
+@theme {
+  --color-primary-500: #3b82f6;
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1f2937;
+  --color-gray-900: #111827;
 }
 
-* {
-  box-sizing: border-box;
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Base styles for dark mode as default since the original app was dark mode */
+:root {
+  color-scheme: dark;
+  --bg-color: #0b1220;
+  --text-color: #e5edf8;
 }
 
 body {
-  margin: 0;
-  background: radial-gradient(circle at top, #13213d 0%, #0b1220 42%);
-  min-height: 100vh;
-}
-
-.container {
-  width: min(920px, 92vw);
-  margin: 32px auto;
-}
-
-h1 {
-  margin: 0;
-  letter-spacing: 0.01em;
-}
-
-.muted {
-  color: #94a7c4;
-}
-
-.card {
-  margin-top: 16px;
-  padding: 16px;
-  border-radius: 12px;
-  border: 1px solid #223557;
-  background: #101a2f;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-button {
-  background: #3b82f6;
-  color: white;
-  border: 0;
-  border-radius: 8px;
-  padding: 9px 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-label {
-  display: block;
-  margin-top: 10px;
-  margin-bottom: 8px;
-}
-
-select,
-textarea {
-  width: 100%;
-  border-radius: 8px;
-  border: 1px solid #334b75;
-  background: #0d1730;
-  color: #e5edf8;
-  padding: 10px;
-  font: inherit;
-}
-
-pre {
-  margin: 0;
-  border-radius: 8px;
-  border: 1px solid #23395f;
-  background: #0a1429;
-  padding: 10px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  min-height: 84px;
-  max-height: 300px;
-  overflow: auto;
+  background-color: var(--bg-color);
+  color: var(--text-color);
 }

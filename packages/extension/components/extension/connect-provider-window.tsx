@@ -1,7 +1,10 @@
+import { Check } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { ProviderAuthMethodForm } from "@/components/extension/provider-auth-method-form"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
 import type { ExtensionAuthMethod } from "@/lib/extension-runtime-api"
 import {
   useProviderAuthFlowQuery,
@@ -199,200 +202,214 @@ export function ConnectProviderWindow({
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-4 px-4 py-4">
-        <header className="border border-border bg-card px-4 py-3">
-          <h1 className="text-sm font-semibold">
-            Connect {provider?.name ?? providerID}
-          </h1>
-          <p className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-            {status === "authorizing"
-              ? "Authentication in progress"
-              : "Select auth method"}
-          </p>
-        </header>
+      <div className="mx-auto flex w-full max-w-[560px] flex-col px-4 py-6">
+        <Card className="rounded-none border-border">
+          <CardHeader className="px-5 py-4">
+            <CardTitle className="text-sm font-semibold">
+              Connect {provider?.name ?? providerID}
+            </CardTitle>
+            <CardDescription className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              {status === "authorizing"
+                ? "Authentication in progress"
+                : "Select auth method"}
+            </CardDescription>
+          </CardHeader>
+          <Separator />
+          <CardContent className="px-5 py-4">
+            {(providersQuery.isPending || authFlowQuery.isPending) && (
+              <p className="text-xs text-muted-foreground">Loading authentication flow...</p>
+            )}
 
-        <main className="border border-border bg-card px-4 py-3">
-          {(providersQuery.isPending || authFlowQuery.isPending) && (
-            <p className="text-xs text-muted-foreground">Loading authentication flow...</p>
-          )}
+            {authFlowQuery.isError && (
+              <p className="text-xs text-destructive">Failed to load authentication flow.</p>
+            )}
 
-          {authFlowQuery.isError && (
-            <p className="text-xs text-destructive">Failed to load authentication flow.</p>
-          )}
+            {!authFlowQuery.isPending && !authFlowQuery.isError && methods.length === 0 && (
+              <p className="text-xs text-muted-foreground">No auth methods are available for this provider.</p>
+            )}
 
-          {!authFlowQuery.isPending && !authFlowQuery.isError && methods.length === 0 && (
-            <p className="text-xs text-muted-foreground">No auth methods are available for this provider.</p>
-          )}
+            {status === "authorizing" && (
+              <div className="flex flex-col gap-4">
+                <p className="text-xs text-muted-foreground">Finishing authentication...</p>
 
-          {status === "authorizing" && (
-            <div className="flex flex-col gap-3">
-              <p className="text-xs text-muted-foreground">Finishing authentication...</p>
+                {instruction && (
+                  <div className="flex flex-col gap-3 bg-secondary/20 px-4 py-3">
+                    <p className="text-xs font-medium text-foreground">{instruction.title}</p>
+                    {instruction.message && (
+                      <p className="text-xs text-muted-foreground">{instruction.message}</p>
+                    )}
 
-              {instruction && (
-                <div className="flex flex-col gap-2 border border-border bg-secondary/20 px-3 py-2">
-                  <p className="text-xs font-medium text-foreground">{instruction.title}</p>
-                  {instruction.message && (
-                    <p className="text-xs text-muted-foreground">{instruction.message}</p>
-                  )}
+                    {instruction.code && (() => {
+                      const code = instruction.code
+                      return (
+                        <div className="flex items-center justify-between gap-2 bg-background px-3 py-2 shadow-sm">
+                          <code className="text-xs text-foreground">{code}</code>
+                          <Button
+                            onClick={() => {
+                              void handleCopyCode(code)
+                            }}
+                            disabled={isBusy}
+                            variant="secondary"
+                            size="sm"
+                          >
+                            Copy code
+                          </Button>
+                        </div>
+                      )
+                    })()}
 
-                  {instruction.code && (() => {
-                    const code = instruction.code
-                    return (
-                      <div className="flex items-center justify-between gap-2 border border-border bg-background px-2 py-1.5">
-                        <code className="text-xs text-foreground">{code}</code>
-                        <Button
-                          onClick={() => {
-                            void handleCopyCode(code)
-                          }}
-                          disabled={isBusy}
-                          variant="outline"
-                          size="sm"
-                        >
-                          Copy code
-                        </Button>
-                      </div>
-                    )
-                  })()}
+                    {instruction.url && (() => {
+                      const url = instruction.url
+                      return (
+                        <div className="flex items-center justify-between gap-2">
+                          <Button
+                            onClick={() => handleOpenUrl(url)}
+                            disabled={isBusy}
+                            variant="secondary"
+                            size="sm"
+                          >
+                            Open verification page
+                          </Button>
+                          {instruction.autoOpened && (
+                            <p className="text-[11px] text-muted-foreground">Opened automatically</p>
+                          )}
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )}
 
-                  {instruction.url && (() => {
-                    const url = instruction.url
-                    return (
-                      <div className="flex items-center justify-between gap-2">
-                        <Button
-                          onClick={() => handleOpenUrl(url)}
-                          disabled={isBusy}
-                          variant="outline"
-                          size="sm"
-                        >
-                          Open verification page
-                        </Button>
-                        {instruction.autoOpened && (
-                          <p className="text-[11px] text-muted-foreground">Opened automatically</p>
-                        )}
-                      </div>
-                    )
-                  })()}
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-2">
-                <Button
-                  onClick={() => {
-                    void handleCancel().catch((error) => {
-                      setFlowError(error instanceof Error ? error.message : String(error))
-                    })
-                  }}
-                  disabled={isBusy}
-                  variant="outline"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {status === "success" && (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-foreground">
-                {provider?.name ?? providerID} connected successfully.
-              </p>
-              <p className="text-xs text-muted-foreground">Closing window...</p>
-            </div>
-          )}
-
-          {status !== "authorizing" && status !== "success" && (
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-2">
-                {methods.map((method) => (
+                <div className="mt-2 flex items-center justify-end gap-2">
                   <Button
-                    key={method.id}
                     onClick={() => {
-                      setSelectedMethodID(method.id)
-                      setValues(buildInitialValues(method.fields ?? []))
-                      setFieldErrors({})
-                      setFlowError(null)
+                      void handleCancel().catch((error) => {
+                        setFlowError(error instanceof Error ? error.message : String(error))
+                      })
                     }}
+                    disabled={isBusy}
                     variant="outline"
-                    className="w-full justify-between px-3 py-2 text-left hover:bg-secondary/40"
                   >
-                    <span className="text-xs font-medium text-foreground">{method.label}</span>
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                      {method.type}
-                    </span>
+                    Cancel
                   </Button>
-                ))}
+                </div>
               </div>
+            )}
 
-              {selectedMethod && (
-                <div className="flex flex-col gap-3 border border-border bg-secondary/20 px-3 py-3">
-                  <p className="text-xs font-medium text-foreground">{selectedMethod.label}</p>
+            {status === "success" && (
+              <div className="flex flex-col items-center justify-center gap-3 py-6">
+                <div className="flex items-center justify-center rounded-full bg-primary/10 p-3 text-primary">
+                  <Check className="size-6" />
+                </div>
+                <div className="flex flex-col items-center gap-1 text-center">
+                  <p className="text-sm font-medium text-foreground">
+                    {provider?.name ?? providerID} connected successfully
+                  </p>
+                  <p className="text-xs text-muted-foreground">Closing window...</p>
+                </div>
+              </div>
+            )}
 
-                  {selectedMethod.fields && selectedMethod.fields.length > 0 && (
-                    <ProviderAuthMethodForm
-                      fields={selectedMethod.fields}
-                      values={values}
-                      errors={fieldErrors}
-                      disabled={isBusy}
-                      onChange={(key, value) => {
-                        setValues((previous) => ({
-                          ...previous,
-                          [key]: value,
-                        }))
-                        setFieldErrors((previous) => ({
-                          ...previous,
-                          [key]: "",
-                        }))
-                      }}
-                    />
-                  )}
-
-                  <div className="mt-1 flex items-center justify-end gap-2">
+            {status !== "authorizing" && status !== "success" && (
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  {methods.map((method) => (
                     <Button
+                      key={method.id}
                       onClick={() => {
-                        setSelectedMethodID(null)
-                        setValues({})
+                        setSelectedMethodID(method.id)
+                        setValues(buildInitialValues(method.fields ?? []))
                         setFieldErrors({})
                         setFlowError(null)
                       }}
-                      disabled={isBusy}
                       variant="outline"
+                      className="w-full justify-between px-4 py-3 text-left hover:bg-secondary/40"
                     >
-                      Back
+                      <span className="text-xs font-medium text-foreground">{method.label}</span>
+                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                        {method.type}
+                      </span>
                     </Button>
+                  ))}
+                </div>
+
+                {selectedMethod && (
+                  <div className="mt-2 flex flex-col gap-4 bg-secondary/20 px-4 py-4">
+                    <p className="text-xs font-medium text-foreground">{selectedMethod.label}</p>
+
+                    {selectedMethod.fields && selectedMethod.fields.length > 0 && (
+                      <ProviderAuthMethodForm
+                        fields={selectedMethod.fields}
+                        values={values}
+                        errors={fieldErrors}
+                        disabled={isBusy}
+                        onChange={(key, value) => {
+                          setValues((previous) => ({
+                            ...previous,
+                            [key]: value,
+                          }))
+                          setFieldErrors((previous) => ({
+                            ...previous,
+                            [key]: "",
+                          }))
+                        }}
+                      />
+                    )}
+
+                    {displayError && (
+                      <p className="text-xs text-destructive">{displayError}</p>
+                    )}
+
+                    <div className="mt-2 flex items-center justify-end gap-2">
+                      <Button
+                        onClick={() => {
+                          setSelectedMethodID(null)
+                          setValues({})
+                          setFieldErrors({})
+                          setFlowError(null)
+                        }}
+                        disabled={isBusy}
+                        variant="ghost"
+                      >
+                        Back
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          void handleStart().catch((error) => {
+                            setFlowError(error instanceof Error ? error.message : String(error))
+                          })
+                        }}
+                        disabled={isBusy}
+                      >
+                        {startAuthFlowMutation.isPending ? "Starting..." : "Continue"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {!selectedMethod && (
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="flex-1">
+                      {displayError && (
+                        <p className="text-xs text-destructive">{displayError}</p>
+                      )}
+                    </div>
                     <Button
                       onClick={() => {
-                        void handleStart().catch((error) => {
+                        void handleCancel().catch((error) => {
                           setFlowError(error instanceof Error ? error.message : String(error))
                         })
                       }}
                       disabled={isBusy}
+                      variant="ghost"
                     >
-                      {startAuthFlowMutation.isPending ? "Starting..." : "Continue"}
+                      Close
                     </Button>
                   </div>
-                </div>
-              )}
-
-              <div className="flex items-center justify-end">
-                <Button
-                  onClick={() => {
-                    void handleCancel().catch((error) => {
-                      setFlowError(error instanceof Error ? error.message : String(error))
-                    })
-                  }}
-                  disabled={isBusy}
-                  variant="outline"
-                >
-                  Close
-                </Button>
+                )}
               </div>
-
-              {displayError && (
-                <p className="text-xs text-destructive">{displayError}</p>
-              )}
-            </div>
-          )}
-        </main>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
