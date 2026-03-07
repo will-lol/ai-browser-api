@@ -4,6 +4,7 @@ import { PendingRequestCard } from "@/components/extension/pending-request-card"
 import { Toaster, toast } from "sonner";
 import { currentOrigin } from "@/lib/extension-runtime-api";
 import { floatingPermissionDataResultAtom } from "@/lib/extension-runtime-atoms";
+import { isInterruptedOnlyCause } from "@/lib/effect-cause";
 
 interface FloatingPermissionPromptProps {
   className?: string;
@@ -33,6 +34,7 @@ export function FloatingPermissionPrompt({
 
   useEffect(() => {
     if (dataResult._tag !== "Failure") return;
+    if (isInterruptedOnlyCause(dataResult.cause)) return;
     console.error(
       "[floating-permission-prompt] failed to load permission prompt data",
       dataResult.cause,

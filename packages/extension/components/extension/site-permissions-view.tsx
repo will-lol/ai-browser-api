@@ -1,5 +1,5 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ModelRow } from "@/components/extension/model-row";
 import { PendingRequestCard } from "@/components/extension/pending-request-card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   sitePermissionsDataResultAtom,
 } from "@/lib/extension-runtime-atoms";
+import { isInterruptedOnlyCause } from "@/lib/effect-cause";
 import { setOriginEnabledAtom } from "@/lib/extension-runtime-mutations";
 
 interface SitePermissionsViewProps {
@@ -36,6 +37,12 @@ export function SitePermissionsView({
   const data = useMemo(() => Result.getOrElse(dataResult, () => null), [
     dataResult,
   ]);
+  const hasInterruptedLoad = useMemo(
+    () =>
+      dataResult._tag === "Failure" && isInterruptedOnlyCause(dataResult.cause),
+    [dataResult],
+  );
+  const hasLoadFailure = dataResult._tag === "Failure" && !hasInterruptedLoad;
 
   const originEnabled = hasActiveOrigin && (data?.originState.enabled ?? true);
   const pendingRequests = useMemo(
@@ -119,6 +126,14 @@ export function SitePermissionsView({
   const controlsDisabled =
     originPending || !hasActiveOrigin || originTogglePending;
 
+  useEffect(() => {
+    if (!hasLoadFailure) return;
+    console.error(
+      "[site-permissions] failed to load permissions data",
+      dataResult.cause,
+    );
+  }, [dataResult, hasLoadFailure]);
+
   if (originPending) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
@@ -137,12 +152,7 @@ export function SitePermissionsView({
     );
   }
 
-  if (dataResult._tag === "Failure" && data == null) {
-    console.error(
-      "[site-permissions] failed to load permissions data",
-      dataResult.cause,
-    );
-
+  if (hasLoadFailure && data == null) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
         <p className="text-xs text-destructive">
