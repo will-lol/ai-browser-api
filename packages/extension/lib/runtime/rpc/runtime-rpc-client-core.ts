@@ -66,9 +66,9 @@ export type RuntimeConnection<Rpcs extends Rpc.Any> = {
   onDisconnect: RuntimeDisconnectListener;
 };
 
-export type RuntimeRpcClientCore<Rpcs extends Rpc.Any> = {
-  ensureConnection: Effect.Effect<RuntimeConnection<Rpcs>, unknown>;
-  ensureClient: Effect.Effect<RuntimeClient<Rpcs>, unknown>;
+export type RuntimeRpcClientCore<Rpcs extends Rpc.Any, E> = {
+  ensureConnection: Effect.Effect<RuntimeConnection<Rpcs>, E>;
+  ensureClient: Effect.Effect<RuntimeClient<Rpcs>, E>;
   destroyConnection: (
     reason: "destroy" | "pagehide",
   ) => Effect.Effect<void, never>;
@@ -78,6 +78,7 @@ type RuntimeRpcClientCoreOptions<Rpcs extends Rpc.Any, E> = {
   portName: string;
   rpcGroup: RpcGroup.RpcGroup<Rpcs>;
   invalidatedError: () => E;
+  normalizeError: (error: unknown) => E;
   connect?: RuntimeConnect;
   windowLike?: PagehideTarget;
   beforeReady?: BeforeReadyHook;
@@ -174,7 +175,7 @@ function createRuntimeConnection<Rpcs extends Rpc.Any, E>(
   options: RuntimeRpcClientCoreOptions<Rpcs, E>,
   destroyIfCurrent: (token: number) => Promise<void>,
   connectionId: number,
-): Effect.Effect<RuntimeConnection<Rpcs>, unknown> {
+): Effect.Effect<RuntimeConnection<Rpcs>, E> {
   const connect = options.connect ?? defaultConnect;
   const beforeReady = options.beforeReady ?? (() => Promise.resolve());
 
@@ -239,16 +240,16 @@ function createRuntimeConnection<Rpcs extends Rpc.Any, E>(
         throw error;
       }
     },
-    catch: (error) => error,
+    catch: options.normalizeError,
   });
 }
 
 export function makeRuntimeRpcClientCore<Rpcs extends Rpc.Any, E>(
   options: RuntimeRpcClientCoreOptions<Rpcs, E>,
-): RuntimeRpcClientCore<Rpcs> {
+): RuntimeRpcClientCore<Rpcs, E> {
   let lifecycle: ResettableConnectionLifecycle<
     RuntimeConnection<Rpcs>,
-    unknown,
+    E,
     "disconnect"
   > | null = null;
 
@@ -263,7 +264,7 @@ export function makeRuntimeRpcClientCore<Rpcs extends Rpc.Any, E>(
   lifecycle = Effect.runSync(
     makeResettableConnectionLifecycle<
       RuntimeConnection<Rpcs>,
-      unknown,
+      E,
       "disconnect"
     >({
       create: (token) =>

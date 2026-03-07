@@ -90,6 +90,10 @@ function createWindowLike() {
   };
 }
 
+function toError(error: unknown) {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 describe("makeRuntimeRpcClientCore", () => {
   it("coalesces concurrent cold-start callers to one connect call", async () => {
     const started = createDeferred<void>();
@@ -101,6 +105,7 @@ describe("makeRuntimeRpcClientCore", () => {
       portName: "test-port",
       rpcGroup: RuntimePublicRpcGroup,
       invalidatedError: () => new Error("invalidated"),
+      normalizeError: toError,
       connect: () => {
         connectCalls += 1;
         const port = createFakePort();
@@ -137,6 +142,7 @@ describe("makeRuntimeRpcClientCore", () => {
       portName: "test-port",
       rpcGroup: RuntimePublicRpcGroup,
       invalidatedError: () => new Error("invalidated"),
+      normalizeError: toError,
       connect: () => {
         const port = createFakePort();
         ports.push(port);
@@ -186,6 +192,7 @@ describe("makeRuntimeRpcClientCore", () => {
       portName: "test-port",
       rpcGroup: RuntimePublicRpcGroup,
       invalidatedError: () => new Error("invalidated"),
+      normalizeError: toError,
       connect: () => {
         const port = createFakePort();
         ports.push(port);
@@ -228,6 +235,7 @@ describe("makeRuntimeRpcClientCore", () => {
       portName: "test-port",
       rpcGroup: RuntimePublicRpcGroup,
       invalidatedError: () => new Error("invalidated"),
+      normalizeError: toError,
       connect: () => {
         const port = createFakePort();
         ports.push(port);
@@ -254,6 +262,7 @@ describe("makeRuntimeRpcClientCore", () => {
       portName: "test-port",
       rpcGroup: RuntimePublicRpcGroup,
       invalidatedError: () => new Error("invalidated"),
+      normalizeError: toError,
       connect: () => createFakePort(),
       windowLike,
     });

@@ -2,6 +2,8 @@ import {
   type RuntimeAdminRpc,
   RUNTIME_ADMIN_RPC_PORT_NAME,
   RuntimeValidationError,
+  toRuntimeRpcError,
+  type RuntimeRpcError,
   RuntimeAdminRpcGroup,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
@@ -21,21 +23,34 @@ const core = makeRuntimeRpcClientCore({
     new RuntimeValidationError({
       message: CONNECTION_INVALIDATED_MESSAGE,
     }),
+  normalizeError: toRuntimeRpcError,
 });
 
 export function createRuntimeAdminRpcClient(input: {
   readonly ensureClient: Effect.Effect<
     RuntimeRpcClientConnection<RuntimeAdminRpc>,
-    unknown
+    RuntimeRpcError
   >;
 }) {
-  const withClient = <A, E>(
-    f: (client: RuntimeRpcClientConnection<RuntimeAdminRpc>) => Effect.Effect<A, E>,
-  ) => Effect.flatMap(input.ensureClient, f);
+  const withClient = <A, E, R>(
+    f: (
+      client: RuntimeRpcClientConnection<RuntimeAdminRpc>,
+    ) => Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, RuntimeRpcError, R> =>
+    Effect.flatMap(input.ensureClient, (client) =>
+      Effect.mapError(f(client), toRuntimeRpcError),
+    );
 
-  const withClientStream = <A, E>(
-    f: (client: RuntimeRpcClientConnection<RuntimeAdminRpc>) => Stream.Stream<A, E>,
-  ) => Stream.unwrap(Effect.map(input.ensureClient, f));
+  const withClientStream = <A, E, R>(
+    f: (
+      client: RuntimeRpcClientConnection<RuntimeAdminRpc>,
+    ) => Stream.Stream<A, E, R>,
+  ): Stream.Stream<A, RuntimeRpcError, R> =>
+    Stream.unwrap(
+      Effect.map(input.ensureClient, (client) =>
+        Stream.mapError(f(client), toRuntimeRpcError),
+      ),
+    );
 
   return {
     listModels: (payload: Parameters<RuntimeRpcClientConnection<RuntimeAdminRpc>["listModels"]>[0]) =>

@@ -56,83 +56,83 @@ function createPageBridgeHandlers() {
           connectedOnly: true,
         }),
       ).pipe(
-          Effect.map((models) => ({
-            models,
-          })),
-        ),
+        Effect.map((models) => ({
+          models,
+        })),
+      ),
 
     getModel: (input) =>
       mapRuntimeEffect(
         Effect.gen(function* () {
-        const requestId = input.requestId ?? nextBridgeRequestId();
-        const sessionID = input.sessionID ?? requestId;
+          const requestId = input.requestId ?? nextBridgeRequestId();
+          const sessionID = input.sessionID ?? requestId;
 
-        return yield* runtime.acquireModel({
-          origin: window.location.origin,
-          requestId,
-          sessionID,
-          modelId: input.modelId,
-        });
-      }),
+          return yield* runtime.acquireModel({
+            origin: window.location.origin,
+            requestId,
+            sessionID,
+            modelId: input.modelId,
+          });
+        }),
       ),
 
     requestPermission: (input) =>
       mapRuntimeEffect(
         Effect.gen(function* () {
-        const result = yield* runtime.requestPermission({
-          action: "create",
-          origin: window.location.origin,
-          modelId: input.modelId,
-        });
-
-        if (!("status" in result)) {
-          return yield* new RuntimeValidationError({
-            message: "Unexpected permission response shape",
+          const result = yield* runtime.requestPermission({
+            action: "create",
+            origin: window.location.origin,
+            modelId: input.modelId,
           });
-        }
 
-        return result;
-      }),
+          if (!("status" in result)) {
+            return yield* new RuntimeValidationError({
+              message: "Unexpected permission response shape",
+            });
+          }
+
+          return result;
+        }),
       ),
 
     abort: (input) =>
       mapRuntimeEffect(
         Effect.gen(function* () {
-        if (!input.requestId) {
-          return { ok: true };
-        }
+          if (!input.requestId) {
+            return { ok: true };
+          }
 
-        const sessionID = input.sessionID ?? input.requestId;
+          const sessionID = input.sessionID ?? input.requestId;
 
-        yield* runtime.abortModelCall({
-          origin: window.location.origin,
-          sessionID,
-          requestId: input.requestId,
-        });
+          yield* runtime.abortModelCall({
+            origin: window.location.origin,
+            sessionID,
+            requestId: input.requestId,
+          });
 
-        return {
-          ok: true,
-        };
-      }),
+          return {
+            ok: true,
+          };
+        }),
       ),
 
     modelDoGenerate: (input) =>
       mapRuntimeEffect(
         Effect.gen(function* () {
-        const normalized = normalizeModelCallInput(input);
-        if (!normalized.options) {
-          return yield* new RuntimeValidationError({
-            message: "modelDoGenerate requires call options with prompt",
+          const normalized = normalizeModelCallInput(input);
+          if (!normalized.options) {
+            return yield* new RuntimeValidationError({
+              message: "modelDoGenerate requires call options with prompt",
+            });
+          }
+          return yield* runtime.modelDoGenerate({
+            origin: window.location.origin,
+            requestId: normalized.requestId,
+            sessionID: normalized.sessionID,
+            modelId: normalized.modelId,
+            options: normalized.options,
           });
-        }
-        return yield* runtime.modelDoGenerate({
-          origin: window.location.origin,
-          requestId: normalized.requestId,
-          sessionID: normalized.sessionID,
-          modelId: normalized.modelId,
-          options: normalized.options,
-        });
-      }),
+        }),
       ),
 
     modelDoStream: (input) => {
@@ -148,12 +148,12 @@ function createPageBridgeHandlers() {
 
       return mapRuntimeStream(
         runtime.modelDoStream({
-        origin: window.location.origin,
-        requestId: normalized.requestId,
-        sessionID: normalized.sessionID,
-        modelId: normalized.modelId,
-        options,
-      }),
+          origin: window.location.origin,
+          requestId: normalized.requestId,
+          sessionID: normalized.sessionID,
+          modelId: normalized.modelId,
+          options,
+        }),
       );
     },
   });

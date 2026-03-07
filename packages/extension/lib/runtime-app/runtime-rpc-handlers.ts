@@ -90,45 +90,37 @@ function requireOrigin(operation: string, origin: string | undefined) {
 
 function makeRuntimeSharedRpcHandlers(app: RuntimeApplicationApi) {
   return {
-    getOriginState: ({ origin }) => mapRpcError(app.getOriginState(origin)),
-    listPending: ({ origin }) => mapRpcError(app.listPending(origin)),
+    getOriginState: ({ origin }) => app.getOriginState(origin),
+    listPending: ({ origin }) => app.listPending(origin),
     acquireModel: ({ origin, requestId, sessionID, modelId }) =>
-      mapRpcError(
-        app.acquireModel({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-        }),
-      ),
+      app.acquireModel({
+        origin,
+        requestID: requestId,
+        sessionID,
+        modelID: modelId,
+      }),
     modelDoGenerate: ({ origin, requestId, sessionID, modelId, options }) =>
-      mapRpcError(
-        app.modelDoGenerate({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-          options,
-        }),
-      ),
+      app.modelDoGenerate({
+        origin,
+        requestID: requestId,
+        sessionID,
+        modelID: modelId,
+        options,
+      }),
     modelDoStream: ({ origin, requestId, sessionID, modelId, options }) =>
-      mapRpcStream(
-        app.modelDoStream({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-          options,
-        }),
-      ),
+      app.modelDoStream({
+        origin,
+        requestID: requestId,
+        sessionID,
+        modelID: modelId,
+        options,
+      }),
     abortModelCall: ({ origin, sessionID, requestId }) =>
-      mapRpcError(
-        app.abortModelCall({
-          origin,
-          sessionID,
-          requestID: requestId,
-        }),
-      ),
+      app.abortModelCall({
+        origin,
+        sessionID,
+        requestID: requestId,
+      }),
   } satisfies RuntimeSharedRpcHandlers;
 }
 

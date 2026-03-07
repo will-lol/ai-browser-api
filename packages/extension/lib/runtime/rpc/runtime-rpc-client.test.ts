@@ -4,7 +4,9 @@ import {
   type RuntimeAdminRpc,
   type RuntimeModelSummary,
   type RuntimePublicRpc,
+  type RuntimeRpcError,
   type RuntimeStreamPart,
+  RuntimeValidationError,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
@@ -56,6 +58,37 @@ describe("runtime rpc client facade", () => {
     });
 
     assert.deepEqual(await Effect.runPromise(effect), TEST_MODELS);
+  });
+
+  it("preserves RuntimeRpcError through Effect.map on public unary methods", () => {
+    const client = createRuntimePublicRpcClient({
+      ensureClient: Effect.succeed(
+        ({
+          listModels: () =>
+            Effect.fail(
+              new RuntimeValidationError({
+                message: "failed",
+              }),
+            ),
+        }) as unknown as RuntimeRpcClientConnection<RuntimePublicRpc>,
+      ),
+    });
+
+    const effect = client
+      .listModels({
+        origin: "https://example.test",
+        connectedOnly: true,
+      })
+      .pipe(Effect.map((models) => ({ models })));
+
+    const typed: Effect.Effect<
+      {
+        models: ReadonlyArray<RuntimeModelSummary>;
+      },
+      RuntimeRpcError
+    > = effect;
+
+    assert.ok(typed);
   });
 
   it("wraps public stream methods as streams", async () => {
