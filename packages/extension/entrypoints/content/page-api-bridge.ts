@@ -3,8 +3,8 @@ import {
   PAGE_BRIDGE_READY_EVENT,
   PageBridgeRpcGroup,
   RuntimeValidationError,
+  RuntimeDefectError,
   isPageBridgePortControlMessage,
-  serializeUnknownRuntimeError,
   type BridgeModelCallRequest,
   type PageBridgePortControlMessage,
 } from "@llm-bridge/contracts";
@@ -38,11 +38,9 @@ function normalizeModelCallInput(input: BridgeModelCallRequest) {
 }
 
 function mapRuntimeEffect<A, E, R>(effect: Effect.Effect<A, E, R>) {
-  return Effect.mapError(effect, serializeUnknownRuntimeError);
-}
-
-function mapRuntimeStream<A, E, R>(stream: Stream.Stream<A, E, R>) {
-  return Stream.mapError(stream, serializeUnknownRuntimeError);
+  return Effect.catchAllDefect(effect, (defect) =>
+    Effect.fail(new RuntimeDefectError({ defect: String(defect) })),
+  );
 }
 
 function createPageBridgeHandlers() {
@@ -146,15 +144,13 @@ function createPageBridgeHandlers() {
         );
       }
 
-      return mapRuntimeStream(
-        runtime.modelDoStream({
-          origin: window.location.origin,
-          requestId: normalized.requestId,
-          sessionID: normalized.sessionID,
-          modelId: normalized.modelId,
-          options,
-        }),
-      );
+      return runtime.modelDoStream({
+        origin: window.location.origin,
+        requestId: normalized.requestId,
+        sessionID: normalized.sessionID,
+        modelId: normalized.modelId,
+        options,
+      });
     },
   });
 }

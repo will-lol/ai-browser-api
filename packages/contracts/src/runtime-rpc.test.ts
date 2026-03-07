@@ -3,16 +3,12 @@ import { describe, it } from "node:test";
 import { RpcClientError } from "@effect/rpc/RpcClientError";
 import * as Schema from "effect/Schema";
 import {
+  RuntimeUpstreamServiceError,
   RuntimeRpcErrorSchema,
-  RuntimeThrownError,
-  RuntimeTransportError,
-  RuntimeUnknownValueError,
   RuntimeCreatePermissionRequestInputSchema,
   RuntimeRequestPermissionInputSchema,
   RuntimeAdminRpcGroup,
   RuntimePublicRpcGroup,
-  serializeRpcClientError,
-  serializeUnknownRuntimeError,
 } from "./index";
 
 const EXPECTED_PUBLIC_TAGS = new Set([
@@ -115,48 +111,48 @@ describe("runtime rpc contracts", () => {
     );
   });
 
-  it("serializes native errors into RuntimeThrownError", () => {
-    const serialized = serializeUnknownRuntimeError(
-      new TypeError("bad payload"),
-    );
+  it("encodes and decodes upstream errors with optional retryAfter", () => {
+    const decodeRuntimeError = Schema.decodeUnknownSync(RuntimeRpcErrorSchema);
+    const encodeRuntimeError = Schema.encodeSync(RuntimeRpcErrorSchema);
 
-    assert.deepEqual(
-      Schema.decodeUnknownSync(RuntimeRpcErrorSchema)(serialized),
-      serialized,
-    );
-    assert.equal(serialized._tag, "RuntimeThrownError");
-    assert.equal(serialized.name, "TypeError");
-    assert.equal(serialized.message, "bad payload");
-  });
-
-  it("serializes rpc client errors into RuntimeTransportError", () => {
-    const serialized = serializeRpcClientError(
-      new RpcClientError({
-        reason: "Protocol",
-        message: "failed to post",
-        cause: new Error("boom"),
-      }),
-      "rpc-client",
-    );
-
-    assert.deepEqual(
-      Schema.decodeUnknownSync(RuntimeRpcErrorSchema)(serialized),
-      serialized,
-    );
-    assert.equal(serialized._tag, "RuntimeTransportError");
-    assert.equal(serialized.reason, "Protocol");
-  });
-
-  it("serializes non-error thrown values into RuntimeUnknownValueError", () => {
-    const serialized = serializeUnknownRuntimeError({
-      status: "weird",
+    const withRetryAfter = decodeRuntimeError({
+      _tag: "RuntimeUpstreamServiceError",
+      providerID: "openai",
+      operation: "generate",
+      statusCode: 429,
+      retryAfter: 12.5,
+      retryable: true,
+      message: "Rate limited",
     });
 
-    assert.deepEqual(
-      Schema.decodeUnknownSync(RuntimeRpcErrorSchema)(serialized),
-      serialized,
-    );
-    assert.equal(serialized._tag, "RuntimeUnknownValueError");
-    assert.equal(serialized.value, "[object Object]");
+    assert.ok(withRetryAfter instanceof RuntimeUpstreamServiceError);
+    assert.equal(withRetryAfter.retryAfter, 12.5);
+    assert.deepEqual(encodeRuntimeError(withRetryAfter), {
+      _tag: "RuntimeUpstreamServiceError",
+      providerID: "openai",
+      operation: "generate",
+      statusCode: 429,
+      retryAfter: 12.5,
+      retryable: true,
+      message: "Rate limited",
+    });
+
+    const withoutRetryAfter = decodeRuntimeError({
+      _tag: "RuntimeUpstreamServiceError",
+      providerID: "openai",
+      operation: "stream",
+      retryable: false,
+      message: "Upstream failed",
+    });
+
+    assert.ok(withoutRetryAfter instanceof RuntimeUpstreamServiceError);
+    assert.equal(withoutRetryAfter.retryAfter, undefined);
+    assert.deepEqual(encodeRuntimeError(withoutRetryAfter), {
+      _tag: "RuntimeUpstreamServiceError",
+      providerID: "openai",
+      operation: "stream",
+      retryable: false,
+      message: "Upstream failed",
+    });
   });
 });

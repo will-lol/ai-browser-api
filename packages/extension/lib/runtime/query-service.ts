@@ -1,5 +1,7 @@
 import * as Effect from "effect/Effect";
+import { type RuntimeRpcError, isRuntimeRpcError } from "@llm-bridge/contracts";
 import { runtimeDb } from "@/lib/runtime/db/runtime-db";
+import { wrapStorageError } from "@/lib/runtime/errors";
 import { resolveTrustedPermissionTargets } from "@/lib/runtime/permission-targets";
 import {
   listModelRows,
@@ -11,15 +13,18 @@ import {
   listPermissions,
 } from "@/lib/runtime/permissions";
 
-const tryPromise = <A>(tryFn: () => Promise<A>) =>
+const tryStoragePromise = <A>(operation: string, tryFn: () => Promise<A>) =>
   Effect.tryPromise({
     try: tryFn,
-    catch: (error) => error,
+    catch: (error): RuntimeRpcError =>
+      isRuntimeRpcError(error) ? error : wrapStorageError(error, operation),
   });
 
 export function listProviders() {
   return Effect.gen(function* () {
-    const rows = yield* tryPromise(() => listProviderRows());
+    const rows = yield* tryStoragePromise("query.listProviders", () =>
+      listProviderRows(),
+    );
 
     return rows
       .map((row) => ({
@@ -41,8 +46,8 @@ export function listModels(
 ) {
   return Effect.gen(function* () {
     const [modelRows, providerRows] = yield* Effect.all([
-      tryPromise(() => listModelRows(options)),
-      tryPromise(() => listProviderRows()),
+      tryStoragePromise("query.listModels", () => listModelRows(options)),
+      tryStoragePromise("query.listModels", () => listProviderRows()),
     ]);
 
     const providers = new Map(providerRows.map((row) => [row.id, row] as const));
@@ -64,7 +69,9 @@ export function listModels(
 
 export function getOriginState(origin: string) {
   return Effect.gen(function* () {
-    const state = yield* tryPromise(() => getOriginPermissions(origin));
+    const state = yield* tryStoragePromise("query.getOriginState", () =>
+      getOriginPermissions(origin),
+    );
 
     return {
       origin,
@@ -75,12 +82,14 @@ export function getOriginState(origin: string) {
 
 export function listPermissionsForOrigin(origin: string) {
   return Effect.gen(function* () {
-    const rows = yield* tryPromise(() => listPermissions(origin));
+    const rows = yield* tryStoragePromise("query.listPermissions", () =>
+      listPermissions(origin),
+    );
     if (rows.length === 0) {
       return [];
     }
 
-    const modelRows = yield* tryPromise(() =>
+    const modelRows = yield* tryStoragePromise("query.listPermissions", () =>
       runtimeDb.models.bulkGet(rows.map((row) => row.modelId)),
     );
     const modelById = new Map(
@@ -108,12 +117,14 @@ export function listPermissionsForOrigin(origin: string) {
 
 export function listPendingRequestsForOrigin(origin: string) {
   return Effect.gen(function* () {
-    const rows = yield* tryPromise(() => listPendingRequests(origin));
+    const rows = yield* tryStoragePromise("query.listPending", () =>
+      listPendingRequests(origin),
+    );
     if (rows.length === 0) {
       return [];
     }
 
-    const trustedTargets = yield* tryPromise(() =>
+    const trustedTargets = yield* tryStoragePromise("query.listPending", () =>
       resolveTrustedPermissionTargets(rows.map((row) => row.modelId)),
     );
 

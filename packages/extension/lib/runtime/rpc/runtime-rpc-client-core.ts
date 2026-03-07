@@ -47,10 +47,10 @@ type PagehideTarget = {
   ) => void;
 };
 
-type BeforeReadyHook = (input: {
+type BeforeReadyHook<E> = (input: {
   connectionId: number;
   port: RuntimePort;
-}) => Promise<void>;
+}) => Effect.Effect<void, E>;
 
 type RuntimeClient<Rpcs extends Rpc.Any> = RpcClient.RpcClient<
   Rpcs,
@@ -78,10 +78,9 @@ type RuntimeRpcClientCoreOptions<Rpcs extends Rpc.Any, E> = {
   portName: string;
   rpcGroup: RpcGroup.RpcGroup<Rpcs>;
   invalidatedError: () => E;
-  normalizeError: (error: unknown) => E;
   connect?: RuntimeConnect;
   windowLike?: PagehideTarget;
-  beforeReady?: BeforeReadyHook;
+  beforeReady?: BeforeReadyHook<E>;
 };
 
 const defaultConnect: RuntimeConnect = ({ name }) =>
@@ -97,76 +96,66 @@ const defaultWindowLike =
 function closeRuntimeConnection<Rpcs extends Rpc.Any>(
   connection: RuntimeConnection<Rpcs>,
 ): Effect.Effect<void, never> {
-  return Effect.tryPromise({
-    try: async () => {
-      connection.port.onDisconnect.removeListener(connection.onDisconnect);
+  return Effect.gen(function* () {
+    connection.port.onDisconnect.removeListener(connection.onDisconnect);
 
-      await Effect.runPromise(
-        Scope.close(connection.scope, Exit.succeed(undefined)),
-      ).catch(() => undefined);
+    yield* Scope.close(connection.scope, Exit.succeed(undefined)).pipe(
+      Effect.catchAll(() => Effect.void),
+    );
 
-      try {
-        connection.port.disconnect();
-      } catch {
-        // ignored
-      }
-    },
-    catch: () => undefined,
-  }).pipe(Effect.orElseSucceed(() => undefined));
+    try {
+      connection.port.disconnect();
+    } catch {
+      // ignored
+    }
+  }).pipe(Effect.catchAll(() => Effect.void));
 }
 
 function createClient<Rpcs extends Rpc.Any>(
   rpcGroup: RpcGroup.RpcGroup<Rpcs>,
   port: RuntimePort,
-  scope: Scope.CloseableScope,
-): Promise<RuntimeClient<Rpcs>> {
-  return Effect.runPromise(
-    RpcClient.Protocol.make((writeResponse) =>
-      Effect.gen(function* () {
-        const onMessage: RuntimeMessageListener = (payload) => {
-          void Effect.runPromise(writeResponse(payload)).catch((error) => {
-            console.warn(
-              "runtime rpc: failed to process server message",
-              error,
-            );
-          });
-        };
+): Effect.Effect<RuntimeClient<Rpcs>, never, Scope.Scope> {
+  return RpcClient.Protocol.make((writeResponse) =>
+    Effect.gen(function* () {
+      const onMessage: RuntimeMessageListener = (payload) => {
+        void Effect.runPromise(writeResponse(payload)).catch((error) => {
+          console.warn(
+            "runtime rpc: failed to process server message",
+            error,
+          );
+        });
+      };
 
-        port.onMessage.addListener(onMessage);
+      port.onMessage.addListener(onMessage);
 
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            port.onMessage.removeListener(onMessage);
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          port.onMessage.removeListener(onMessage);
+        }),
+      );
+
+      return {
+        send: (message: FromClientEncoded) =>
+          Effect.try({
+            try: () => {
+              port.postMessage(message);
+            },
+            catch: (cause) =>
+              new RpcClientError({
+                reason: "Protocol",
+                message: "Failed to post runtime RPC message",
+                cause,
+              }),
           }),
-        );
-
-        return {
-          send: (message: FromClientEncoded) =>
-            Effect.try({
-              try: () => {
-                port.postMessage(message);
-              },
-              catch: (cause) =>
-                new RpcClientError({
-                  reason: "Protocol",
-                  message: "Failed to post runtime RPC message",
-                  cause,
-                }),
-            }),
-          supportsAck: true,
-          supportsTransferables: false,
-        } as const;
-      }),
-    ).pipe(
-      Scope.extend(scope),
-      Effect.flatMap((protocol) =>
-        RpcClient.make(rpcGroup, {
-          disableTracing: true,
-        }).pipe(
-          Effect.provideService(RpcClient.Protocol, protocol),
-          Scope.extend(scope),
-        ),
-      ),
+        supportsAck: true,
+        supportsTransferables: false,
+      } as const;
+    }),
+  ).pipe(
+    Effect.flatMap((protocol) =>
+      RpcClient.make(rpcGroup, {
+        disableTracing: true,
+      }).pipe(Effect.provideService(RpcClient.Protocol, protocol)),
     ),
   );
 }
@@ -177,70 +166,55 @@ function createRuntimeConnection<Rpcs extends Rpc.Any, E>(
   connectionId: number,
 ): Effect.Effect<RuntimeConnection<Rpcs>, E> {
   const connect = options.connect ?? defaultConnect;
-  const beforeReady = options.beforeReady ?? (() => Promise.resolve());
+  const beforeReady = options.beforeReady ?? (() => Effect.void);
 
-  return Effect.tryPromise({
-    try: async () => {
-      let scope: Scope.CloseableScope | null = null;
-      let port: RuntimePort | null = null;
-      let onDisconnect: RuntimeDisconnectListener | null = null;
+  return Effect.gen(function* () {
+    const runtimeScope = yield* Scope.make();
 
-      try {
-        const runtimeScope = await Effect.runPromise(Scope.make());
-        scope = runtimeScope;
+    return yield* Effect.gen(function* () {
+      const runtimePort = connect({
+        name: options.portName,
+      });
 
-        const runtimePort = connect({
-          name: options.portName,
-        });
-        port = runtimePort;
+      const onDisconnect = () => {
+        void destroyIfCurrent(connectionId).catch(() => undefined);
+      };
 
-        onDisconnect = () => {
-          void destroyIfCurrent(connectionId).catch(() => undefined);
-        };
+      runtimePort.onDisconnect.addListener(onDisconnect);
 
-        runtimePort.onDisconnect.addListener(onDisconnect);
-
-        await beforeReady({
-          connectionId,
-          port: runtimePort,
-        });
-
-        const client = await createClient(
-          options.rpcGroup,
-          runtimePort,
-          runtimeScope,
-        );
-
-        return {
-          connectionId,
-          scope: runtimeScope,
-          port: runtimePort,
-          client,
-          onDisconnect,
-        };
-      } catch (error) {
-        if (port && onDisconnect) {
-          port.onDisconnect.removeListener(onDisconnect);
-        }
-
-        if (scope) {
-          await Effect.runPromise(
-            Scope.close(scope, Exit.succeed(undefined)),
-          ).catch(() => undefined);
-        }
-
-        if (port) {
+      yield* Scope.addFinalizer(
+        runtimeScope,
+        Effect.sync(() => {
+          runtimePort.onDisconnect.removeListener(onDisconnect);
           try {
-            port.disconnect();
+            runtimePort.disconnect();
           } catch {
             // ignored
           }
-        }
+        }),
+      );
 
-        throw error;
-      }
-    },
-    catch: options.normalizeError,
+      yield* beforeReady({
+        connectionId,
+        port: runtimePort,
+      });
+
+      const client = yield* createClient(options.rpcGroup, runtimePort).pipe(
+        Scope.extend(runtimeScope),
+      );
+
+      return {
+        connectionId,
+        scope: runtimeScope,
+        port: runtimePort,
+        client,
+        onDisconnect,
+      };
+    }).pipe(
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) ? Scope.close(runtimeScope, exit) : Effect.void,
+      ),
+    );
   });
 }
 

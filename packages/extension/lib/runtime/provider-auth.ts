@@ -1,7 +1,14 @@
 import { getAuth, removeAuth, setAuth } from "@/lib/runtime/auth-store";
-import { RuntimeValidationError } from "@llm-bridge/contracts";
+import {
+  RuntimeValidationError,
+  isRuntimeRpcError,
+} from "@llm-bridge/contracts";
 import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import type { RuntimeAuthFlowInstruction } from "@llm-bridge/contracts";
+import {
+  wrapAuthPluginError,
+  wrapExtensionError,
+} from "@/lib/runtime/errors";
 import type {
   AuthMethodType,
   RuntimeAuthMethod,
@@ -80,14 +87,19 @@ export async function listProviderAuthMethods(
     auth?: AuthRecord;
   } = {},
 ): Promise<RuntimeAuthMethod[]> {
-  const provider = options.provider ?? (await getProvider(providerID));
-  if (!provider) return [];
-  const pluginManager = getPluginManager();
-  return pluginManager.listAuthMethods({
-    providerID,
-    provider,
-    auth: options.auth ?? (await getAuth(providerID)),
-  });
+  try {
+    const provider = options.provider ?? (await getProvider(providerID));
+    if (!provider) return [];
+    const pluginManager = getPluginManager();
+    return pluginManager.listAuthMethods({
+      providerID,
+      provider,
+      auth: options.auth ?? (await getAuth(providerID)),
+    });
+  } catch (error) {
+    if (isRuntimeRpcError(error)) throw error;
+    throw wrapAuthPluginError(error, providerID, "auth.methods");
+  }
 }
 
 export async function startProviderAuth(input: {
@@ -99,31 +111,41 @@ export async function startProviderAuth(input: {
     instruction: RuntimeAuthFlowInstruction,
   ) => void | Promise<void>;
 }): Promise<StartProviderAuthResult> {
-  const ctx = await resolveAuthContext(input.providerID);
-  const pluginManager = getPluginManager();
-  const resolved = await pluginManager.resolveAuthMethod(ctx, input.methodID);
-  if (!resolved) {
-    throw new RuntimeValidationError({
-      message: `Auth method ${input.methodID} was not found for provider ${input.providerID}`,
-    });
+  try {
+    const ctx = await resolveAuthContext(input.providerID);
+    const pluginManager = getPluginManager();
+    const resolved = await pluginManager.resolveAuthMethod(ctx, input.methodID);
+    if (!resolved) {
+      throw new RuntimeValidationError({
+        message: `Auth method ${input.methodID} was not found for provider ${input.providerID}`,
+      });
+    }
+
+    const result = await pluginManager.authorize(
+      ctx,
+      resolved,
+      input.values ?? {},
+      input.signal,
+      input.onInstruction,
+    );
+
+    await persistAuth(input.providerID, resolved.method.type, result);
+
+    return {
+      methodID: resolved.method.id,
+      connected: true,
+    };
+  } catch (error) {
+    if (isRuntimeRpcError(error)) throw error;
+    throw wrapAuthPluginError(error, input.providerID, "auth.authorize");
   }
-
-  const result = await pluginManager.authorize(
-    ctx,
-    resolved,
-    input.values ?? {},
-    input.signal,
-    input.onInstruction,
-  );
-
-  await persistAuth(input.providerID, resolved.method.type, result);
-
-  return {
-    methodID: resolved.method.id,
-    connected: true,
-  };
 }
 
 export async function disconnectProvider(providerID: string) {
-  await removeAuth(providerID);
+  try {
+    await removeAuth(providerID);
+  } catch (error) {
+    if (isRuntimeRpcError(error)) throw error;
+    throw wrapExtensionError(error, "auth.disconnect");
+  }
 }

@@ -4,6 +4,7 @@ import type {
   LanguageModelV3GenerateResult,
   LanguageModelV3StreamPart,
 } from "@ai-sdk/provider";
+import { APICallError } from "@ai-sdk/provider";
 import * as amazonBedrockModule from "@ai-sdk/amazon-bedrock";
 import * as anthropicModule from "@ai-sdk/anthropic";
 import * as azureModule from "@ai-sdk/azure";
@@ -24,11 +25,17 @@ import {
   ModelNotFoundError,
   ProviderNotConnectedError,
   RuntimeValidationError,
+  isRuntimeRpcError,
 } from "@llm-bridge/contracts";
 import * as openRouterModule from "@openrouter/ai-sdk-provider";
+import { RetryError } from "ai";
 import { getAuth } from "@/lib/runtime/auth-store";
 import type { AuthRecord } from "@/lib/runtime/auth-store";
 import { normalizeValueForCache } from "@/lib/runtime/ai/adapter-state";
+import {
+  wrapExtensionError,
+  wrapProviderError,
+} from "@/lib/runtime/errors";
 import type {
   RuntimeAdapterContext,
   RuntimeAdapterState,
@@ -692,37 +699,53 @@ export async function getRuntimeModelDescriptor(input: {
   sessionID: string;
   requestID: string;
 }) {
-  const runtime = await resolveModelRuntimeContext(input.modelID);
-  const { context, prepared } = await prepareCallOptions({
-    runtime,
-    origin: input.origin,
-    sessionID: input.sessionID,
-    requestID: input.requestID,
-    options: {
-      prompt: [
-        {
-          role: "system",
-          content: "describe capabilities",
-        },
-      ],
-    },
-  });
+  let providerID: string | undefined;
 
-  const languageModel = await getLanguageModel({
-    runtime,
-    context,
-    transportPatch: prepared.transport,
-    staticHeaders: toHeaderRecord(prepared.callOptions.headers),
-  });
-  const supportedUrls = await Promise.resolve(
-    languageModel.supportedUrls ?? {},
-  );
+  try {
+    const runtime = await resolveModelRuntimeContext(input.modelID);
+    providerID = runtime.providerID;
 
-  return {
-    provider: languageModel.provider,
-    modelId: input.modelID,
-    supportedUrls,
-  };
+    const { context, prepared } = await prepareCallOptions({
+      runtime,
+      origin: input.origin,
+      sessionID: input.sessionID,
+      requestID: input.requestID,
+      options: {
+        prompt: [
+          {
+            role: "system",
+            content: "describe capabilities",
+          },
+        ],
+      },
+    });
+
+    const languageModel = await getLanguageModel({
+      runtime,
+      context,
+      transportPatch: prepared.transport,
+      staticHeaders: toHeaderRecord(prepared.callOptions.headers),
+    });
+    const supportedUrls = await Promise.resolve(
+      languageModel.supportedUrls ?? {},
+    );
+
+    return {
+      provider: languageModel.provider,
+      modelId: input.modelID,
+      supportedUrls,
+    };
+  } catch (error) {
+    if (isRuntimeRpcError(error)) throw error;
+    if (
+      providerID &&
+      error instanceof Error &&
+      (APICallError.isInstance(error) || RetryError.isInstance(error))
+    ) {
+      throw wrapProviderError(error, providerID, "describe");
+    }
+    throw wrapExtensionError(error, "model.describe");
+  }
 }
 
 export async function runLanguageModelGenerate(input: {
@@ -740,8 +763,11 @@ export async function runLanguageModelGenerate(input: {
     sessionID: input.sessionID,
   });
 
+  let providerID: string | undefined;
+
   try {
     const runtime = await resolveModelRuntimeContext(input.modelID);
+    providerID = runtime.providerID;
     const { context, prepared } = await prepareCallOptions({
       runtime,
       origin: input.origin,
@@ -777,7 +803,15 @@ export async function runLanguageModelGenerate(input: {
       requestID: input.requestID,
       sessionID: input.sessionID,
     });
-    throw error;
+    if (isRuntimeRpcError(error)) throw error;
+    if (
+      providerID &&
+      error instanceof Error &&
+      (APICallError.isInstance(error) || RetryError.isInstance(error))
+    ) {
+      throw wrapProviderError(error, providerID, "generate");
+    }
+    throw wrapExtensionError(error, "model.generate");
   }
 }
 
@@ -796,8 +830,11 @@ export async function runLanguageModelStream(input: {
     sessionID: input.sessionID,
   });
 
+  let providerID: string | undefined;
+
   try {
     const runtime = await resolveModelRuntimeContext(input.modelID);
+    providerID = runtime.providerID;
     const { context, prepared } = await prepareCallOptions({
       runtime,
       origin: input.origin,
@@ -833,6 +870,14 @@ export async function runLanguageModelStream(input: {
       requestID: input.requestID,
       sessionID: input.sessionID,
     });
-    throw error;
+    if (isRuntimeRpcError(error)) throw error;
+    if (
+      providerID &&
+      error instanceof Error &&
+      (APICallError.isInstance(error) || RetryError.isInstance(error))
+    ) {
+      throw wrapProviderError(error, providerID, "stream");
+    }
+    throw wrapExtensionError(error, "model.stream");
   }
 }

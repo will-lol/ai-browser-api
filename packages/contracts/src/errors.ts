@@ -1,5 +1,6 @@
-import { RpcClientError } from "@effect/rpc/RpcClientError";
 import * as Schema from "effect/Schema";
+import { RpcClientError } from "@effect/rpc/RpcClientError";
+export { RpcClientError };
 
 export class PermissionDeniedError extends Schema.TaggedError<PermissionDeniedError>(
   "PermissionDeniedError",
@@ -49,6 +50,7 @@ export class RuntimeUpstreamServiceError extends Schema.TaggedError<RuntimeUpstr
   providerID: Schema.String,
   operation: Schema.String,
   statusCode: Schema.optional(Schema.Number),
+  retryAfter: Schema.optional(Schema.Number),
   retryable: Schema.Boolean,
   message: Schema.String,
 }) {}
@@ -75,32 +77,37 @@ export class RuntimeValidationError extends Schema.TaggedError<RuntimeValidation
   message: Schema.String,
 }) {}
 
-export class RuntimeThrownError extends Schema.TaggedError<RuntimeThrownError>(
-  "RuntimeThrownError",
-)("RuntimeThrownError", {
-  name: Schema.String,
+export class BridgeInitializationTimeoutError extends Schema.TaggedError<BridgeInitializationTimeoutError>(
+  "BridgeInitializationTimeoutError",
+)("BridgeInitializationTimeoutError", {
+  timeoutMs: Schema.Number,
   message: Schema.String,
-  stack: Schema.optional(Schema.String),
 }) {}
 
-export class RuntimeUnknownValueError extends Schema.TaggedError<RuntimeUnknownValueError>(
-  "RuntimeUnknownValueError",
-)("RuntimeUnknownValueError", {
-  value: Schema.String,
-}) {}
-
-export class RuntimeTransportError extends Schema.TaggedError<RuntimeTransportError>(
-  "RuntimeTransportError",
-)("RuntimeTransportError", {
-  source: Schema.Union(
-    Schema.Literal("rpc-client"),
-    Schema.Literal("rpc-server"),
-    Schema.Literal("page-bridge"),
-    Schema.Literal("runtime-port"),
-  ),
+export class RpcProtocolError extends Schema.TaggedError<RpcProtocolError>(
+  "RpcProtocolError",
+)("RpcProtocolError", {
   reason: Schema.String,
   message: Schema.String,
   stack: Schema.optional(Schema.String),
+}) {}
+
+export class BridgeAbortError extends Schema.TaggedError<BridgeAbortError>(
+  "BridgeAbortError",
+)("BridgeAbortError", {
+  message: Schema.String,
+}) {}
+
+export class BridgeMessagePortError extends Schema.TaggedError<BridgeMessagePortError>(
+  "BridgeMessagePortError",
+)("BridgeMessagePortError", {
+  message: Schema.String,
+}) {}
+
+export class RuntimeDefectError extends Schema.TaggedError<RuntimeDefectError>(
+  "RuntimeDefectError",
+)("RuntimeDefectError", {
+  defect: Schema.String,
 }) {}
 
 export const RuntimeRpcErrorSchema = Schema.Union(
@@ -114,9 +121,12 @@ export const RuntimeRpcErrorSchema = Schema.Union(
   RuntimeAuthProviderError,
   RuntimeInternalError,
   RuntimeValidationError,
-  RuntimeThrownError,
-  RuntimeUnknownValueError,
-  RuntimeTransportError,
+  BridgeInitializationTimeoutError,
+  RpcProtocolError,
+  BridgeAbortError,
+  BridgeMessagePortError,
+  RuntimeDefectError,
+  RpcClientError,
 );
 
 export type RuntimeRpcError = Schema.Schema.Type<typeof RuntimeRpcErrorSchema>;
@@ -133,59 +143,11 @@ export function isRuntimeRpcError(error: unknown): error is RuntimeRpcError {
     error instanceof RuntimeAuthProviderError ||
     error instanceof RuntimeInternalError ||
     error instanceof RuntimeValidationError ||
-    error instanceof RuntimeThrownError ||
-    error instanceof RuntimeUnknownValueError ||
-    error instanceof RuntimeTransportError
+    error instanceof BridgeInitializationTimeoutError ||
+    error instanceof RpcProtocolError ||
+    error instanceof BridgeAbortError ||
+    error instanceof BridgeMessagePortError ||
+    error instanceof RuntimeDefectError ||
+    error instanceof RpcClientError
   );
-}
-
-function logSerializedRuntimeRpcError(message: string, error: unknown) {
-  console.error(message, {
-    error,
-    name: error instanceof Error ? error.name : undefined,
-    message: error instanceof Error ? error.message : String(error),
-    stack: error instanceof Error ? error.stack : undefined,
-  });
-}
-
-export function serializeRpcClientError(
-  error: RpcClientError,
-  source: RuntimeTransportError["source"],
-): RuntimeTransportError {
-  return new RuntimeTransportError({
-    source,
-    reason: error.reason,
-    message: error.message,
-    stack: error.stack,
-  });
-}
-
-export function serializeUnknownRuntimeError(error: unknown): RuntimeRpcError {
-  if (isRuntimeRpcError(error)) {
-    return error;
-  }
-
-  if (error instanceof RpcClientError) {
-    return serializeRpcClientError(error, "rpc-client");
-  }
-
-  if (error instanceof Error) {
-    logSerializedRuntimeRpcError(
-      "[runtime-rpc] serializing native Error to RuntimeThrownError",
-      error,
-    );
-    return new RuntimeThrownError({
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-    });
-  }
-
-  logSerializedRuntimeRpcError(
-    "[runtime-rpc] serializing unknown thrown value to RuntimeUnknownValueError",
-    error,
-  );
-  return new RuntimeUnknownValueError({
-    value: String(error),
-  });
 }

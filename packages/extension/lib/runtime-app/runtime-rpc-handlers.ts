@@ -2,24 +2,36 @@ import {
   RuntimeAdminRpcGroup,
   RuntimePublicRpcGroup,
   RuntimeValidationError,
-  serializeUnknownRuntimeError,
+  isRuntimeRpcError,
+  type RuntimeRpcError,
 } from "@llm-bridge/contracts";
 import { RuntimeApplication } from "@llm-bridge/runtime-core";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
+import {
+  wrapExtensionError,
+  wrapTransportError,
+} from "@/lib/runtime/errors";
+
+function serializeUnknownRuntimeError(error: unknown): RuntimeRpcError {
+  if (isRuntimeRpcError(error)) return error;
+  return wrapExtensionError(error, "runtime.rpc");
+}
 
 function serializeRpcError<A, E, R>(
   effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, ReturnType<typeof serializeUnknownRuntimeError>, R> {
+): Effect.Effect<A, RuntimeRpcError, R> {
   return Effect.mapError(effect, serializeUnknownRuntimeError);
 }
 
 function serializeRpcStream<A, E, R>(
   effect: Effect.Effect<ReadableStream<A>, E, R>,
-): Stream.Stream<A, ReturnType<typeof serializeUnknownRuntimeError>, R> {
+): Stream.Stream<A, RuntimeRpcError, R> {
   return Stream.unwrap(
     Effect.map(serializeRpcError(effect), (stream) =>
-      Stream.fromReadableStream(() => stream, serializeUnknownRuntimeError),
+      Stream.fromReadableStream(() => stream, (error) =>
+        isRuntimeRpcError(error) ? error : wrapTransportError(error),
+      ),
     ),
   );
 }
@@ -82,11 +94,7 @@ export const makeRuntimePublicRpcHandlers = Effect.gen(function* () {
       serializeRpcError(
         Effect.gen(function* () {
           yield* app.ensureOriginEnabled(yield* requireOrigin("listModels", origin));
-
-          return yield* app.listModels({
-            connectedOnly,
-            providerID,
-          });
+          return yield* app.listModels({ connectedOnly, providerID });
         }),
       ),
     requestPermission: (input) =>

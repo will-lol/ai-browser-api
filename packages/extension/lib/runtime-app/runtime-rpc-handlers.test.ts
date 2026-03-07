@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  RuntimeAuthProviderError,
+  RuntimeUpstreamServiceError,
   RuntimeValidationError,
   type RuntimeModelSummary,
 } from "@llm-bridge/contracts";
@@ -488,6 +490,71 @@ describe("runtime rpc handlers", () => {
         methodID: "api-key",
       },
     ]);
+  });
+
+  it("preserves typed upstream errors from admin provider auth handlers", async () => {
+    const { runtimeApplication } = createRuntimeApplication(() => ({
+      startProviderAuthFlow: () =>
+        Effect.fail(
+          new RuntimeUpstreamServiceError({
+            providerID: "openai",
+            operation: "auth.authorize",
+            statusCode: 429,
+            retryAfter: 3,
+            retryable: true,
+            message: "Rate limited",
+          }),
+        ),
+    }));
+
+    const handlers = await loadAdminHandlers(runtimeApplication);
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        handlers.startProviderAuthFlow({
+          providerID: "openai",
+          methodID: "api-key",
+        }),
+      ),
+    );
+
+    assert.equal(result._tag, "Left");
+    assert.ok(result.left instanceof RuntimeUpstreamServiceError);
+    assert.equal(result.left.providerID, "openai");
+    assert.equal(result.left.operation, "auth.authorize");
+    assert.equal(result.left.retryAfter, 3);
+    assert.equal(result.left.statusCode, 429);
+  });
+
+  it("preserves typed auth provider errors from admin provider auth handlers", async () => {
+    const { runtimeApplication } = createRuntimeApplication(() => ({
+      startProviderAuthFlow: () =>
+        Effect.fail(
+          new RuntimeAuthProviderError({
+            providerID: "gitlab",
+            operation: "auth.authorize",
+            retryable: false,
+            message: "Plugin rejected the request",
+          }),
+        ),
+    }));
+
+    const handlers = await loadAdminHandlers(runtimeApplication);
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        handlers.startProviderAuthFlow({
+          providerID: "gitlab",
+          methodID: "oauth",
+        }),
+      ),
+    );
+
+    assert.equal(result._tag, "Left");
+    assert.ok(result.left instanceof RuntimeAuthProviderError);
+    assert.equal(result.left.providerID, "gitlab");
+    assert.equal(result.left.operation, "auth.authorize");
+    assert.equal(result.left.message, "Plugin rejected the request");
   });
 
   it("allows admin resolve and dismiss requestPermission on a disabled site", async () => {

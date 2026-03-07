@@ -1,5 +1,6 @@
 import type {
   PermissionStatus,
+  RuntimeRpcError,
   RuntimeAuthFlowSnapshot,
   RuntimeCancelProviderAuthFlowResponse,
   RuntimeCreatePermissionRequestResponse,
@@ -24,7 +25,10 @@ import type {
 import type * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 
-type AppEffect<A, E = unknown> = Effect.Effect<A, E>;
+type AppEffect<A, E extends RuntimeRpcError = RuntimeRpcError> = Effect.Effect<
+  A,
+  E
+>;
 
 export interface ResolvedPermissionTarget {
   modelId: string;

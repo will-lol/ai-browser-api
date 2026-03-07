@@ -79,10 +79,12 @@ function toAuthFlowErrorSummary(error: unknown) {
       return "Authentication request is not authorized.";
     case "RuntimeInternalError":
       return "Authentication failed due to an internal runtime error.";
-    case "RuntimeThrownError":
-    case "RuntimeTransportError":
+    case "BridgeInitializationTimeoutError":
+    case "RpcProtocolError":
+    case "BridgeAbortError":
+    case "BridgeMessagePortError":
       return error.message;
-    case "RuntimeUnknownValueError":
+    case "RuntimeDefectError":
       return "Authentication failed. Please retry.";
     case "ProviderNotConnectedError":
     case "PermissionDeniedError":

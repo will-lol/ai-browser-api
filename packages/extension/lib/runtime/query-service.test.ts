@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { RuntimeInternalError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 
 const TEST_ORIGIN = "https://example.test";
@@ -68,9 +69,19 @@ mock.module("@/lib/runtime/db/runtime-db", () => ({
 mock.module("@/lib/runtime/provider-registry", () => ({
   listModelRows: mock(async () => []),
   listProviderRows: mock(async () => []),
+  getProvider: mock(async () => undefined),
+  getModel: mock(async () => undefined),
 }));
 
-const { listPendingRequestsForOrigin } =
+const providerRegistry = await import("@/lib/runtime/provider-registry");
+const listModelRowsMock = providerRegistry.listModelRows as ReturnType<
+  typeof mock
+>;
+const listProviderRowsMock = providerRegistry.listProviderRows as ReturnType<
+  typeof mock
+>;
+
+const { listPendingRequestsForOrigin, listProviders } =
   await import("@/lib/runtime/query-service");
 
 beforeEach(() => {
@@ -79,6 +90,10 @@ beforeEach(() => {
   providerRowsById.clear();
   bulkGetMock.mockClear();
   providersBulkGetMock.mockClear();
+  listModelRowsMock.mockReset();
+  listProviderRowsMock.mockReset();
+  listModelRowsMock.mockImplementation(async () => []);
+  listProviderRowsMock.mockImplementation(async () => []);
 });
 
 afterAll(() => {
@@ -86,6 +101,22 @@ afterAll(() => {
 });
 
 describe("listPendingRequestsForOrigin", () => {
+  it("normalizes provider row failures into RuntimeInternalError", async () => {
+    listProviderRowsMock.mockRejectedValueOnce(new Error("db unavailable"));
+
+    const result = await Effect.runPromise(Effect.either(listProviders()));
+
+    expect("left" in result).toBe(true);
+    if ("left" in result) {
+      expect(result.left).toEqual(
+        new RuntimeInternalError({
+          operation: "query.listProviders",
+          message: "db unavailable",
+        }),
+      );
+    }
+  });
+
   it("hydrates pending request display metadata from trusted model rows", async () => {
     pendingRows.push(
       {

@@ -1,6 +1,7 @@
 import {
   AuthFlowExpiredError,
   PermissionDeniedError,
+  type RuntimeRpcError,
   type RuntimeAuthFlowSnapshot,
   type RuntimeCancelProviderAuthFlowResponse,
   type RuntimeCreatePermissionRequestResponse,
@@ -35,7 +36,10 @@ import {
   type PermissionsRepositoryApi,
 } from "./repositories";
 
-type AppEffect<A, E = unknown> = Effect.Effect<A, E>;
+type AppEffect<A, E extends RuntimeRpcError = RuntimeRpcError> = Effect.Effect<
+  A,
+  E
+>;
 
 export function makeAuthFlowService(input: {
   auth: AuthRepositoryApi;

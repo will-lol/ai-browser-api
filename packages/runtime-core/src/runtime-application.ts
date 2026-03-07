@@ -1,4 +1,5 @@
 import type {
+  RuntimeRpcError,
   RuntimeAuthFlowSnapshot,
   RuntimeCancelProviderAuthFlowResponse,
   RuntimeCreatePermissionRequestResponse,
@@ -48,7 +49,10 @@ import {
   type PermissionServiceApi,
 } from "./services";
 
-type AppEffect<A, E = unknown> = Effect.Effect<A, E>;
+type AppEffect<A, E extends RuntimeRpcError = RuntimeRpcError> = Effect.Effect<
+  A,
+  E
+>;
 
 export function makeRuntimeApplication(input: {
   catalog: CatalogRepositoryApi;

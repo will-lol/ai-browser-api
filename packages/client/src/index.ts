@@ -9,8 +9,13 @@ import {
   PAGE_BRIDGE_READY_EVENT,
   PageBridgeRpcGroup,
   RuntimeValidationError,
+  BridgeInitializationTimeoutError,
+  RpcProtocolError,
+  BridgeAbortError,
+  BridgeMessagePortError,
+  RuntimeDefectError,
+  isRuntimeRpcError,
   decodeSupportedUrls,
-  serializeUnknownRuntimeError,
   type BridgePermissionRequest,
   type BridgeModelDescriptorResponse,
   type PageBridgeRpc,
@@ -60,9 +65,9 @@ export type BridgeModelSummary = RuntimeModelSummary;
 export type BridgePermissionResult = RuntimeCreatePermissionRequestResponse;
 
 function createAbortError() {
-  const error = new Error("The operation was aborted");
-  error.name = "AbortError";
-  return error;
+  return new BridgeAbortError({
+    message: "The operation was aborted",
+  });
 }
 
 function logBridgeDebug(event: string, details?: unknown) {
@@ -79,25 +84,32 @@ function logBridgeError(event: string, error: unknown, details?: unknown) {
 }
 
 function waitForBridgeReady(timeoutMs: number) {
-  return new Promise<void>((resolve, reject) => {
+  return Effect.async<void, BridgeInitializationTimeoutError>((resume) => {
     if (typeof window === "undefined") {
-      resolve();
+      resume(Effect.void);
       return;
     }
 
     if (document.documentElement.dataset.llmBridgeReady === "true") {
-      resolve();
+      resume(Effect.void);
       return;
     }
 
     const timer = window.setTimeout(() => {
       cleanup();
-      reject(new Error(`Bridge initialization timed out after ${timeoutMs}ms`));
+      resume(
+        Effect.fail(
+          new BridgeInitializationTimeoutError({
+            timeoutMs,
+            message: `Bridge initialization timed out after ${timeoutMs}ms`,
+          }),
+        ),
+      );
     }, timeoutMs);
 
     const onReady = () => {
       cleanup();
-      resolve();
+      resume(Effect.void);
     };
 
     const cleanup = () => {
@@ -160,102 +172,93 @@ function createConnection(
 ): Effect.Effect<BridgeConnection, RuntimeRpcError> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  return Effect.tryPromise({
-    try: async () => {
-      let scope: Scope.CloseableScope | null = null;
-      let port: MessagePort | null = null;
+  return Effect.gen(function* () {
+    yield* waitForBridgeReady(timeoutMs);
 
-      try {
-        await waitForBridgeReady(timeoutMs);
+    const runtimeScope = yield* Scope.make();
 
-        const runtimeScope = await Effect.runPromise(Scope.make());
-        scope = runtimeScope;
+    return yield* Effect.gen(function* () {
+      const messageChannel = new MessageChannel();
+      const runtimePort = messageChannel.port1;
 
-        const messageChannel = new MessageChannel();
-        const runtimePort = messageChannel.port1;
-        port = runtimePort;
-
-        const protocol = await Effect.runPromise(
-          RpcClient.Protocol.make((writeResponse) =>
-            Effect.gen(function* () {
-              const onMessage = (event: MessageEvent<FromServerEncoded>) => {
-                void Effect.runPromise(writeResponse(event.data)).catch(
-                  () => undefined,
-                );
-              };
-
-              runtimePort.addEventListener("message", onMessage);
-              runtimePort.start();
-
-              yield* Effect.addFinalizer(() =>
-                Effect.sync(() => {
-                  runtimePort.removeEventListener("message", onMessage);
-                }),
-              );
-
-              return {
-                send: (message: FromClientEncoded) =>
-                  Effect.try({
-                    try: () => {
-                      runtimePort.postMessage(message);
-                    },
-                    catch: (cause) =>
-                      new RpcClientError({
-                        reason: "Protocol",
-                        message: "Failed to post page bridge RPC message",
-                        cause,
-                      }),
-                  }),
-                supportsAck: true,
-                supportsTransferables: false,
-              } as const;
-            }),
-          ).pipe(Scope.extend(runtimeScope)),
-        );
-
-        const client = await Effect.runPromise(
-          RpcClient.make(PageBridgeRpcGroup, {
-            disableTracing: true,
-          }).pipe(
-            Effect.provideService(RpcClient.Protocol, protocol),
-            Scope.extend(runtimeScope),
-          ),
-        );
-
-        window.postMessage({ type: PAGE_BRIDGE_INIT_MESSAGE }, "*", [
-          messageChannel.port2,
-        ]);
-
-        return {
-          connectionId,
-          scope: runtimeScope,
-          port: runtimePort,
-          client,
-        };
-      } catch (error) {
-        if (scope) {
+      yield* Scope.addFinalizer(
+        runtimeScope,
+        Effect.sync(() => {
           try {
-            await Effect.runPromise(
-              Scope.close(scope, Exit.succeed(undefined)),
+            runtimePort.close();
+          } catch {
+            // ignored
+          }
+        }),
+      );
+
+      const protocol = yield* RpcClient.Protocol.make((writeResponse) =>
+        Effect.gen(function* () {
+          const onMessage = (event: MessageEvent<FromServerEncoded>) => {
+            void Effect.runPromise(writeResponse(event.data)).catch(
+              () => undefined,
             );
-          } catch {
-            // ignored
-          }
-        }
+          };
 
-        if (port) {
-          try {
-            port.close();
-          } catch {
-            // ignored
-          }
-        }
+          runtimePort.addEventListener("message", onMessage);
+          runtimePort.start();
 
-        throw error;
-      }
-    },
-    catch: serializeUnknownRuntimeError,
-  });
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              runtimePort.removeEventListener("message", onMessage);
+            }),
+          );
+
+          return {
+            send: (message: FromClientEncoded) =>
+              Effect.try({
+                try: () => {
+                  runtimePort.postMessage(message);
+                },
+                catch: (cause) =>
+                  new RpcClientError({
+                    reason: "Protocol",
+                    message: "Failed to post page bridge RPC message",
+                    cause,
+                  }),
+              }),
+            supportsAck: true,
+            supportsTransferables: false,
+          } as const;
+        }),
+      ).pipe(Scope.extend(runtimeScope));
+
+      const client = yield* RpcClient.make(PageBridgeRpcGroup, {
+        disableTracing: true,
+      }).pipe(
+        Effect.provideService(RpcClient.Protocol, protocol),
+        Scope.extend(runtimeScope),
+      );
+
+      window.postMessage({ type: PAGE_BRIDGE_INIT_MESSAGE }, "*", [
+        messageChannel.port2,
+      ]);
+
+      return {
+        connectionId,
+        scope: runtimeScope,
+        port: runtimePort,
+        client,
+      };
+    }).pipe(
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) ? Scope.close(runtimeScope, exit) : Effect.void,
+      ),
+    );
+  }).pipe(
+    Effect.catchAllDefect((defect) =>
+      Effect.fail(
+        new RuntimeDefectError({
+          defect: String(defect),
+        }),
+      ),
+    ),
+  );
 }
 
 function nextRequestId(sequence: number) {
@@ -271,34 +274,25 @@ function makeBridgeClientApi(input: {
   ) => LanguageModelV3;
   nextModelRequestId: () => string;
 }) {
-  const normalizeRpcError = <A, E, R>(
-    effect: Effect.Effect<A, E, R>,
-  ): Effect.Effect<A, RuntimeRpcError, R> =>
-    Effect.mapError(effect, serializeUnknownRuntimeError);
-
   const listModels = input.ensureConnection.pipe(
-    Effect.flatMap((current) => normalizeRpcError(current.client.listModels({}))),
+    Effect.flatMap((current) => current.client.listModels({})),
     Effect.map((response) => response.models),
   );
 
   const requestPermission = (payload: BridgePermissionRequest) =>
     input.ensureConnection.pipe(
-      Effect.flatMap((current) =>
-        normalizeRpcError(current.client.requestPermission(payload)),
-      ),
+      Effect.flatMap((current) => current.client.requestPermission(payload)),
     );
 
   const getModel = (modelId: string) =>
     Effect.gen(function* () {
       const requestId = input.nextModelRequestId();
       const current = yield* input.ensureConnection;
-      const descriptor = yield* normalizeRpcError(
-        current.client.getModel({
-          modelId,
-          requestId,
-          sessionID: requestId,
-        }),
-      );
+      const descriptor = yield* current.client.getModel({
+        modelId,
+        requestId,
+        sessionID: requestId,
+      });
 
       return input.createLanguageModel(modelId, descriptor);
     });
@@ -338,25 +332,14 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
       });
 
       const ensureConnection = lifecycle.ensure;
-      const normalizeRpcError = <A, E, R>(
-        effect: Effect.Effect<A, E, R>,
-      ): Effect.Effect<A, RuntimeRpcError, R> =>
-        Effect.mapError(effect, serializeUnknownRuntimeError);
-
-      const normalizeRpcStreamError = <A, E, R>(
-        stream: Stream.Stream<A, E, R>,
-      ): Stream.Stream<A, RuntimeRpcError, R> =>
-        Stream.mapError(stream, serializeUnknownRuntimeError);
 
       const abortRequest = (input: { requestId: string; sessionID: string }) =>
         ensureConnection.pipe(
           Effect.flatMap((current) =>
-            normalizeRpcError(
-              current.client.abort({
-                requestId: input.requestId,
-                sessionID: input.sessionID,
-              }),
-            ),
+            current.client.abort({
+              requestId: input.requestId,
+              sessionID: input.sessionID,
+            }),
           ),
           Effect.asVoid,
         );
@@ -404,14 +387,12 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
                 }
 
                 const current = yield* ensureConnection;
-                const generated = yield* normalizeRpcError(
-                  current.client.modelDoGenerate({
-                    requestId,
-                    sessionID: requestId,
-                    modelId,
-                    options: toRuntimeModelCallOptions(options),
-                  }),
-                );
+                const generated = yield* current.client.modelDoGenerate({
+                  requestId,
+                  sessionID: requestId,
+                  modelId,
+                  options: toRuntimeModelCallOptions(options),
+                });
 
                 return fromRuntimeGenerateResponse(generated);
               }),
@@ -449,14 +430,12 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
                 const current = yield* ensureConnection;
                 return yield* Effect.scoped(
                   Stream.toReadableStreamEffect(
-                    normalizeRpcStreamError(
-                      current.client.modelDoStream({
-                        requestId,
-                        sessionID: requestId,
-                        modelId,
-                        options: toRuntimeModelCallOptions(options),
-                      }),
-                    ),
+                    current.client.modelDoStream({
+                      requestId,
+                      sessionID: requestId,
+                      modelId,
+                      options: toRuntimeModelCallOptions(options),
+                    }),
                   ),
                 );
               }),
@@ -530,7 +509,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
           }
         },
       });
- 
+
       return makeBridgeClientApi({
         ensureConnection,
         destroy,

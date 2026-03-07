@@ -105,18 +105,18 @@ describe("makeRuntimeRpcClientCore", () => {
       portName: "test-port",
       rpcGroup: RuntimePublicRpcGroup,
       invalidatedError: () => new Error("invalidated"),
-      normalizeError: toError,
       connect: () => {
         connectCalls += 1;
         const port = createFakePort();
         ports.push(port);
         return port;
       },
-      beforeReady: async ({ connectionId }) => {
-        if (connectionId !== 1) return;
-        started.resolve();
-        await release.promise;
-      },
+      beforeReady: ({ connectionId }) =>
+        Effect.tryPromise(async () => {
+          if (connectionId !== 1) return;
+          started.resolve();
+          await release.promise;
+        }),
     });
 
     const first = Effect.runPromise(core.ensureConnection);
@@ -142,17 +142,17 @@ describe("makeRuntimeRpcClientCore", () => {
       portName: "test-port",
       rpcGroup: RuntimePublicRpcGroup,
       invalidatedError: () => new Error("invalidated"),
-      normalizeError: toError,
       connect: () => {
         const port = createFakePort();
         ports.push(port);
         return port;
       },
-      beforeReady: async ({ connectionId }) => {
-        if (connectionId !== 1) return;
-        started.resolve();
-        await release.promise;
-      },
+      beforeReady: ({ connectionId }) =>
+        Effect.tryPromise(async () => {
+          if (connectionId !== 1) return;
+          started.resolve();
+          await release.promise;
+        }),
     });
 
     const firstAttempt = Effect.runPromise(core.ensureConnection).then(
@@ -192,17 +192,17 @@ describe("makeRuntimeRpcClientCore", () => {
       portName: "test-port",
       rpcGroup: RuntimePublicRpcGroup,
       invalidatedError: () => new Error("invalidated"),
-      normalizeError: toError,
       connect: () => {
         const port = createFakePort();
         ports.push(port);
         return port;
       },
-      beforeReady: async ({ connectionId }) => {
-        if (connectionId !== 1) return;
-        started.resolve();
-        await release.promise;
-      },
+      beforeReady: ({ connectionId }) =>
+        Effect.tryPromise(async () => {
+          if (connectionId !== 1) return;
+          started.resolve();
+          await release.promise;
+        }),
     });
 
     const waiting = Effect.runPromise(core.ensureConnection).then(
@@ -235,7 +235,6 @@ describe("makeRuntimeRpcClientCore", () => {
       portName: "test-port",
       rpcGroup: RuntimePublicRpcGroup,
       invalidatedError: () => new Error("invalidated"),
-      normalizeError: toError,
       connect: () => {
         const port = createFakePort();
         ports.push(port);
@@ -262,7 +261,6 @@ describe("makeRuntimeRpcClientCore", () => {
       portName: "test-port",
       rpcGroup: RuntimePublicRpcGroup,
       invalidatedError: () => new Error("invalidated"),
-      normalizeError: toError,
       connect: () => createFakePort(),
       windowLike,
     });

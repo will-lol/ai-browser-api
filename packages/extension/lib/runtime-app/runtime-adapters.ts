@@ -7,8 +7,10 @@ import {
   ModelNotFoundError,
   ProviderNotConnectedError,
   encodeSupportedUrls,
+  type RuntimeRpcError,
   type RuntimeModelCallOptions,
   type RuntimeStreamPart,
+  isRuntimeRpcError,
 } from "@llm-bridge/contracts";
 import {
   AuthRepository,
@@ -37,6 +39,10 @@ import {
   runLanguageModelStream,
 } from "@/lib/runtime/ai/language-model-runtime";
 import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager";
+import {
+  wrapExtensionError,
+  wrapStorageError,
+} from "@/lib/runtime/errors";
 import { resolveTrustedPermissionTarget } from "@/lib/runtime/permission-targets";
 import {
   getOriginState,
@@ -62,11 +68,21 @@ import {
 } from "@/lib/runtime/permissions";
 import { parseProviderModel } from "@/lib/runtime/util";
 
-const tryPromise = <A>(tryFn: () => Promise<A>) =>
+const tryPromise = <A>(
+  tryFn: () => Promise<A>,
+  onError: (error: unknown) => RuntimeRpcError,
+) =>
   Effect.tryPromise({
     try: tryFn,
-    catch: (error) => error,
+    catch: (error): RuntimeRpcError =>
+      isRuntimeRpcError(error) ? error : onError(error),
   });
+
+const tryExtensionPromise = <A>(operation: string, tryFn: () => Promise<A>) =>
+  tryPromise(tryFn, (error) => wrapExtensionError(error, operation));
+
+const tryStoragePromise = <A>(operation: string, tryFn: () => Promise<A>) =>
+  tryPromise(tryFn, (error) => wrapStorageError(error, operation));
 
 function mapStream(
   stream: ReadableStream<LanguageModelV3StreamPart>,
@@ -110,12 +126,12 @@ export function makeRuntimeCoreInfrastructureLayer() {
     AuthRepository,
     makeAuthRepository({
       openProviderAuthWindow: (providerID: string) =>
-        tryPromise(() => {
+        tryExtensionPromise("auth.openProviderAuthWindow", () => {
           const manager = getAuthFlowManager();
           return manager.openProviderAuthWindow(providerID);
         }),
       getProviderAuthFlow: (providerID: string) =>
-        tryPromise(async () => {
+        tryExtensionPromise("auth.getProviderAuthFlow", async () => {
           const manager = getAuthFlowManager();
           return {
             providerID,
@@ -127,7 +143,7 @@ export function makeRuntimeCoreInfrastructureLayer() {
         methodID: string;
         values?: Record<string, string>;
       }) =>
-        tryPromise(async () => {
+        tryExtensionPromise("auth.startProviderAuthFlow", async () => {
           const manager = getAuthFlowManager();
           return {
             providerID: input.providerID,
@@ -135,7 +151,7 @@ export function makeRuntimeCoreInfrastructureLayer() {
           };
         }),
       cancelProviderAuthFlow: (input: { providerID: string; reason?: string }) =>
-        tryPromise(async () => {
+        tryExtensionPromise("auth.cancelProviderAuthFlow", async () => {
           const manager = getAuthFlowManager();
           return {
             providerID: input.providerID,
@@ -143,7 +159,7 @@ export function makeRuntimeCoreInfrastructureLayer() {
           };
         }),
       disconnectProvider: (providerID: string) =>
-        tryPromise(async () => {
+        tryExtensionPromise("auth.disconnectProvider", async () => {
           const manager = getAuthFlowManager();
           await manager
             .cancelProviderAuthFlow({
@@ -169,9 +185,11 @@ export function makeRuntimeCoreInfrastructureLayer() {
       getOriginState,
       listPermissions: listPermissionsForOrigin,
       getModelPermission: (origin: string, modelID: string) =>
-        tryPromise(() => getModelPermission(origin, modelID)),
+        tryStoragePromise("permissions.getModelPermission", () =>
+          getModelPermission(origin, modelID),
+        ),
       setOriginEnabled: (origin: string, enabled: boolean) =>
-        tryPromise(async () => {
+        tryStoragePromise("permissions.setOriginEnabled", async () => {
           await setOriginEnabled(origin, enabled);
           return {
             origin,
@@ -184,7 +202,7 @@ export function makeRuntimeCoreInfrastructureLayer() {
         status: "allowed" | "denied";
         capabilities?: ReadonlyArray<string>;
       }) =>
-        tryPromise(async () => {
+        tryStoragePromise("permissions.updatePermission", async () => {
           await setModelPermission(
             input.origin,
             input.modelID,
@@ -204,7 +222,7 @@ export function makeRuntimeCoreInfrastructureLayer() {
         modelName: string;
         capabilities?: ReadonlyArray<string>;
       }) =>
-        tryPromise(() =>
+        tryStoragePromise("permissions.createPermissionRequest", () =>
           createPermissionRequest({
             ...input,
             capabilities: input.capabilities
@@ -216,7 +234,7 @@ export function makeRuntimeCoreInfrastructureLayer() {
         requestId: string;
         decision: "allowed" | "denied";
       }) =>
-        tryPromise(async () => {
+        tryStoragePromise("permissions.resolvePermissionRequest", async () => {
           await resolvePermissionRequest(input.requestId, input.decision);
           return {
             requestId: input.requestId,
@@ -224,7 +242,7 @@ export function makeRuntimeCoreInfrastructureLayer() {
           };
         }),
       dismissPermissionRequest: (requestId: string) =>
-        tryPromise(async () => {
+        tryStoragePromise("permissions.dismissPermissionRequest", async () => {
           await dismissPermissionRequest(requestId);
           return {
             requestId,
@@ -234,7 +252,10 @@ export function makeRuntimeCoreInfrastructureLayer() {
         requestId: string,
         timeoutMs?: number,
         signal?: AbortSignal,
-      ) => tryPromise(() => waitForPermissionDecision(requestId, timeoutMs, signal)),
+      ) =>
+        tryStoragePromise("permissions.waitForPermissionDecision", () =>
+          waitForPermissionDecision(requestId, timeoutMs, signal),
+        ),
     }),
   );
 
@@ -250,7 +271,7 @@ export function makeRuntimeCoreInfrastructureLayer() {
     makeMetaRepository({
       parseProviderModel,
       resolvePermissionTarget: (modelID: string) =>
-        tryPromise(async () => {
+        tryExtensionPromise("meta.resolvePermissionTarget", async () => {
           await ensureProviderCatalog();
           const resolution = await resolveTrustedPermissionTarget(modelID);
           if (resolution.status === "resolved") {
@@ -280,7 +301,7 @@ export function makeRuntimeCoreInfrastructureLayer() {
         requestID: string;
         modelID: string;
       }) =>
-        tryPromise(() =>
+        tryExtensionPromise("model.acquire", () =>
           getRuntimeModelDescriptor({
             modelID: input.modelID,
             origin: input.origin,
@@ -301,7 +322,7 @@ export function makeRuntimeCoreInfrastructureLayer() {
         options: RuntimeModelCallOptions;
         signal?: AbortSignal;
       }) =>
-        tryPromise(() =>
+        tryExtensionPromise("model.generate", () =>
           runLanguageModelGenerate({
             modelID: input.modelID,
             origin: input.origin,
@@ -319,7 +340,7 @@ export function makeRuntimeCoreInfrastructureLayer() {
         options: RuntimeModelCallOptions;
         signal?: AbortSignal;
       }) =>
-        tryPromise(() =>
+        tryExtensionPromise("model.stream", () =>
           runLanguageModelStream({
             modelID: input.modelID,
             origin: input.origin,
@@ -335,10 +356,16 @@ export function makeRuntimeCoreInfrastructureLayer() {
   const CatalogRepoLive = Layer.succeed(
     CatalogRepository,
     makeCatalogRepository({
-      ensureCatalog: () => tryPromise(() => ensureProviderCatalog()),
-      refreshCatalog: () => tryPromise(() => refreshProviderCatalog()).pipe(Effect.asVoid),
+      ensureCatalog: () =>
+        tryExtensionPromise("catalog.ensure", () => ensureProviderCatalog()),
+      refreshCatalog: () =>
+        tryExtensionPromise("catalog.refresh", () =>
+          refreshProviderCatalog(),
+        ).pipe(Effect.asVoid),
       refreshCatalogForProvider: (providerID: string) =>
-        tryPromise(() => refreshProviderCatalogForProvider(providerID)),
+        tryExtensionPromise("catalog.refreshProvider", () =>
+          refreshProviderCatalogForProvider(providerID),
+        ),
     }),
   );
 
