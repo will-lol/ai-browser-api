@@ -1,3 +1,4 @@
+import { RpcClientError } from "@effect/rpc/RpcClientError";
 import * as Schema from "effect/Schema";
 
 export class PermissionDeniedError extends Schema.TaggedError<PermissionDeniedError>(
@@ -74,6 +75,34 @@ export class RuntimeValidationError extends Schema.TaggedError<RuntimeValidation
   message: Schema.String,
 }) {}
 
+export class RuntimeThrownError extends Schema.TaggedError<RuntimeThrownError>(
+  "RuntimeThrownError",
+)("RuntimeThrownError", {
+  name: Schema.String,
+  message: Schema.String,
+  stack: Schema.optional(Schema.String),
+}) {}
+
+export class RuntimeUnknownValueError extends Schema.TaggedError<RuntimeUnknownValueError>(
+  "RuntimeUnknownValueError",
+)("RuntimeUnknownValueError", {
+  value: Schema.String,
+}) {}
+
+export class RuntimeTransportError extends Schema.TaggedError<RuntimeTransportError>(
+  "RuntimeTransportError",
+)("RuntimeTransportError", {
+  source: Schema.Union(
+    Schema.Literal("rpc-client"),
+    Schema.Literal("rpc-server"),
+    Schema.Literal("page-bridge"),
+    Schema.Literal("runtime-port"),
+  ),
+  reason: Schema.String,
+  message: Schema.String,
+  stack: Schema.optional(Schema.String),
+}) {}
+
 export const RuntimeRpcErrorSchema = Schema.Union(
   PermissionDeniedError,
   ModelNotFoundError,
@@ -85,6 +114,9 @@ export const RuntimeRpcErrorSchema = Schema.Union(
   RuntimeAuthProviderError,
   RuntimeInternalError,
   RuntimeValidationError,
+  RuntimeThrownError,
+  RuntimeUnknownValueError,
+  RuntimeTransportError,
 );
 
 export type RuntimeRpcError = Schema.Schema.Type<typeof RuntimeRpcErrorSchema>;
@@ -100,12 +132,15 @@ export function isRuntimeRpcError(error: unknown): error is RuntimeRpcError {
     error instanceof RuntimeUpstreamServiceError ||
     error instanceof RuntimeAuthProviderError ||
     error instanceof RuntimeInternalError ||
-    error instanceof RuntimeValidationError
+    error instanceof RuntimeValidationError ||
+    error instanceof RuntimeThrownError ||
+    error instanceof RuntimeUnknownValueError ||
+    error instanceof RuntimeTransportError
   );
 }
 
-function logUnknownRuntimeRpcError(error: unknown) {
-  console.error("[runtime-rpc] normalizing unknown error to RuntimeInternalError", {
+function logSerializedRuntimeRpcError(message: string, error: unknown) {
+  console.error(message, {
     error,
     name: error instanceof Error ? error.name : undefined,
     message: error instanceof Error ? error.message : String(error),
@@ -113,22 +148,44 @@ function logUnknownRuntimeRpcError(error: unknown) {
   });
 }
 
-export function toRuntimeRpcError(error: unknown): RuntimeRpcError {
-  if (isRuntimeRpcError(error)) return error;
+export function serializeRpcClientError(
+  error: RpcClientError,
+  source: RuntimeTransportError["source"],
+): RuntimeTransportError {
+  return new RuntimeTransportError({
+    source,
+    reason: error.reason,
+    message: error.message,
+    stack: error.stack,
+  });
+}
 
-  if (error instanceof TypeError) {
-    console.error("[runtime-rpc] normalizing TypeError to RuntimeValidationError", {
+export function serializeUnknownRuntimeError(error: unknown): RuntimeRpcError {
+  if (isRuntimeRpcError(error)) {
+    return error;
+  }
+
+  if (error instanceof RpcClientError) {
+    return serializeRpcClientError(error, "rpc-client");
+  }
+
+  if (error instanceof Error) {
+    logSerializedRuntimeRpcError(
+      "[runtime-rpc] serializing native Error to RuntimeThrownError",
       error,
+    );
+    return new RuntimeThrownError({
+      name: error.name,
       message: error.message,
       stack: error.stack,
     });
-    return new RuntimeValidationError({
-      message: "Invalid runtime input",
-    });
   }
 
-  logUnknownRuntimeRpcError(error);
-  return new RuntimeInternalError({
-    message: "Internal runtime error",
+  logSerializedRuntimeRpcError(
+    "[runtime-rpc] serializing unknown thrown value to RuntimeUnknownValueError",
+    error,
+  );
+  return new RuntimeUnknownValueError({
+    value: String(error),
   });
 }

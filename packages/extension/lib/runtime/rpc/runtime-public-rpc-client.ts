@@ -2,9 +2,9 @@ import {
   type RuntimePublicRpc,
   RUNTIME_PUBLIC_RPC_PORT_NAME,
   RuntimeValidationError,
-  toRuntimeRpcError,
-  type RuntimeRpcError,
   RuntimePublicRpcGroup,
+  serializeUnknownRuntimeError,
+  type RuntimeRpcError,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
@@ -23,7 +23,7 @@ const core = makeRuntimeRpcClientCore({
     new RuntimeValidationError({
       message: CONNECTION_INVALIDATED_MESSAGE,
     }),
-  normalizeError: toRuntimeRpcError,
+  normalizeError: serializeUnknownRuntimeError,
 });
 
 export function createRuntimePublicRpcClient(input: {
@@ -38,7 +38,7 @@ export function createRuntimePublicRpcClient(input: {
     ) => Effect.Effect<A, E, R>,
   ): Effect.Effect<A, RuntimeRpcError, R> =>
     Effect.flatMap(input.ensureClient, (client) =>
-      Effect.mapError(f(client), toRuntimeRpcError),
+      Effect.mapError(f(client), serializeUnknownRuntimeError),
     );
 
   const withClientStream = <A, E, R>(
@@ -48,36 +48,55 @@ export function createRuntimePublicRpcClient(input: {
   ): Stream.Stream<A, RuntimeRpcError, R> =>
     Stream.unwrap(
       Effect.map(input.ensureClient, (client) =>
-        Stream.mapError(f(client), toRuntimeRpcError),
+        Stream.mapError(f(client), serializeUnknownRuntimeError),
       ),
     );
 
   return {
-    listModels: (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["listModels"]>[0]) =>
-      withClient((client) => client.listModels(payload)),
+    listModels: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimePublicRpc>["listModels"]
+      >[0],
+    ) => withClient((client) => client.listModels(payload)),
     getOriginState: (
-      payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["getOriginState"]>[0],
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimePublicRpc>["getOriginState"]
+      >[0],
     ) => withClient((client) => client.getOriginState(payload)),
     listPending: (
-      payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["listPending"]>[0],
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimePublicRpc>["listPending"]
+      >[0],
     ) => withClient((client) => client.listPending(payload)),
     acquireModel: (
-      payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["acquireModel"]>[0],
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimePublicRpc>["acquireModel"]
+      >[0],
     ) => withClient((client) => client.acquireModel(payload)),
     modelDoGenerate: (
-      payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["modelDoGenerate"]>[0],
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimePublicRpc>["modelDoGenerate"]
+      >[0],
     ) => withClient((client) => client.modelDoGenerate(payload)),
     modelDoStream: (
-      payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["modelDoStream"]>[0],
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimePublicRpc>["modelDoStream"]
+      >[0],
     ) => withClientStream((client) => client.modelDoStream(payload)),
     abortModelCall: (
-      payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["abortModelCall"]>[0],
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimePublicRpc>["abortModelCall"]
+      >[0],
     ) => withClient((client) => client.abortModelCall(payload)),
     requestPermission: (
-      payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["requestPermission"]>[0],
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimePublicRpc>["requestPermission"]
+      >[0],
     ) => withClient((client) => client.requestPermission(payload)),
   };
 }
+
+export type RuntimePublicRpcClient = ReturnType<typeof createRuntimePublicRpcClient>;
 
 export function getRuntimePublicRPC() {
   return createRuntimePublicRpcClient({

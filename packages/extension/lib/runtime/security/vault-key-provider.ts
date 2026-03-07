@@ -9,35 +9,7 @@ export const AUTH_MASTER_KEY_ID = "auth-master-key" as const;
 const AUTH_MASTER_KEY_VERSION = 1 as const;
 const AUTH_MASTER_KEY_ALGORITHM = "AES-GCM" as const;
 
-export interface VaultKeyProviderApi {
-  readonly getOrCreateAuthKey: Effect.Effect<
-    CryptoKey,
-    VaultKeyUnavailableError
-  >;
-}
-
-export class VaultKeyProvider extends Context.Tag(
-  "@llm-bridge/extension/VaultKeyProvider",
-)<VaultKeyProvider, VaultKeyProviderApi>() {}
-
-function isCryptoKey(value: unknown): value is CryptoKey {
-  return typeof CryptoKey !== "undefined" && value instanceof CryptoKey;
-}
-
-function createVaultKeyRow(key: CryptoKey): RuntimeDbVaultKey {
-  const timestamp = Date.now();
-
-  return {
-    id: AUTH_MASTER_KEY_ID,
-    key,
-    algorithm: AUTH_MASTER_KEY_ALGORITHM,
-    version: AUTH_MASTER_KEY_VERSION,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
-}
-
-export function makeVaultKeyProvider(): VaultKeyProviderApi {
+export function makeVaultKeyProvider() {
   let cachedAuthKey: CryptoKey | undefined;
 
   const readStoredKey = Effect.tryPromise({
@@ -102,6 +74,29 @@ export function makeVaultKeyProvider(): VaultKeyProviderApi {
 
       return readStoredKey;
     }),
+  };
+}
+
+export type VaultKeyProviderApi = ReturnType<typeof makeVaultKeyProvider>;
+
+export class VaultKeyProvider extends Context.Tag(
+  "@llm-bridge/extension/VaultKeyProvider",
+)<VaultKeyProvider, VaultKeyProviderApi>() {}
+
+function isCryptoKey(value: unknown): value is CryptoKey {
+  return typeof CryptoKey !== "undefined" && value instanceof CryptoKey;
+}
+
+function createVaultKeyRow(key: CryptoKey): RuntimeDbVaultKey {
+  const timestamp = Date.now();
+
+  return {
+    id: AUTH_MASTER_KEY_ID,
+    key,
+    algorithm: AUTH_MASTER_KEY_ALGORITHM,
+    version: AUTH_MASTER_KEY_VERSION,
+    createdAt: timestamp,
+    updatedAt: timestamp,
   };
 }
 

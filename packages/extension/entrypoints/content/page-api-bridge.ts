@@ -4,7 +4,7 @@ import {
   PageBridgeRpcGroup,
   RuntimeValidationError,
   isPageBridgePortControlMessage,
-  toRuntimeRpcError,
+  serializeUnknownRuntimeError,
   type BridgeModelCallRequest,
   type PageBridgePortControlMessage,
 } from "@llm-bridge/contracts";
@@ -38,11 +38,11 @@ function normalizeModelCallInput(input: BridgeModelCallRequest) {
 }
 
 function mapRuntimeEffect<A, E, R>(effect: Effect.Effect<A, E, R>) {
-  return Effect.mapError(effect, toRuntimeRpcError);
+  return Effect.mapError(effect, serializeUnknownRuntimeError);
 }
 
 function mapRuntimeStream<A, E, R>(stream: Stream.Stream<A, E, R>) {
-  return Stream.mapError(stream, toRuntimeRpcError);
+  return Stream.mapError(stream, serializeUnknownRuntimeError);
 }
 
 function createPageBridgeHandlers() {

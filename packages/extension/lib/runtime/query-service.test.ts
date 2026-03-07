@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import * as Effect from "effect/Effect";
 
 const TEST_ORIGIN = "https://example.test";
 const TRUSTED_MODEL_ID = "openai/gpt-4o-mini";
@@ -136,7 +137,9 @@ describe("listPendingRequestsForOrigin", () => {
       connected: false,
     });
 
-    const result = await listPendingRequestsForOrigin(TEST_ORIGIN);
+    const result = await Effect.runPromise(
+      listPendingRequestsForOrigin(TEST_ORIGIN),
+    );
 
     expect(result).toEqual([
       {

@@ -16,7 +16,6 @@ import type {
   RuntimePermissionEntry,
   RuntimeProviderSummary,
   RuntimeResolvePermissionRequestResponse,
-  RuntimeRpcError,
   RuntimeSetOriginEnabledResponse,
   RuntimeStartProviderAuthFlowResponse,
   RuntimeStreamPart,
@@ -25,7 +24,7 @@ import type {
 import type * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 
-type AppEffect<A> = Effect.Effect<A, RuntimeRpcError>;
+type AppEffect<A, E = unknown> = Effect.Effect<A, E>;
 
 export interface ResolvedPermissionTarget {
   modelId: string;
@@ -34,28 +33,34 @@ export interface ResolvedPermissionTarget {
   capabilities: ReadonlyArray<string>;
 }
 
-export interface ProvidersRepositoryApi {
+export function makeProvidersRepository(input: {
   listProviders: () => AppEffect<ReadonlyArray<RuntimeProviderSummary>>;
+}) {
+  return input;
 }
+
+export type ProvidersRepositoryApi = ReturnType<typeof makeProvidersRepository>;
 
 export class ProvidersRepository extends Context.Tag(
   "@llm-bridge/runtime-core/ProvidersRepository",
 )<ProvidersRepository, ProvidersRepositoryApi>() {}
 
-export interface ModelsRepositoryApi {
+export function makeModelsRepository(input: {
   listModels: (options: {
     connectedOnly?: boolean;
     providerID?: string;
   }) => AppEffect<ReadonlyArray<RuntimeModelSummary>>;
+}) {
+  return input;
 }
+
+export type ModelsRepositoryApi = ReturnType<typeof makeModelsRepository>;
 
 export class ModelsRepository extends Context.Tag(
   "@llm-bridge/runtime-core/ModelsRepository",
 )<ModelsRepository, ModelsRepositoryApi>() {}
 
-export interface AuthRepositoryApi {
-  // Repository operations must only perform auth storage/window work.
-  // Catalog refresh side-effects are owned by runtime-core services.
+export function makeAuthRepository(input: {
   openProviderAuthWindow: (
     providerID: string,
   ) => AppEffect<RuntimeOpenProviderAuthWindowResponse>;
@@ -75,13 +80,17 @@ export interface AuthRepositoryApi {
   disconnectProvider: (
     providerID: string,
   ) => AppEffect<RuntimeDisconnectProviderResponse>;
+}) {
+  return input;
 }
+
+export type AuthRepositoryApi = ReturnType<typeof makeAuthRepository>;
 
 export class AuthRepository extends Context.Tag(
   "@llm-bridge/runtime-core/AuthRepository",
 )<AuthRepository, AuthRepositoryApi>() {}
 
-export interface PermissionsRepositoryApi {
+export function makePermissionsRepository(input: {
   getOriginState: (origin: string) => AppEffect<RuntimeOriginState>;
   listPermissions: (
     origin: string,
@@ -119,31 +128,47 @@ export interface PermissionsRepositoryApi {
     timeoutMs?: number,
     signal?: AbortSignal,
   ) => AppEffect<"resolved" | "timeout" | "aborted">;
+}) {
+  return input;
 }
+
+export type PermissionsRepositoryApi = ReturnType<
+  typeof makePermissionsRepository
+>;
 
 export class PermissionsRepository extends Context.Tag(
   "@llm-bridge/runtime-core/PermissionsRepository",
 )<PermissionsRepository, PermissionsRepositoryApi>() {}
 
-export interface PendingRequestsRepositoryApi {
+export function makePendingRequestsRepository(input: {
   listPending: (
     origin: string,
   ) => AppEffect<ReadonlyArray<RuntimePendingRequest>>;
+}) {
+  return input;
 }
+
+export type PendingRequestsRepositoryApi = ReturnType<
+  typeof makePendingRequestsRepository
+>;
 
 export class PendingRequestsRepository extends Context.Tag(
   "@llm-bridge/runtime-core/PendingRequestsRepository",
 )<PendingRequestsRepository, PendingRequestsRepositoryApi>() {}
 
-export interface ConfigRepositoryApi {
+export function makeConfigRepository(input: {
   currentOriginFallback: () => string;
+}) {
+  return input;
 }
+
+export type ConfigRepositoryApi = ReturnType<typeof makeConfigRepository>;
 
 export class ConfigRepository extends Context.Tag(
   "@llm-bridge/runtime-core/ConfigRepository",
 )<ConfigRepository, ConfigRepositoryApi>() {}
 
-export interface MetaRepositoryApi {
+export function makeMetaRepository(input: {
   parseProviderModel: (modelID: string) => {
     providerID: string;
     modelID: string;
@@ -151,15 +176,17 @@ export interface MetaRepositoryApi {
   resolvePermissionTarget: (
     modelID: string,
   ) => AppEffect<ResolvedPermissionTarget>;
+}) {
+  return input;
 }
+
+export type MetaRepositoryApi = ReturnType<typeof makeMetaRepository>;
 
 export class MetaRepository extends Context.Tag(
   "@llm-bridge/runtime-core/MetaRepository",
 )<MetaRepository, MetaRepositoryApi>() {}
 
-export interface ModelExecutionRepositoryApi {
-  // Repository operations execute models only.
-  // Permission/origin policy checks are owned by runtime-core services.
+export function makeModelExecutionRepository(input: {
   acquireModel: (input: {
     origin: string;
     sessionID: string;
@@ -182,17 +209,27 @@ export interface ModelExecutionRepositoryApi {
     options: RuntimeModelCallOptions;
     signal?: AbortSignal;
   }) => AppEffect<ReadableStream<RuntimeStreamPart>>;
+}) {
+  return input;
 }
+
+export type ModelExecutionRepositoryApi = ReturnType<
+  typeof makeModelExecutionRepository
+>;
 
 export class ModelExecutionRepository extends Context.Tag(
   "@llm-bridge/runtime-core/ModelExecutionRepository",
 )<ModelExecutionRepository, ModelExecutionRepositoryApi>() {}
 
-export interface CatalogRepositoryApi {
+export function makeCatalogRepository(input: {
   ensureCatalog: () => AppEffect<void>;
   refreshCatalog: () => AppEffect<void>;
   refreshCatalogForProvider: (providerID: string) => AppEffect<void>;
+}) {
+  return input;
 }
+
+export type CatalogRepositoryApi = ReturnType<typeof makeCatalogRepository>;
 
 export class CatalogRepository extends Context.Tag(
   "@llm-bridge/runtime-core/CatalogRepository",

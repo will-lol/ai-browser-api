@@ -2,41 +2,19 @@ import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-types";
 import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 import { afterCommit, runTx } from "@/lib/runtime/db/runtime-db-tx";
 import { publishRuntimeEvent } from "@/lib/runtime/events/runtime-events";
+import {
+  SecretVault,
+  type SecretVaultApi,
+} from "@/lib/runtime/security/secret-vault";
 import { now } from "@/lib/runtime/util";
-import type { SecretVaultApi } from "@/lib/runtime/security/secret-vault";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { SecretVault } from "./secret-vault";
 import {
   VaultDecryptError,
   VaultEncryptError,
   VaultKeyUnavailableError,
 } from "./vault-errors";
-
-export interface AuthVaultStoreApi {
-  readonly getAuth: (
-    providerID: string,
-  ) => Effect.Effect<
-    AuthRecord | undefined,
-    VaultDecryptError | VaultKeyUnavailableError
-  >;
-  readonly listAuth: Effect.Effect<
-    Record<string, AuthRecord>,
-    VaultDecryptError | VaultKeyUnavailableError
-  >;
-  readonly setAuth: (
-    providerID: string,
-    value: AuthResult,
-  ) => Effect.Effect<AuthRecord, VaultEncryptError | VaultKeyUnavailableError>;
-  readonly removeAuth: (
-    providerID: string,
-  ) => Effect.Effect<void, VaultKeyUnavailableError>;
-}
-
-export class AuthVaultStore extends Context.Tag(
-  "@llm-bridge/extension/AuthVaultStore",
-)<AuthVaultStore, AuthVaultStoreApi>() {}
 
 const warnedCorruptAuthProviders = new Set<string>();
 
@@ -91,7 +69,7 @@ function emitAuthChanged(providerID: string) {
   ]).then(() => undefined);
 }
 
-export function makeAuthVaultStore(vault: SecretVaultApi): AuthVaultStoreApi {
+export function makeAuthVaultStore(vault: SecretVaultApi) {
   const readAuthRow = (providerID: string) =>
     Effect.tryPromise({
       try: () => runtimeDb.auth.get(providerID),
@@ -103,7 +81,7 @@ export function makeAuthVaultStore(vault: SecretVaultApi): AuthVaultStoreApi {
     });
 
   return {
-    getAuth: (providerID) =>
+    getAuth: (providerID: string) =>
       Effect.gen(function* () {
         const row = yield* readAuthRow(providerID);
         if (!row) return undefined;
@@ -152,7 +130,7 @@ export function makeAuthVaultStore(vault: SecretVaultApi): AuthVaultStoreApi {
       }
       return authMap;
     }),
-    setAuth: (providerID, value) =>
+    setAuth: (providerID: string, value: AuthResult) =>
       Effect.gen(function* () {
         const existing = yield* readAuthRow(providerID).pipe(
           Effect.flatMap((row) => {
@@ -201,7 +179,7 @@ export function makeAuthVaultStore(vault: SecretVaultApi): AuthVaultStoreApi {
 
         return auth;
       }),
-    removeAuth: (providerID) =>
+    removeAuth: (providerID: string) =>
       Effect.tryPromise({
         try: async () => {
           await runTx([runtimeDb.auth, runtimeDb.providers], async () => {
@@ -229,6 +207,12 @@ export function makeAuthVaultStore(vault: SecretVaultApi): AuthVaultStoreApi {
       }),
   };
 }
+
+export type AuthVaultStoreApi = ReturnType<typeof makeAuthVaultStore>;
+
+export class AuthVaultStore extends Context.Tag(
+  "@llm-bridge/extension/AuthVaultStore",
+)<AuthVaultStore, AuthVaultStoreApi>() {}
 
 export const AuthVaultStoreLive = Layer.effect(
   AuthVaultStore,

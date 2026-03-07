@@ -10,7 +10,7 @@ import {
   PageBridgeRpcGroup,
   RuntimeValidationError,
   decodeSupportedUrls,
-  toRuntimeRpcError,
+  serializeUnknownRuntimeError,
   type BridgePermissionRequest,
   type BridgeModelDescriptorResponse,
   type PageBridgeRpc,
@@ -58,24 +58,6 @@ export type BridgeClientOptions = {
 
 export type BridgeModelSummary = RuntimeModelSummary;
 export type BridgePermissionResult = RuntimeCreatePermissionRequestResponse;
-
-export interface BridgeClientApi {
-  readonly listModels: Effect.Effect<
-    ReadonlyArray<BridgeModelSummary>,
-    RuntimeRpcError
-  >;
-  getModel: (
-    modelId: string,
-  ) => Effect.Effect<LanguageModelV3, RuntimeRpcError>;
-  requestPermission: (
-    payload: BridgePermissionRequest,
-  ) => Effect.Effect<BridgePermissionResult, RuntimeRpcError>;
-  readonly destroy: Effect.Effect<void, never>;
-}
-
-export class BridgeClient extends Context.Tag(
-  "@llm-bridge/client/BridgeClient",
-)<BridgeClient, BridgeClientApi>() {}
 
 function createAbortError() {
   const error = new Error("The operation was aborted");
@@ -272,13 +254,68 @@ function createConnection(
         throw error;
       }
     },
-    catch: toRuntimeRpcError,
+    catch: serializeUnknownRuntimeError,
   });
 }
 
 function nextRequestId(sequence: number) {
   return `req_${Date.now()}_${sequence}`;
 }
+
+function makeBridgeClientApi(input: {
+  ensureConnection: Effect.Effect<BridgeConnection, RuntimeRpcError>;
+  destroy: Effect.Effect<void, never>;
+  createLanguageModel: (
+    modelId: string,
+    descriptor: BridgeModelDescriptorResponse,
+  ) => LanguageModelV3;
+  nextModelRequestId: () => string;
+}) {
+  const normalizeRpcError = <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, RuntimeRpcError, R> =>
+    Effect.mapError(effect, serializeUnknownRuntimeError);
+
+  const listModels = input.ensureConnection.pipe(
+    Effect.flatMap((current) => normalizeRpcError(current.client.listModels({}))),
+    Effect.map((response) => response.models),
+  );
+
+  const requestPermission = (payload: BridgePermissionRequest) =>
+    input.ensureConnection.pipe(
+      Effect.flatMap((current) =>
+        normalizeRpcError(current.client.requestPermission(payload)),
+      ),
+    );
+
+  const getModel = (modelId: string) =>
+    Effect.gen(function* () {
+      const requestId = input.nextModelRequestId();
+      const current = yield* input.ensureConnection;
+      const descriptor = yield* normalizeRpcError(
+        current.client.getModel({
+          modelId,
+          requestId,
+          sessionID: requestId,
+        }),
+      );
+
+      return input.createLanguageModel(modelId, descriptor);
+    });
+
+  return {
+    listModels,
+    getModel,
+    requestPermission,
+    destroy: input.destroy,
+  };
+}
+
+export type BridgeClientApi = ReturnType<typeof makeBridgeClientApi>;
+
+export class BridgeClient extends Context.Tag(
+  "@llm-bridge/client/BridgeClient",
+)<BridgeClient, BridgeClientApi>() {}
 
 export function BridgeClientLive(options: BridgeClientOptions = {}) {
   return Layer.scoped(
@@ -301,16 +338,15 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
       });
 
       const ensureConnection = lifecycle.ensure;
-
-      const normalizeRpcError = <A, R>(
-        effect: Effect.Effect<A, RuntimeRpcError | RpcClientError, R>,
+      const normalizeRpcError = <A, E, R>(
+        effect: Effect.Effect<A, E, R>,
       ): Effect.Effect<A, RuntimeRpcError, R> =>
-        Effect.mapError(effect, toRuntimeRpcError);
+        Effect.mapError(effect, serializeUnknownRuntimeError);
 
-      const normalizeRpcStreamError = <A, R>(
-        stream: Stream.Stream<A, RuntimeRpcError | RpcClientError, R>,
+      const normalizeRpcStreamError = <A, E, R>(
+        stream: Stream.Stream<A, E, R>,
       ): Stream.Stream<A, RuntimeRpcError, R> =>
-        Stream.mapError(stream, toRuntimeRpcError);
+        Stream.mapError(stream, serializeUnknownRuntimeError);
 
       const abortRequest = (input: { requestId: string; sessionID: string }) =>
         ensureConnection.pipe(
@@ -495,42 +531,15 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
         },
       });
  
-      const listModels = ensureConnection.pipe(
-        Effect.flatMap((current) =>
-          normalizeRpcError(current.client.listModels({})),
-        ),
-        Effect.map((response) => response.models),
-      );
-
-      const requestPermission = (payload: BridgePermissionRequest) =>
-        ensureConnection.pipe(
-          Effect.flatMap((current) =>
-            normalizeRpcError(current.client.requestPermission(payload)),
-          ),
-        );
-
-      const getModel = (modelId: string) =>
-        Effect.gen(function* () {
-          sequence += 1;
-          const requestId = nextRequestId(sequence);
-          const current = yield* ensureConnection;
-          const descriptor = yield* normalizeRpcError(
-            current.client.getModel({
-              modelId,
-              requestId,
-              sessionID: requestId,
-            }),
-          );
-
-          return createLanguageModel(modelId, descriptor);
-        });
-
-      return {
-        listModels,
-        getModel,
-        requestPermission,
+      return makeBridgeClientApi({
+        ensureConnection,
         destroy,
-      } satisfies BridgeClientApi;
+        createLanguageModel,
+        nextModelRequestId: () => {
+          sequence += 1;
+          return nextRequestId(sequence);
+        },
+      });
     }),
   );
 }

@@ -1,10 +1,12 @@
 import type { AuthRecord } from "@/lib/runtime/auth-types";
 import type { RuntimeDbAuth } from "@/lib/runtime/db/runtime-db-types";
-import type { VaultKeyProviderApi } from "@/lib/runtime/security/vault-key-provider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { VaultKeyProvider } from "./vault-key-provider";
+import {
+  VaultKeyProvider,
+  type VaultKeyProviderApi,
+} from "./vault-key-provider";
 import {
   VaultDecryptError,
   VaultEncryptError,
@@ -14,23 +16,6 @@ import {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const AUTH_VAULT_VERSION = 1 as const;
-
-export interface SecretVaultApi {
-  readonly sealAuth: (input: {
-    providerID: string;
-    record: AuthRecord;
-  }) => Effect.Effect<
-    RuntimeDbAuth,
-    VaultEncryptError | VaultKeyUnavailableError
-  >;
-  readonly openAuth: (
-    row: RuntimeDbAuth,
-  ) => Effect.Effect<AuthRecord, VaultDecryptError | VaultKeyUnavailableError>;
-}
-
-export class SecretVault extends Context.Tag(
-  "@llm-bridge/extension/SecretVault",
-)<SecretVault, SecretVaultApi>() {}
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -83,9 +68,15 @@ function authAdditionalData(
 
 export function makeSecretVault(
   keyProvider: VaultKeyProviderApi,
-): SecretVaultApi {
+) {
   return {
-    sealAuth: ({ providerID, record }) =>
+    sealAuth: ({
+      providerID,
+      record,
+    }: {
+      providerID: string;
+      record: AuthRecord;
+    }) =>
       Effect.gen(function* () {
         const key = yield* keyProvider.getOrCreateAuthKey;
         const iv = yield* Effect.sync(() =>
@@ -131,7 +122,7 @@ export function makeSecretVault(
           updatedAt: record.updatedAt,
         };
       }),
-    openAuth: (row) =>
+    openAuth: (row: RuntimeDbAuth) =>
       Effect.gen(function* () {
         if (row.version !== AUTH_VAULT_VERSION) {
           return yield* new VaultDecryptError({
@@ -182,6 +173,12 @@ export function makeSecretVault(
       }),
   };
 }
+
+export type SecretVaultApi = ReturnType<typeof makeSecretVault>;
+
+export class SecretVault extends Context.Tag(
+  "@llm-bridge/extension/SecretVault",
+)<SecretVault, SecretVaultApi>() {}
 
 export const SecretVaultLive = Layer.effect(
   SecretVault,
