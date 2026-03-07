@@ -182,7 +182,9 @@ describe("language-model-runtime error normalization", () => {
       providerID: "openai",
       operation: "generate",
       statusCode: 429,
-      retryAfter: 1.5,
+      responseHeaders: {
+        "retry-after-ms": "1500",
+      },
       retryable: true,
       message: "Rate limited",
     } satisfies Partial<RuntimeUpstreamServiceError>);
@@ -209,7 +211,9 @@ describe("language-model-runtime error normalization", () => {
       providerID: "openai",
       operation: "stream",
       statusCode: 503,
-      retryAfter: 2,
+      responseHeaders: {
+        "retry-after": "2",
+      },
       retryable: true,
       message: "Overloaded",
     } satisfies Partial<RuntimeUpstreamServiceError>);

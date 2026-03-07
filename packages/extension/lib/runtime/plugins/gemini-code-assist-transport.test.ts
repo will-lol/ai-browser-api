@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  createGeminiCodeAssistFetch,
   normalizeGeminiCodeAssistResponse,
   rewriteGeminiCodeAssistRequest,
 } from "@/lib/runtime/plugins/gemini-code-assist-transport";
@@ -135,5 +136,64 @@ describe("gemini-code-assist transport response normalization", () => {
     const payload = JSON.parse(dataLine.slice(6)) as Record<string, unknown>;
     assert.equal(payload.responseId, "trace-2");
     assert.equal(Array.isArray(payload.candidates), true);
+  });
+});
+
+describe("gemini-code-assist fetch wrapper", () => {
+  it("rewrites and forwards a single fetch attempt", async () => {
+    let callCount = 0;
+
+    const fetchFn = async (input: RequestInfo | URL, init?: RequestInit) => {
+      callCount += 1;
+
+      assert.equal(
+        String(input),
+        "https://cloudcode-pa.googleapis.com/v1internal:generateContent",
+      );
+
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get("authorization"), "Bearer oauth-token");
+
+      return new Response(
+        JSON.stringify({
+          response: {
+            candidates: [{ content: { parts: [{ text: "done" }] } }],
+          },
+        }),
+        {
+          status: 429,
+          headers: {
+            "content-type": "application/json",
+          },
+        },
+      );
+    };
+
+    const wrappedFetch = createGeminiCodeAssistFetch({
+      projectId: "managed-project-3",
+      fetchFn,
+      maxAttempts: 5,
+      baseRetryDelayMs: 1,
+    });
+
+    const response = await wrappedFetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer oauth-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: "Hello" }] }],
+        }),
+      },
+    );
+
+    assert.equal(callCount, 1);
+    assert.equal(response.status, 429);
+
+    const body = (await response.json()) as Record<string, unknown>;
+    assert.equal(Array.isArray(body.candidates), true);
   });
 });

@@ -10,11 +10,9 @@ import {
   PageBridgeRpcGroup,
   RuntimeValidationError,
   BridgeInitializationTimeoutError,
-  RpcProtocolError,
   BridgeAbortError,
-  BridgeMessagePortError,
   RuntimeDefectError,
-  isRuntimeRpcError,
+  RuntimeUpstreamServiceError,
   decodeSupportedUrls,
   type BridgePermissionRequest,
   type BridgeModelDescriptorResponse,
@@ -25,9 +23,10 @@ import {
   type PageBridgePortControlMessage,
 } from "@llm-bridge/contracts";
 import { makeResettableConnectionLifecycle } from "@llm-bridge/runtime-core";
-import type {
-  LanguageModelV3,
-  LanguageModelV3StreamPart,
+import {
+  APICallError,
+  type LanguageModelV3,
+  type LanguageModelV3StreamPart,
 } from "@ai-sdk/provider";
 import * as RpcClient from "@effect/rpc/RpcClient";
 import { RpcClientError } from "@effect/rpc/RpcClientError";
@@ -68,6 +67,52 @@ function createAbortError() {
   return new BridgeAbortError({
     message: "The operation was aborted",
   });
+}
+
+function createBridgeModelCallUrl(
+  operation: "generate" | "stream",
+  modelId: string,
+) {
+  return `llm-bridge://${operation}/${encodeURIComponent(modelId)}`;
+}
+
+function toResponseHeaders(error: RuntimeUpstreamServiceError) {
+  if (
+    error.responseHeaders &&
+    Object.keys(error.responseHeaders).length > 0
+  ) {
+    return error.responseHeaders;
+  }
+  return undefined;
+}
+
+function normalizeModelCallError(input: {
+  error: unknown;
+  operation: "generate" | "stream";
+  modelId: string;
+  requestBodyValues: unknown;
+}) {
+  if (!(input.error instanceof RuntimeUpstreamServiceError)) {
+    return input.error;
+  }
+
+  return new APICallError({
+    message: input.error.message,
+    url: createBridgeModelCallUrl(input.operation, input.modelId),
+    requestBodyValues: input.requestBodyValues,
+    statusCode: input.error.statusCode,
+    responseHeaders: toResponseHeaders(input.error),
+    isRetryable: input.error.retryable,
+    cause: input.error,
+  });
+}
+
+function isBootstrapRuntimeStreamPart(part: { type: string }) {
+  return (
+    part.type === "stream-start" ||
+    part.type === "response-metadata" ||
+    part.type === "raw"
+  );
 }
 
 function logBridgeDebug(event: string, details?: unknown) {
@@ -362,6 +407,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
           sequence += 1;
           const requestId = nextRequestId(sequence);
           const abortSignal = options.abortSignal;
+          const runtimeOptions = toRuntimeModelCallOptions(options);
           logBridgeDebug("doGenerate.started", { modelId, requestId });
 
           if (abortSignal?.aborted) {
@@ -391,7 +437,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
                   requestId,
                   sessionID: requestId,
                   modelId,
-                  options: toRuntimeModelCallOptions(options),
+                  options: runtimeOptions,
                 });
 
                 return fromRuntimeGenerateResponse(generated);
@@ -401,11 +447,17 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
             logBridgeDebug("doGenerate.succeeded", { modelId, requestId });
             return response;
           } catch (error) {
-            logBridgeError("doGenerate.failed", error, {
+            const normalized = normalizeModelCallError({
+              error,
+              operation: "generate",
+              modelId,
+              requestBodyValues: runtimeOptions,
+            });
+            logBridgeError("doGenerate.failed", normalized, {
               modelId,
               requestId,
             });
-            throw error;
+            throw normalized;
           } finally {
             abortSignal?.removeEventListener("abort", onAbort);
           }
@@ -414,6 +466,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
           sequence += 1;
           const requestId = nextRequestId(sequence);
           const abortSignal = options.abortSignal;
+          const runtimeOptions = toRuntimeModelCallOptions(options);
           logBridgeDebug("doStream.started", { modelId, requestId });
 
           if (abortSignal?.aborted) {
@@ -434,7 +487,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
                       requestId,
                       sessionID: requestId,
                       modelId,
-                      options: toRuntimeModelCallOptions(options),
+                      options: runtimeOptions,
                     }),
                   ),
                 );
@@ -457,28 +510,72 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
               abortSignal?.removeEventListener("abort", onAbort);
             };
 
+            const bufferedParts = [] as Array<LanguageModelV3StreamPart>;
+            let streamFinishedDuringBootstrap = false;
+
+            while (true) {
+              const next = await reader.read();
+              if (next.done) {
+                streamFinishedDuringBootstrap = true;
+                break;
+              }
+
+              const part = fromRuntimeStreamPart(next.value);
+              bufferedParts.push(part);
+              if (!isBootstrapRuntimeStreamPart(part)) {
+                break;
+              }
+            }
+
+            let bufferedIndex = 0;
+            let completed = false;
+
+            const finishStream = () => {
+              if (completed) return;
+              completed = true;
+              cleanup();
+              logBridgeDebug("doStream.completed", {
+                modelId,
+                requestId,
+              });
+            };
+
             return {
               stream: new ReadableStream<LanguageModelV3StreamPart>({
                 async pull(controller) {
+                  if (bufferedIndex < bufferedParts.length) {
+                    controller.enqueue(bufferedParts[bufferedIndex]!);
+                    bufferedIndex += 1;
+                    return;
+                  }
+
+                  if (streamFinishedDuringBootstrap) {
+                    finishStream();
+                    controller.close();
+                    return;
+                  }
+
                   try {
                     const next = await reader.read();
                     if (next.done) {
-                      cleanup();
-                      logBridgeDebug("doStream.completed", {
-                        modelId,
-                        requestId,
-                      });
+                      finishStream();
                       controller.close();
                       return;
                     }
                     controller.enqueue(fromRuntimeStreamPart(next.value));
                   } catch (error) {
                     cleanup();
-                    logBridgeError("doStream.pullFailed", error, {
+                    const normalized = normalizeModelCallError({
+                      error,
+                      operation: "stream",
+                      modelId,
+                      requestBodyValues: runtimeOptions,
+                    });
+                    logBridgeError("doStream.pullFailed", normalized, {
                       modelId,
                       requestId,
                     });
-                    throw error;
+                    throw normalized;
                   }
                 },
                 async cancel() {
@@ -501,11 +598,17 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
               }),
             };
           } catch (error) {
-            logBridgeError("doStream.failed", error, {
+            const normalized = normalizeModelCallError({
+              error,
+              operation: "stream",
+              modelId,
+              requestBodyValues: runtimeOptions,
+            });
+            logBridgeError("doStream.failed", normalized, {
               modelId,
               requestId,
             });
-            throw error;
+            throw normalized;
           }
         },
       });

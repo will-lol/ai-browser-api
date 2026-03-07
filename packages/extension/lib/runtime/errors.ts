@@ -23,32 +23,6 @@ function unwrapRetryError(error: unknown) {
   return error;
 }
 
-function parseRetryAfterSeconds(headers?: Record<string, string>) {
-  if (!headers) return undefined;
-
-  const retryAfterMs = headers["retry-after-ms"];
-  if (retryAfterMs) {
-    const parsed = Number.parseFloat(retryAfterMs);
-    if (!Number.isNaN(parsed) && parsed >= 0) {
-      return parsed / 1000;
-    }
-  }
-
-  const retryAfter = headers["retry-after"];
-  if (!retryAfter) return undefined;
-
-  const parsedSeconds = Number.parseFloat(retryAfter);
-  if (!Number.isNaN(parsedSeconds) && parsedSeconds >= 0) {
-    return parsedSeconds;
-  }
-
-  const parsedDate = Date.parse(retryAfter);
-  if (Number.isNaN(parsedDate)) return undefined;
-
-  const seconds = (parsedDate - Date.now()) / 1000;
-  return seconds >= 0 ? seconds : undefined;
-}
-
 export function wrapProviderError(
   error: unknown,
   providerID: string,
@@ -61,7 +35,7 @@ export function wrapProviderError(
       providerID,
       operation,
       statusCode: normalized.statusCode,
-      retryAfter: parseRetryAfterSeconds(normalized.responseHeaders),
+      responseHeaders: normalized.responseHeaders,
       retryable: normalized.isRetryable,
       message: normalized.message,
     });

@@ -33,7 +33,9 @@ describe("runtime error wrappers", () => {
     );
 
     expect(wrapped).toBeInstanceOf(RuntimeUpstreamServiceError);
-    expect(wrapped.retryAfter).toBe(2.5);
+    expect(wrapped.responseHeaders).toEqual({
+      "retry-after-ms": "2500",
+    });
     expect(wrapped.statusCode).toBe(429);
     expect(wrapped.retryable).toBe(true);
   });
@@ -54,11 +56,13 @@ describe("runtime error wrappers", () => {
       "stream",
     );
 
-    expect(wrapped.retryAfter).toBe(7);
+    expect(wrapped.responseHeaders).toEqual({
+      "retry-after": "7",
+    });
     expect(wrapped.statusCode).toBe(503);
   });
 
-  it("extracts HTTP-date retry-after values from AI SDK API call errors", () => {
+  it("preserves HTTP-date retry-after values from AI SDK API call errors", () => {
     const future = new Date(Date.now() + 5000).toUTCString();
     const wrapped = wrapProviderError(
       new APICallError({
@@ -75,8 +79,9 @@ describe("runtime error wrappers", () => {
       "generate",
     );
 
-    expect(wrapped.retryAfter).toBeGreaterThan(0);
-    expect(wrapped.retryAfter).toBeLessThanOrEqual(5);
+    expect(wrapped.responseHeaders).toEqual({
+      "retry-after": future,
+    });
   });
 
   it("unwraps RetryError.lastError before classifying provider failures", () => {
@@ -106,7 +111,9 @@ describe("runtime error wrappers", () => {
       providerID: "openai",
       operation: "generate",
       statusCode: 429,
-      retryAfter: 3,
+      responseHeaders: {
+        "retry-after": "3",
+      },
       retryable: true,
       message: "Rate limited",
     } satisfies Partial<RuntimeUpstreamServiceError>);

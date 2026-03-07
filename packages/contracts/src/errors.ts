@@ -50,7 +50,9 @@ export class RuntimeUpstreamServiceError extends Schema.TaggedError<RuntimeUpstr
   providerID: Schema.String,
   operation: Schema.String,
   statusCode: Schema.optional(Schema.Number),
-  retryAfter: Schema.optional(Schema.Number),
+  responseHeaders: Schema.optional(
+    Schema.Record({ key: Schema.String, value: Schema.String }),
+  ),
   retryable: Schema.Boolean,
   message: Schema.String,
 }) {}

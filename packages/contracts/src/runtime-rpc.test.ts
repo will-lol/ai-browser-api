@@ -111,33 +111,39 @@ describe("runtime rpc contracts", () => {
     );
   });
 
-  it("encodes and decodes upstream errors with optional retryAfter", () => {
+  it("encodes and decodes upstream errors with optional response headers", () => {
     const decodeRuntimeError = Schema.decodeUnknownSync(RuntimeRpcErrorSchema);
     const encodeRuntimeError = Schema.encodeSync(RuntimeRpcErrorSchema);
 
-    const withRetryAfter = decodeRuntimeError({
+    const withHeaders = decodeRuntimeError({
       _tag: "RuntimeUpstreamServiceError",
       providerID: "openai",
       operation: "generate",
       statusCode: 429,
-      retryAfter: 12.5,
+      responseHeaders: {
+        "retry-after-ms": "12500",
+      },
       retryable: true,
       message: "Rate limited",
     });
 
-    assert.ok(withRetryAfter instanceof RuntimeUpstreamServiceError);
-    assert.equal(withRetryAfter.retryAfter, 12.5);
-    assert.deepEqual(encodeRuntimeError(withRetryAfter), {
+    assert.ok(withHeaders instanceof RuntimeUpstreamServiceError);
+    assert.deepEqual(withHeaders.responseHeaders, {
+      "retry-after-ms": "12500",
+    });
+    assert.deepEqual(encodeRuntimeError(withHeaders), {
       _tag: "RuntimeUpstreamServiceError",
       providerID: "openai",
       operation: "generate",
       statusCode: 429,
-      retryAfter: 12.5,
+      responseHeaders: {
+        "retry-after-ms": "12500",
+      },
       retryable: true,
       message: "Rate limited",
     });
 
-    const withoutRetryAfter = decodeRuntimeError({
+    const withoutHeaders = decodeRuntimeError({
       _tag: "RuntimeUpstreamServiceError",
       providerID: "openai",
       operation: "stream",
@@ -145,9 +151,9 @@ describe("runtime rpc contracts", () => {
       message: "Upstream failed",
     });
 
-    assert.ok(withoutRetryAfter instanceof RuntimeUpstreamServiceError);
-    assert.equal(withoutRetryAfter.retryAfter, undefined);
-    assert.deepEqual(encodeRuntimeError(withoutRetryAfter), {
+    assert.ok(withoutHeaders instanceof RuntimeUpstreamServiceError);
+    assert.equal(withoutHeaders.responseHeaders, undefined);
+    assert.deepEqual(encodeRuntimeError(withoutHeaders), {
       _tag: "RuntimeUpstreamServiceError",
       providerID: "openai",
       operation: "stream",

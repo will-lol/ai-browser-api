@@ -500,7 +500,9 @@ describe("runtime rpc handlers", () => {
             providerID: "openai",
             operation: "auth.authorize",
             statusCode: 429,
-            retryAfter: 3,
+            responseHeaders: {
+              "retry-after": "3",
+            },
             retryable: true,
             message: "Rate limited",
           }),
@@ -522,7 +524,9 @@ describe("runtime rpc handlers", () => {
     assert.ok(result.left instanceof RuntimeUpstreamServiceError);
     assert.equal(result.left.providerID, "openai");
     assert.equal(result.left.operation, "auth.authorize");
-    assert.equal(result.left.retryAfter, 3);
+    assert.deepEqual(result.left.responseHeaders, {
+      "retry-after": "3",
+    });
     assert.equal(result.left.statusCode, 429);
   });
 

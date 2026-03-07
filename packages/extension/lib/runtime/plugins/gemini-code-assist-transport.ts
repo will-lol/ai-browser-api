@@ -1,9 +1,3 @@
-import {
-  backoffDelayMs,
-  createTransportFetchPipeline,
-  parseRetryAfterMs,
-} from "@/lib/runtime/ai/transport-pipeline";
-import type { RewrittenTransportRequest } from "@/lib/runtime/ai/transport-pipeline";
 import type { RuntimeFetch } from "@/lib/runtime/plugin-manager";
 
 const GENERATIVE_LANGUAGE_HOST = "generativelanguage.googleapis.com";
@@ -32,6 +26,12 @@ export interface GeminiRewriteMetadata {
   requestedModel: string;
 }
 
+export interface RewrittenTransportRequest<TMetadata = void> {
+  request: RequestInfo | URL;
+  init: RequestInit;
+  metadata: TMetadata;
+}
+
 function randomRequestID() {
   if (
     typeof crypto !== "undefined" &&
@@ -40,93 +40,6 @@ function randomRequestID() {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function parseGoogleRetryDelayMs(value: unknown) {
-  if (typeof value === "string") {
-    const match = value.trim().match(/^(\d+)(?:\.(\d+))?s$/);
-    if (!match) return undefined;
-    const seconds = Number.parseInt(match[1] ?? "0", 10);
-    const fractionRaw = match[2];
-    const millis = fractionRaw
-      ? Number.parseInt(fractionRaw.padEnd(3, "0").slice(0, 3), 10)
-      : 0;
-    return seconds * 1000 + millis;
-  }
-
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const secondsRaw = record.seconds;
-    const nanosRaw = record.nanos;
-
-    const seconds =
-      typeof secondsRaw === "number"
-        ? secondsRaw
-        : typeof secondsRaw === "string"
-          ? Number.parseInt(secondsRaw, 10)
-          : 0;
-
-    const nanos =
-      typeof nanosRaw === "number"
-        ? nanosRaw
-        : typeof nanosRaw === "string"
-          ? Number.parseInt(nanosRaw, 10)
-          : 0;
-
-    if (!Number.isFinite(seconds) || !Number.isFinite(nanos)) {
-      return undefined;
-    }
-
-    return Math.max(0, seconds * 1000 + Math.floor(nanos / 1_000_000));
-  }
-
-  return undefined;
-}
-
-async function parseRetryInfoDelayMs(response: Response) {
-  try {
-    const body = (await response.clone().json()) as {
-      error?: {
-        details?: Array<Record<string, unknown>>;
-      };
-    };
-
-    const details = body?.error?.details;
-    if (!Array.isArray(details)) return undefined;
-
-    for (const detail of details) {
-      if (detail?.["@type"] !== "type.googleapis.com/google.rpc.RetryInfo") {
-        continue;
-      }
-
-      const delay = parseGoogleRetryDelayMs(detail.retryDelay);
-      if (typeof delay === "number") {
-        return delay;
-      }
-    }
-  } catch {
-    return undefined;
-  }
-
-  return undefined;
-}
-
-async function resolveGeminiRetryDelayMs(
-  response: Response,
-  attempt: number,
-  baseRetryDelayMs: number,
-) {
-  const headerDelay = parseRetryAfterMs(response.headers.get("Retry-After"));
-  if (typeof headerDelay === "number") {
-    return headerDelay;
-  }
-
-  const bodyDelay = await parseRetryInfoDelayMs(response);
-  if (typeof bodyDelay === "number") {
-    return bodyDelay;
-  }
-
-  return backoffDelayMs(attempt, baseRetryDelayMs);
 }
 
 function extractActionAndModel(url: string) {
@@ -446,15 +359,18 @@ export async function normalizeGeminiCodeAssistResponse(
 export function createGeminiCodeAssistFetch(
   options: GeminiCodeAssistFetchOptions,
 ): RuntimeFetch {
-  return createTransportFetchPipeline({
-    fetchFn: options.fetchFn,
-    maxAttempts: options.maxAttempts,
-    baseRetryDelayMs: options.baseRetryDelayMs,
-    rewriteRequest: (input, init) =>
-      rewriteGeminiCodeAssistRequest(input, init, {
-        projectId: options.projectId,
-      }),
-    normalizeResponse: normalizeGeminiCodeAssistResponse,
-    resolveRetryDelayMs: resolveGeminiRetryDelayMs,
-  });
+  const fetchFn = options.fetchFn ?? fetch;
+
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const rewritten = await rewriteGeminiCodeAssistRequest(input, init, {
+      projectId: options.projectId,
+    });
+
+    if (!rewritten) {
+      return fetchFn(input, init);
+    }
+
+    const response = await fetchFn(rewritten.request, rewritten.init);
+    return normalizeGeminiCodeAssistResponse(response, rewritten.metadata);
+  };
 }

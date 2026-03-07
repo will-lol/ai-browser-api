@@ -1,4 +1,5 @@
-import { streamText } from "ai";
+import type { ChatTransport, UIMessage } from "ai";
+import { useChat } from "@ai-sdk/react";
 import {
   BridgeClient,
   type BridgeModelSummary,
@@ -7,24 +8,22 @@ import {
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, User, Bot, Loader2, RefreshCw } from "lucide-react";
+import { createBridgeChatTransport } from "./bridge-chat-transport";
 
 const DEFAULT_MODEL_ID = "google/gemini-3.1-pro-preview";
 
-type Message = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-};
+function getMessageText(message: UIMessage) {
+  return message.parts
+    .filter((part): part is Extract<(typeof message.parts)[number], { type: "text" }> => part.type === "text")
+    .map((part) => part.text)
+    .join("");
+}
 
 export function App() {
   const [models, setModels] = useState<ReadonlyArray<BridgeModelSummary>>([]);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [status, setStatus] = useState("Idle");
-
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
 
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const startupRefreshTriggeredRef = useRef(false);
@@ -101,7 +100,7 @@ export function App() {
     });
 
     return refreshInFlightRef.current;
-  }, [pushError, runBridge]);
+  }, [pushDebug, pushError, runBridge]);
 
   const loadModel = useCallback(
     (modelId: string) =>
@@ -113,79 +112,57 @@ export function App() {
       ),
     [runBridge],
   );
+  const selectedModelIdRef = useRef(selectedModelId);
+  const loadModelRef = useRef(loadModel);
+  const transportRef = useRef<ChatTransport<UIMessage> | null>(null);
+
+  selectedModelIdRef.current = selectedModelId;
+  loadModelRef.current = loadModel;
+
+  if (transportRef.current === null) {
+    transportRef.current = createBridgeChatTransport({
+      getSelectedModelId: () => selectedModelIdRef.current,
+      loadModel: (modelId) => loadModelRef.current(modelId),
+      pushDebug,
+    });
+  }
+
+  const {
+    messages,
+    sendMessage,
+    clearError,
+    error,
+    status: chatStatus,
+  } = useChat({
+    transport: transportRef.current,
+    onError: (error) => {
+      pushError("stream.failed", error);
+    },
+    onFinish: ({ message }) => {
+      pushDebug("stream.completed", {
+        selectedModelId: selectedModelIdRef.current,
+        assistantMessageId: message.id,
+      });
+    },
+  });
+
+  const isLoading =
+    chatStatus === "submitted" || chatStatus === "streaming";
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!input.trim() || isLoading || !selectedModelId) return;
 
     const prompt = input.trim();
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: prompt,
-    };
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
+    clearError();
     setInput("");
-    setIsLoading(true);
-    setError(null);
-
-    const assistantMessageId = (Date.now() + 1).toString();
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantMessageId, role: "assistant", content: "" },
-    ]);
-
-    try {
-      pushDebug("stream.started", {
-        selectedModelId,
-        promptLength: prompt.length,
-        messageCount: newMessages.length,
-      });
-      const model = await loadModel(selectedModelId);
-      pushDebug("stream.modelLoaded", {
-        selectedModelId,
-        provider: model.provider,
-        modelId: model.modelId,
-      });
-
-      const streamResult = streamText({
-        model,
-        messages: newMessages,
-        providerOptions: {
-          openai: { instructions: "You are a helpful assistant" },
-        },
-      });
-
-      for await (const chunk of streamResult.textStream) {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMessageId
-              ? { ...msg, content: msg.content + chunk }
-              : msg,
-          ),
-        );
-      }
-      pushDebug("stream.completed", {
-        selectedModelId,
-        assistantMessageId,
-      });
-    } catch (err) {
-      pushError("stream.failed", err);
-      setError(err instanceof Error ? err : new Error(String(err)));
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last.id === assistantMessageId && last.content === "") {
-          return prev.slice(0, -1);
-        }
-        return prev;
-      });
-    } finally {
-      setIsLoading(false);
-    }
+    await sendMessage({ text: prompt });
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (error) {
+      clearError();
+    }
     setInput(e.target.value);
   };
 
@@ -298,14 +275,15 @@ export function App() {
                       }
                     `}
                   >
-                    {message.content}
+                    {getMessageText(message)}
                   </div>
                 </div>
               </div>
             ))}
 
             {/* Loading Indicator */}
-            {isLoading && messages[messages.length - 1]?.role === "user" && (
+            {chatStatus === "submitted" &&
+              messages[messages.length - 1]?.role === "user" && (
               <div className="flex gap-4 md:gap-6 flex-row max-w-4xl mx-auto">
                 <div className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-sm bg-[#223557] text-[#e5edf8]">
                   <Bot className="w-5 h-5" />
