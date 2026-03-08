@@ -13,6 +13,10 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import {
+  ChatExecutionService,
+  type ChatExecutionServiceApi,
+} from "@/lib/runtime/ai/chat-execution-service";
+import {
   makeRuntimeAdminRpcHandlers,
   makeRuntimePublicRpcHandlers,
 } from "./runtime-rpc-handlers";
@@ -248,17 +252,67 @@ function createRuntimeApplication(
 }
 
 async function loadPublicHandlers(runtimeApplication: RuntimeApplicationApi) {
+  const chatExecutionService: ChatExecutionServiceApi = {
+    sendMessages: () =>
+      Effect.succeed(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+      ),
+    reconnectStream: () =>
+      Effect.succeed(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+      ),
+    abortStream: () => Effect.succeed(undefined),
+  };
+
   return Effect.runPromise(
     makeRuntimePublicRpcHandlers.pipe(
-      Effect.provide(Layer.succeed(RuntimeApplication, runtimeApplication)),
+      Effect.provide(
+        Layer.merge(
+          Layer.succeed(RuntimeApplication, runtimeApplication),
+          Layer.succeed(ChatExecutionService, chatExecutionService),
+        ),
+      ),
     ),
   );
 }
 
 async function loadAdminHandlers(runtimeApplication: RuntimeApplicationApi) {
+  const chatExecutionService: ChatExecutionServiceApi = {
+    sendMessages: () =>
+      Effect.succeed(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+      ),
+    reconnectStream: () =>
+      Effect.succeed(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+      ),
+    abortStream: () => Effect.succeed(undefined),
+  };
+
   return Effect.runPromise(
     makeRuntimeAdminRpcHandlers.pipe(
-      Effect.provide(Layer.succeed(RuntimeApplication, runtimeApplication)),
+      Effect.provide(
+        Layer.merge(
+          Layer.succeed(RuntimeApplication, runtimeApplication),
+          Layer.succeed(ChatExecutionService, chatExecutionService),
+        ),
+      ),
     ),
   );
 }

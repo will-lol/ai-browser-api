@@ -5,6 +5,8 @@ import type {
   LanguageModelV3StreamPart,
 } from "@ai-sdk/provider";
 import { APICallError } from "@ai-sdk/provider";
+import type { ModelMessage } from "ai";
+import { fromRuntimeModelCallOptions } from "@llm-bridge/bridge-codecs";
 import * as amazonBedrockModule from "@ai-sdk/amazon-bedrock";
 import * as anthropicModule from "@ai-sdk/anthropic";
 import * as azureModule from "@ai-sdk/azure";
@@ -26,6 +28,8 @@ import {
   ProviderNotConnectedError,
   RuntimeValidationError,
   isRuntimeRpcError,
+  type RuntimeChatCallOptions,
+  type RuntimeModelCallOptions,
 } from "@llm-bridge/contracts";
 import * as openRouterModule from "@openrouter/ai-sdk-provider";
 import { RetryError } from "ai";
@@ -67,6 +71,20 @@ interface ModelRuntimeContext {
 type PreparedCallOptions = {
   callOptions: RuntimeLanguageModelCallOptions;
   transport: Partial<RuntimeTransportConfig>;
+};
+
+export type PreparedRuntimeLanguageModelCall = {
+  providerID: string;
+  providerModelID: string;
+  languageModel: LanguageModelV3;
+  callOptions: RuntimeLanguageModelCallOptions;
+};
+
+export type PreparedRuntimeChatModelCall = {
+  providerID: string;
+  providerModelID: string;
+  languageModel: LanguageModelV3;
+  callOptions: Omit<RuntimeLanguageModelCallOptions, "prompt">;
 };
 
 const providerSDKCache = new Map<string, ReturnType<RuntimeProviderFactory>>();
@@ -298,6 +316,125 @@ function toLegacyMessages(prompt: LanguageModelV3CallOptions["prompt"]) {
       }),
     };
   });
+}
+
+function toLegacyChatMessages(input: {
+  messages: Array<ModelMessage>;
+  system?: string;
+}) {
+  const systemMessages =
+    input.system != null
+      ? [
+          {
+            role: "system",
+            content: input.system,
+          },
+        ]
+      : [];
+
+  const messages = input.messages.map((message) => {
+    if (message.role === "system" && typeof message.content === "string") {
+      return {
+        role: message.role,
+        content: message.content,
+      };
+    }
+
+    if (message.role === "user") {
+      if (typeof message.content === "string") {
+        return {
+          role: message.role,
+          content: message.content,
+        };
+      }
+
+      return {
+        role: message.role,
+        content: message.content.map((part) => {
+          if (part.type === "text") {
+            return {
+              type: "text",
+              text: part.text,
+            };
+          }
+
+          if (
+            part.type === "image" &&
+            part.mediaType?.startsWith("image/") &&
+            (typeof part.image === "string" || part.image instanceof URL)
+          ) {
+            return {
+              type: "image_url",
+              image_url: {
+                url:
+                  typeof part.image === "string"
+                    ? part.image
+                    : part.image.toString(),
+              },
+            };
+          }
+
+          if (
+            part.type === "file" &&
+            part.mediaType.startsWith("image/") &&
+            (typeof part.data === "string" || part.data instanceof URL)
+          ) {
+            return {
+              type: "image_url",
+              image_url: {
+                url:
+                  typeof part.data === "string"
+                    ? part.data
+                    : part.data.toString(),
+              },
+            };
+          }
+
+          return part;
+        }),
+      };
+    }
+
+    if (message.role === "assistant" && typeof message.content === "string") {
+      return {
+        role: message.role,
+        content: message.content,
+      };
+    }
+
+    return {
+      role: message.role,
+      content: message.content,
+    };
+  });
+
+  return [...systemMessages, ...messages];
+}
+
+function toRuntimeModelCallOptionsForChat(
+  options?: RuntimeChatCallOptions,
+): RuntimeModelCallOptions {
+  return {
+    prompt: [],
+    maxOutputTokens: options?.maxOutputTokens,
+    temperature: options?.temperature,
+    stopSequences: options?.stopSequences
+      ? [...options.stopSequences]
+      : undefined,
+    topP: options?.topP,
+    topK: options?.topK,
+    presencePenalty: options?.presencePenalty,
+    frequencyPenalty: options?.frequencyPenalty,
+    responseFormat: options?.responseFormat,
+    seed: options?.seed,
+    tools: options?.tools ? [...options.tools] : undefined,
+    toolChoice: options?.toolChoice,
+    includeRawChunks: options?.includeRawChunks,
+    headers: options?.headers ? { ...options.headers } : undefined,
+    providerOptions: options?.providerOptions
+      ? { ...options.providerOptions }
+      : undefined,
+  };
 }
 
 function toCallOptions(
@@ -693,6 +830,158 @@ async function prepareCallOptions(input: {
   };
 }
 
+export async function prepareRuntimeLanguageModelCall(input: {
+  modelID: string;
+  origin: string;
+  sessionID: string;
+  requestID: string;
+  options: RuntimeLanguageModelCallOptions;
+}): Promise<PreparedRuntimeLanguageModelCall> {
+  const runtime = await resolveModelRuntimeContext(input.modelID);
+  const { context, prepared } = await prepareCallOptions({
+    runtime,
+    origin: input.origin,
+    sessionID: input.sessionID,
+    requestID: input.requestID,
+    options: input.options,
+  });
+
+  const languageModel = await getLanguageModel({
+    runtime,
+    context,
+    transportPatch: prepared.transport,
+    staticHeaders: toHeaderRecord(prepared.callOptions.headers),
+  });
+
+  return {
+    providerID: runtime.providerID,
+    providerModelID: runtime.modelID,
+    languageModel,
+    callOptions: prepared.callOptions,
+  };
+}
+
+export async function prepareRuntimeChatModelCall(input: {
+  modelID: string;
+  origin: string;
+  sessionID: string;
+  requestID: string;
+  messages: Array<ModelMessage>;
+  options?: RuntimeChatCallOptions;
+}): Promise<PreparedRuntimeChatModelCall> {
+  const runtime = await resolveModelRuntimeContext(input.modelID);
+  const plugins = getPluginManager();
+  const context: RuntimeAdapterContext = {
+    providerID: runtime.providerID,
+    modelID: runtime.modelID,
+    origin: input.origin,
+    sessionID: input.sessionID,
+    requestID: input.requestID,
+    auth: runtime.auth,
+    provider: runtime.provider,
+    model: runtime.model,
+  };
+
+  const authOptions = await plugins.loadAuthOptions({
+    providerID: runtime.providerID,
+    provider: runtime.provider,
+    auth: runtime.auth,
+  });
+
+  const merged = mergeRecord(
+    mergeRecord(
+      (input.options ?? {}) as Record<string, unknown>,
+      {
+        model: runtime.model.api.id,
+        messages: toLegacyChatMessages({
+          messages: input.messages,
+          system: input.options?.system,
+        }),
+      },
+    ),
+    authOptions.requestOptions,
+  );
+
+  const chatPatched = await plugins.applyChatParams(context, merged);
+  const requestPatched = await plugins.applyRequestOptions(context, chatPatched);
+  const finalHeaders = await plugins.applyChatHeaders(context, {
+    ...toHeaderRecord(input.options?.headers),
+    ...toHeaderRecord(requestPatched.headers),
+  });
+
+  const providerOptionKey = getProviderOptionKey(runtime.model);
+  const knownKeys = new Set([
+    "prompt",
+    "maxOutputTokens",
+    "max_tokens",
+    "temperature",
+    "stopSequences",
+    "stop",
+    "topP",
+    "top_p",
+    "topK",
+    "presencePenalty",
+    "frequencyPenalty",
+    "responseFormat",
+    "response_format",
+    "seed",
+    "tools",
+    "toolChoice",
+    "tool_choice",
+    "includeRawChunks",
+    "providerOptions",
+    "headers",
+    "model",
+    "messages",
+    "system",
+  ]);
+
+  const providerOptionsPatch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(requestPatched)) {
+    if (knownKeys.has(key)) continue;
+    if (value === undefined) continue;
+    providerOptionsPatch[key] = value;
+  }
+
+  const fallback = fromRuntimeModelCallOptions(
+    toRuntimeModelCallOptionsForChat(input.options),
+  );
+
+  const callOptions = toCallOptions(requestPatched, fallback);
+
+  if (Object.keys(providerOptionsPatch).length > 0) {
+    callOptions.providerOptions = mergeRecord(
+      (callOptions.providerOptions as Record<string, unknown>) ?? {},
+      {
+        [providerOptionKey]: mergeRecord(
+          ((callOptions.providerOptions as Record<string, unknown>)?.[
+            providerOptionKey
+          ] as Record<string, unknown> | undefined) ?? {},
+          providerOptionsPatch,
+        ),
+      },
+    ) as RuntimeLanguageModelCallOptions["providerOptions"];
+  }
+
+  callOptions.headers = finalHeaders;
+
+  const languageModel = await getLanguageModel({
+    runtime,
+    context,
+    transportPatch: authOptions.transport,
+    staticHeaders: toHeaderRecord(callOptions.headers),
+  });
+
+  const { prompt: _prompt, ...callOptionsWithoutPrompt } = callOptions;
+
+  return {
+    providerID: runtime.providerID,
+    providerModelID: runtime.modelID,
+    languageModel,
+    callOptions: callOptionsWithoutPrompt,
+  };
+}
+
 export async function getRuntimeModelDescriptor(input: {
   modelID: string;
   origin: string;
@@ -766,24 +1055,16 @@ export async function runLanguageModelGenerate(input: {
   let providerID: string | undefined;
 
   try {
-    const runtime = await resolveModelRuntimeContext(input.modelID);
-    providerID = runtime.providerID;
-    const { context, prepared } = await prepareCallOptions({
-      runtime,
+    const preparedCall = await prepareRuntimeLanguageModelCall({
+      modelID: input.modelID,
       origin: input.origin,
       sessionID: input.sessionID,
       requestID: input.requestID,
       options: input.options,
     });
-
-    const languageModel = await getLanguageModel({
-      runtime,
-      context,
-      transportPatch: prepared.transport,
-      staticHeaders: toHeaderRecord(prepared.callOptions.headers),
-    });
-    const result = await languageModel.doGenerate({
-      ...prepared.callOptions,
+    providerID = preparedCall.providerID;
+    const result = await preparedCall.languageModel.doGenerate({
+      ...preparedCall.callOptions,
       abortSignal: input.signal,
     });
 
@@ -792,8 +1073,8 @@ export async function runLanguageModelGenerate(input: {
       origin: input.origin,
       requestID: input.requestID,
       sessionID: input.sessionID,
-      providerID: runtime.providerID,
-      providerModelID: runtime.modelID,
+      providerID: preparedCall.providerID,
+      providerModelID: preparedCall.providerModelID,
     });
     return result;
   } catch (error) {
@@ -833,24 +1114,16 @@ export async function runLanguageModelStream(input: {
   let providerID: string | undefined;
 
   try {
-    const runtime = await resolveModelRuntimeContext(input.modelID);
-    providerID = runtime.providerID;
-    const { context, prepared } = await prepareCallOptions({
-      runtime,
+    const preparedCall = await prepareRuntimeLanguageModelCall({
+      modelID: input.modelID,
       origin: input.origin,
       sessionID: input.sessionID,
       requestID: input.requestID,
       options: input.options,
     });
-
-    const languageModel = await getLanguageModel({
-      runtime,
-      context,
-      transportPatch: prepared.transport,
-      staticHeaders: toHeaderRecord(prepared.callOptions.headers),
-    });
-    const result = await languageModel.doStream({
-      ...prepared.callOptions,
+    providerID = preparedCall.providerID;
+    const result = await preparedCall.languageModel.doStream({
+      ...preparedCall.callOptions,
       abortSignal: input.signal,
     });
 
@@ -859,8 +1132,8 @@ export async function runLanguageModelStream(input: {
       origin: input.origin,
       requestID: input.requestID,
       sessionID: input.sessionID,
-      providerID: runtime.providerID,
-      providerModelID: runtime.modelID,
+      providerID: preparedCall.providerID,
+      providerModelID: preparedCall.providerModelID,
     });
     return result.stream;
   } catch (error) {

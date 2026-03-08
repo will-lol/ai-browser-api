@@ -8,6 +8,7 @@ import {
 import { RuntimeApplication } from "@llm-bridge/runtime-core";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
+import { ChatExecutionService } from "@/lib/runtime/ai/chat-execution-service";
 import {
   wrapExtensionError,
   wrapTransportError,
@@ -49,6 +50,7 @@ function requireOrigin(operation: string, origin: string | undefined) {
 
 export const makeRuntimePublicRpcHandlers = Effect.gen(function* () {
   const app = yield* RuntimeApplication;
+  const chat = yield* ChatExecutionService;
 
   return RuntimePublicRpcGroup.of({
     getOriginState: ({ origin }) => serializeRpcError(app.getOriginState(origin)),
@@ -90,6 +92,12 @@ export const makeRuntimePublicRpcHandlers = Effect.gen(function* () {
           requestID: requestId,
         }),
       ),
+    chatSendMessages: (input) =>
+      serializeRpcStream(chat.sendMessages(input)),
+    chatReconnectStream: (input) =>
+      serializeRpcStream(chat.reconnectStream(input)),
+    abortChatStream: (input) =>
+      serializeRpcError(chat.abortStream(input)),
     listModels: ({ origin, connectedOnly, providerID }) =>
       serializeRpcError(
         Effect.gen(function* () {
@@ -121,6 +129,7 @@ export const RuntimePublicRpcHandlersLive = RuntimePublicRpcGroup.toLayer(
 
 export const makeRuntimeAdminRpcHandlers = Effect.gen(function* () {
   const app = yield* RuntimeApplication;
+  const chat = yield* ChatExecutionService;
 
   return RuntimeAdminRpcGroup.of({
     getOriginState: ({ origin }) => serializeRpcError(app.getOriginState(origin)),
@@ -162,6 +171,12 @@ export const makeRuntimeAdminRpcHandlers = Effect.gen(function* () {
           requestID: requestId,
         }),
       ),
+    chatSendMessages: (input) =>
+      serializeRpcStream(chat.sendMessages(input)),
+    chatReconnectStream: (input) =>
+      serializeRpcStream(chat.reconnectStream(input)),
+    abortChatStream: (input) =>
+      serializeRpcError(chat.abortStream(input)),
     listProviders: () => serializeRpcError(app.listProviders()),
     listConnectedModels: () => serializeRpcError(app.listConnectedModels()),
     listPermissions: ({ origin }) => serializeRpcError(app.listPermissions(origin)),

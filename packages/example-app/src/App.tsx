@@ -8,7 +8,6 @@ import {
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, User, Bot, Loader2, RefreshCw } from "lucide-react";
-import { createBridgeChatTransport } from "./bridge-chat-transport";
 
 const DEFAULT_MODEL_ID = "google/gemini-3.1-pro-preview";
 
@@ -24,6 +23,9 @@ export function App() {
   const [selectedModelId, setSelectedModelId] = useState("");
   const [status, setStatus] = useState("Idle");
   const [input, setInput] = useState("");
+  const [transport, setTransport] = useState<ChatTransport<UIMessage> | null>(
+    null,
+  );
 
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const startupRefreshTriggeredRef = useRef(false);
@@ -102,31 +104,6 @@ export function App() {
     return refreshInFlightRef.current;
   }, [pushDebug, pushError, runBridge]);
 
-  const loadModel = useCallback(
-    (modelId: string) =>
-      runBridge(
-        Effect.gen(function* () {
-          const client = yield* BridgeClient;
-          return yield* client.getModel(modelId);
-        }),
-      ),
-    [runBridge],
-  );
-  const selectedModelIdRef = useRef(selectedModelId);
-  const loadModelRef = useRef(loadModel);
-  const transportRef = useRef<ChatTransport<UIMessage> | null>(null);
-
-  selectedModelIdRef.current = selectedModelId;
-  loadModelRef.current = loadModel;
-
-  if (transportRef.current === null) {
-    transportRef.current = createBridgeChatTransport({
-      getSelectedModelId: () => selectedModelIdRef.current,
-      loadModel: (modelId) => loadModelRef.current(modelId),
-      pushDebug,
-    });
-  }
-
   const {
     messages,
     sendMessage,
@@ -134,13 +111,13 @@ export function App() {
     error,
     status: chatStatus,
   } = useChat({
-    transport: transportRef.current,
+    transport: transport ?? undefined,
     onError: (error) => {
       pushError("stream.failed", error);
     },
     onFinish: ({ message }) => {
       pushDebug("stream.completed", {
-        selectedModelId: selectedModelIdRef.current,
+        selectedModelId,
         assistantMessageId: message.id,
       });
     },
@@ -151,7 +128,7 @@ export function App() {
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!input.trim() || isLoading || !selectedModelId) return;
+    if (!input.trim() || isLoading || !selectedModelId || !transport) return;
 
     const prompt = input.trim();
     clearError();
@@ -179,6 +156,44 @@ export function App() {
     startupRefreshTriggeredRef.current = true;
     void refreshModels();
   }, [refreshModels]);
+
+  useEffect(() => {
+    if (!selectedModelId) {
+      setTransport(null);
+      return;
+    }
+
+    let disposed = false;
+
+    void runBridge(
+      Effect.gen(function* () {
+        const client = yield* BridgeClient;
+        return client.getChatTransport(selectedModelId);
+      }),
+    )
+      .then((nextTransport) => {
+        if (disposed) {
+          return;
+        }
+
+        setTransport(nextTransport);
+        pushDebug("chatTransport.loaded", {
+          selectedModelId,
+        });
+      })
+      .catch((error) => {
+        if (disposed) {
+          return;
+        }
+
+        setTransport(null);
+        pushError("chatTransport.failed", error);
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [pushDebug, pushError, runBridge, selectedModelId]);
 
   return (
     <div className="flex flex-col h-screen bg-[#0b1220] text-[#e5edf8] font-sans">

@@ -2,13 +2,17 @@ import * as Rpc from "@effect/rpc/Rpc";
 import * as RpcGroup from "@effect/rpc/RpcGroup";
 import * as Schema from "effect/Schema";
 import {
+  BridgeAbortChatStreamRequestSchema,
   BridgeAbortRequestSchema,
+  BridgeChatReconnectStreamRequestSchema,
+  BridgeChatSendMessagesRequestSchema,
   BridgeListModelsResponseSchema,
   BridgeModelCallRequestSchema,
   BridgeModelDescriptorResponseSchema,
   BridgeModelRequestSchema,
   BridgePermissionRequestSchema,
   RuntimeCreatePermissionRequestResponseSchema,
+  RuntimeChatStreamChunkSchema,
   RuntimeGenerateResponseSchema,
   RuntimeStreamPartSchema,
 } from "./entities";
@@ -91,6 +95,25 @@ export const PageBridgeRpcGroup = RpcGroup.make(
     payload: BridgeModelCallRequestSchema,
     success: RuntimeStreamPartSchema,
     stream: true,
+    error: RuntimeRpcErrorSchema,
+  }),
+  Rpc.make("chatSendMessages", {
+    payload: BridgeChatSendMessagesRequestSchema,
+    success: RuntimeChatStreamChunkSchema,
+    stream: true,
+    error: RuntimeRpcErrorSchema,
+  }),
+  Rpc.make("chatReconnectStream", {
+    payload: BridgeChatReconnectStreamRequestSchema,
+    success: RuntimeChatStreamChunkSchema,
+    stream: true,
+    error: RuntimeRpcErrorSchema,
+  }),
+  Rpc.make("abortChatStream", {
+    payload: BridgeAbortChatStreamRequestSchema,
+    success: Schema.Struct({
+      ok: Schema.Boolean,
+    }),
     error: RuntimeRpcErrorSchema,
   }),
 );

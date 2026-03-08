@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
+import type { UIMessage } from "ai";
 import {
   PageBridgeRpcGroup,
   RuntimeDefectError,
+  RuntimeChatStreamNotFoundError,
+  RuntimeValidationError,
   RuntimeUpstreamServiceError,
+  isRuntimeRpcError,
   isPageBridgePortControlMessage,
+  type RuntimeChatStreamChunk,
   type RuntimeStreamPart,
 } from "@llm-bridge/contracts";
 import { APICallError } from "@ai-sdk/provider";
@@ -33,6 +38,12 @@ type MockStreamScenario = {
   error?: RuntimeUpstreamServiceError;
 };
 
+type MockChatStreamScenario = {
+  chunks: Array<RuntimeChatStreamChunk>;
+  failAtRead?: number;
+  error?: RuntimeDefectError | RuntimeChatStreamNotFoundError;
+};
+
 const TEST_DESCRIPTOR = {
   specificationVersion: "v3" as const,
   provider: "bridge-test",
@@ -49,6 +60,19 @@ const BASE_STREAM_OPTIONS = {
   ],
 };
 
+const TEST_CHAT_MESSAGES: Array<UIMessage> = [
+  {
+    id: "msg_1",
+    role: "user",
+    parts: [
+      {
+        type: "text",
+        text: "hello",
+      },
+    ],
+  },
+];
+
 function createUpstreamError(message: string, retryAfter = 2) {
   return new RuntimeUpstreamServiceError({
     providerID: "google",
@@ -62,11 +86,15 @@ function createUpstreamError(message: string, retryAfter = 2) {
   });
 }
 
-function createRuntimeStream(input: MockStreamScenario) {
+function createRuntimeStream<T>(input: {
+  parts: Array<T>;
+  failAtRead?: number;
+  error?: Error;
+}) {
   let readCount = 0;
   let partIndex = 0;
 
-  return new ReadableStream<RuntimeStreamPart>({
+  return new ReadableStream<T>({
     pull(controller) {
       if (input.failAtRead === readCount) {
         controller.error(input.error ?? createUpstreamError("stream failed"));
@@ -89,6 +117,8 @@ function createRuntimeStream(input: MockStreamScenario) {
 async function createMockPageBridgeSession(input: {
   port: MessagePort;
   streamScenarios: Array<MockStreamScenario>;
+  chatSendScenarios?: Array<MockChatStreamScenario>;
+  chatReconnectScenarios?: Array<MockChatStreamScenario>;
 }) {
   const scope = await Effect.runPromise(Scope.make());
   let onMessage:
@@ -136,6 +166,63 @@ async function createMockPageBridgeSession(input: {
                   }),
           );
         },
+        chatSendMessages: () => {
+          const scenario = input.chatSendScenarios?.shift();
+          if (!scenario) {
+            return Stream.fail(
+              new RuntimeDefectError({
+                defect: "No chat send scenario configured for test",
+              }),
+            );
+          }
+
+          return Stream.fromReadableStream(
+            () =>
+              createRuntimeStream({
+                parts: scenario.chunks,
+                failAtRead: scenario.failAtRead,
+                error: scenario.error,
+              }),
+            (error) =>
+              isRuntimeRpcError(error)
+                ? error
+                : new RuntimeDefectError({
+                    defect: String(error),
+                  }),
+          );
+        },
+        chatReconnectStream: () => {
+          const scenario = input.chatReconnectScenarios?.shift();
+          if (!scenario) {
+            return Stream.fail(
+              new RuntimeChatStreamNotFoundError({
+                origin: "https://example.test",
+                chatId: "missing",
+                message: "No chat reconnect scenario configured for test",
+              }),
+            );
+          }
+
+          if (scenario.error instanceof RuntimeChatStreamNotFoundError) {
+            return Stream.fail(scenario.error);
+          }
+
+          return Stream.fromReadableStream(
+            () =>
+              createRuntimeStream({
+                parts: scenario.chunks,
+                failAtRead: scenario.failAtRead,
+                error: scenario.error,
+              }),
+            (error) =>
+              isRuntimeRpcError(error)
+                ? error
+                : new RuntimeDefectError({
+                    defect: String(error),
+                  }),
+          );
+        },
+        abortChatStream: () => Effect.succeed({ ok: true }),
       }),
     ),
   );
@@ -220,7 +307,11 @@ async function createMockPageBridgeSession(input: {
 }
 
 async function withMockBridge<A>(
-  streamScenarios: Array<MockStreamScenario>,
+  input: {
+    streamScenarios: Array<MockStreamScenario>;
+    chatSendScenarios?: Array<MockChatStreamScenario>;
+    chatReconnectScenarios?: Array<MockChatStreamScenario>;
+  },
   run: () => Promise<A>,
 ) {
   const globals = globalThis as TestGlobals;
@@ -251,7 +342,9 @@ async function withMockBridge<A>(
 
       void createMockPageBridgeSession({
         port: transfer[0],
-        streamScenarios,
+        streamScenarios: input.streamScenarios,
+        chatSendScenarios: input.chatSendScenarios,
+        chatReconnectScenarios: input.chatReconnectScenarios,
       }).then((cleanup) => {
         sessionCleanups.push(cleanup);
       });
@@ -290,6 +383,20 @@ async function loadTestModel() {
       Effect.gen(function* () {
         const client = yield* BridgeClient;
         return yield* client.getModel("google/gemini-test");
+      }),
+      {
+        timeoutMs: 50,
+      },
+    ),
+  );
+}
+
+async function loadTestChatTransport() {
+  return await Effect.runPromise(
+    withBridgeClient(
+      Effect.gen(function* () {
+        const client = yield* BridgeClient;
+        return client.getChatTransport("google/gemini-test");
       }),
       {
         timeoutMs: 50,
@@ -348,13 +455,15 @@ describe("BridgeClientLive connection lifecycle", () => {
 describe("BridgeClientLive stream bootstrap", () => {
   it("fails doStream before returning when bootstrap metadata is followed by an upstream error", async () => {
     await withMockBridge(
-      [
+      {
+        streamScenarios: [
         {
           parts: [{ type: "stream-start", warnings: [] }],
           failAtRead: 1,
           error: createUpstreamError("Quota hit during bootstrap"),
         },
-      ],
+        ],
+      },
       async () => {
         const model = await loadTestModel();
 
@@ -377,7 +486,8 @@ describe("BridgeClientLive stream bootstrap", () => {
 
   it("buffers bootstrap metadata and replays it in order", async () => {
     await withMockBridge(
-      [
+      {
+        streamScenarios: [
         {
           parts: [
             { type: "stream-start", warnings: [] },
@@ -403,7 +513,8 @@ describe("BridgeClientLive stream bootstrap", () => {
             },
           ],
         },
-      ],
+        ],
+      },
       async () => {
         const model = await loadTestModel();
         const result = await model.doStream(BASE_STREAM_OPTIONS);
@@ -429,7 +540,8 @@ describe("BridgeClientLive stream bootstrap", () => {
 
   it("surfaces later stream failures after the first content chunk", async () => {
     await withMockBridge(
-      [
+      {
+        streamScenarios: [
         {
           parts: [
             { type: "stream-start", warnings: [] },
@@ -438,7 +550,8 @@ describe("BridgeClientLive stream bootstrap", () => {
           failAtRead: 2,
           error: createUpstreamError("Late stream failure", 4),
         },
-      ],
+        ],
+      },
       async () => {
         const model = await loadTestModel();
         const result = await model.doStream(BASE_STREAM_OPTIONS);
@@ -465,6 +578,105 @@ describe("BridgeClientLive stream bootstrap", () => {
             return true;
           },
         );
+      },
+    );
+  });
+});
+
+describe("BridgeClientLive chat transport", () => {
+  it("returns a chat transport that streams UI message chunks", async () => {
+    await withMockBridge(
+      {
+        streamScenarios: [],
+        chatSendScenarios: [
+          {
+            chunks: [
+              { type: "start", messageId: "msg_assistant" },
+              { type: "start-step" },
+              { type: "text-start", id: "text_1" },
+              { type: "text-delta", id: "text_1", delta: "hello" },
+              { type: "text-end", id: "text_1" },
+              { type: "finish-step" },
+              { type: "finish" },
+            ],
+          },
+        ],
+      },
+      async () => {
+        const transport = await loadTestChatTransport();
+        const stream = await transport.sendMessages({
+          trigger: "submit-message",
+          chatId: "chat_1",
+          messageId: undefined,
+          messages: TEST_CHAT_MESSAGES,
+          abortSignal: undefined,
+        });
+
+        const reader = stream.getReader();
+        const first = await readNextChunk(reader);
+        const second = await readNextChunk(reader);
+        const third = await readNextChunk(reader);
+        const fourth = await readNextChunk(reader);
+
+        assert.equal(first.done, false);
+        assert.equal(first.value?.type, "start");
+        assert.equal(second.done, false);
+        assert.equal(second.value?.type, "start-step");
+        assert.equal(third.done, false);
+        assert.equal(third.value?.type, "text-start");
+        assert.equal(fourth.done, false);
+        assert.equal(fourth.value?.type, "text-delta");
+        assert.equal(fourth.value?.delta, "hello");
+      },
+    );
+  });
+
+  it("maps reconnect misses to null", async () => {
+    await withMockBridge(
+      {
+        streamScenarios: [],
+        chatReconnectScenarios: [
+          {
+            chunks: [],
+            failAtRead: 0,
+            error: new RuntimeChatStreamNotFoundError({
+              origin: "https://example.test",
+              chatId: "chat_missing",
+              message: "missing",
+            }),
+          },
+        ],
+      },
+      async () => {
+        const transport = await loadTestChatTransport();
+        const result = await transport.reconnectToStream({
+          chatId: "chat_missing",
+        });
+
+        assert.equal(result, null);
+      },
+    );
+  });
+
+  it("rejects per-request headers", async () => {
+    const transport = await loadTestChatTransport();
+
+    await assert.rejects(
+      () =>
+        transport.sendMessages({
+          trigger: "submit-message",
+          chatId: "chat_headers",
+          messageId: undefined,
+          messages: TEST_CHAT_MESSAGES,
+          abortSignal: undefined,
+          headers: {
+            "x-test": "1",
+          },
+        }),
+      (error: Error) => {
+        assert.equal(error instanceof RuntimeValidationError, true);
+        assert.match(error.message, /does not support per-request headers/i);
+        return true;
       },
     );
   });

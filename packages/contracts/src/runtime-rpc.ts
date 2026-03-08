@@ -4,7 +4,11 @@ import * as Schema from "effect/Schema";
 import {
   RuntimeAbortModelCallInputSchema,
   RuntimeAcquireModelInputSchema,
+  RuntimeAbortChatStreamInputSchema,
   RuntimeAuthFlowSnapshotSchema,
+  RuntimeChatReconnectStreamInputSchema,
+  RuntimeChatSendMessagesInputSchema,
+  RuntimeChatStreamChunkSchema,
   RuntimeCancelProviderAuthFlowResponseSchema,
   RuntimeCreatePermissionRequestInputSchema,
   RuntimeCreatePermissionRequestResponseSchema,
@@ -82,6 +86,26 @@ const RuntimeModelDoStreamRpc = Rpc.make("modelDoStream", {
 
 const RuntimeAbortModelCallRpc = Rpc.make("abortModelCall", {
   payload: RuntimeAbortModelCallInputSchema,
+  success: Schema.Void,
+  error: RuntimeRpcErrorSchema,
+});
+
+const RuntimeChatSendMessagesRpc = Rpc.make("chatSendMessages", {
+  payload: RuntimeChatSendMessagesInputSchema,
+  success: RuntimeChatStreamChunkSchema,
+  stream: true,
+  error: RuntimeRpcErrorSchema,
+});
+
+const RuntimeChatReconnectStreamRpc = Rpc.make("chatReconnectStream", {
+  payload: RuntimeChatReconnectStreamInputSchema,
+  success: RuntimeChatStreamChunkSchema,
+  stream: true,
+  error: RuntimeRpcErrorSchema,
+});
+
+const RuntimeAbortChatStreamRpc = Rpc.make("abortChatStream", {
+  payload: RuntimeAbortChatStreamInputSchema,
   success: Schema.Void,
   error: RuntimeRpcErrorSchema,
 });
@@ -187,6 +211,9 @@ const RuntimeSharedRpcs = [
   RuntimeModelDoGenerateRpc,
   RuntimeModelDoStreamRpc,
   RuntimeAbortModelCallRpc,
+  RuntimeChatSendMessagesRpc,
+  RuntimeChatReconnectStreamRpc,
+  RuntimeAbortChatStreamRpc,
 ] as const;
 
 const RuntimePublicOnlyRpcs = [RuntimePublicRequestPermissionRpc] as const;

@@ -57,6 +57,14 @@ export class RuntimeUpstreamServiceError extends Schema.TaggedError<RuntimeUpstr
   message: Schema.String,
 }) {}
 
+export class RuntimeChatStreamNotFoundError extends Schema.TaggedError<RuntimeChatStreamNotFoundError>(
+  "RuntimeChatStreamNotFoundError",
+)("RuntimeChatStreamNotFoundError", {
+  origin: Schema.String,
+  chatId: Schema.String,
+  message: Schema.String,
+}) {}
+
 export class RuntimeAuthProviderError extends Schema.TaggedError<RuntimeAuthProviderError>(
   "RuntimeAuthProviderError",
 )("RuntimeAuthProviderError", {
@@ -120,6 +128,7 @@ export const RuntimeRpcErrorSchema = Schema.Union(
   TransportProtocolError,
   RuntimeAuthorizationError,
   RuntimeUpstreamServiceError,
+  RuntimeChatStreamNotFoundError,
   RuntimeAuthProviderError,
   RuntimeInternalError,
   RuntimeValidationError,
@@ -142,6 +151,7 @@ export function isRuntimeRpcError(error: unknown): error is RuntimeRpcError {
     error instanceof TransportProtocolError ||
     error instanceof RuntimeAuthorizationError ||
     error instanceof RuntimeUpstreamServiceError ||
+    error instanceof RuntimeChatStreamNotFoundError ||
     error instanceof RuntimeAuthProviderError ||
     error instanceof RuntimeInternalError ||
     error instanceof RuntimeValidationError ||

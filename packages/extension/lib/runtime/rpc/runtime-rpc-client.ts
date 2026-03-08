@@ -44,6 +44,12 @@ export function createRuntimeAdminRpcClient(input: {
       Stream.unwrap(Effect.map(input.ensureClient, (client) => client.modelDoStream(payload))),
     abortModelCall: (payload: Parameters<RuntimeRpcClientConnection<RuntimeAdminRpc>["abortModelCall"]>[0]) =>
       Effect.flatMap(input.ensureClient, (client) => client.abortModelCall(payload)),
+    chatSendMessages: (payload: Parameters<RuntimeRpcClientConnection<RuntimeAdminRpc>["chatSendMessages"]>[0]) =>
+      Stream.unwrap(Effect.map(input.ensureClient, (client) => client.chatSendMessages(payload))),
+    chatReconnectStream: (payload: Parameters<RuntimeRpcClientConnection<RuntimeAdminRpc>["chatReconnectStream"]>[0]) =>
+      Stream.unwrap(Effect.map(input.ensureClient, (client) => client.chatReconnectStream(payload))),
+    abortChatStream: (payload: Parameters<RuntimeRpcClientConnection<RuntimeAdminRpc>["abortChatStream"]>[0]) =>
+      Effect.flatMap(input.ensureClient, (client) => client.abortChatStream(payload)),
     listProviders: (payload: Parameters<RuntimeRpcClientConnection<RuntimeAdminRpc>["listProviders"]>[0]) =>
       Effect.flatMap(input.ensureClient, (client) => client.listProviders(payload)),
     listConnectedModels: (payload: Parameters<RuntimeRpcClientConnection<RuntimeAdminRpc>["listConnectedModels"]>[0]) =>

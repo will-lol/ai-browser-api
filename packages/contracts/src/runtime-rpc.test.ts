@@ -20,6 +20,9 @@ const EXPECTED_PUBLIC_TAGS = new Set([
   "modelDoGenerate",
   "modelDoStream",
   "abortModelCall",
+  "chatSendMessages",
+  "chatReconnectStream",
+  "abortChatStream",
 ]);
 
 const EXPECTED_ADMIN_TAGS = new Set([
@@ -40,6 +43,9 @@ const EXPECTED_ADMIN_TAGS = new Set([
   "modelDoGenerate",
   "modelDoStream",
   "abortModelCall",
+  "chatSendMessages",
+  "chatReconnectStream",
+  "abortChatStream",
 ]);
 
 const SHARED_TAGS = [
@@ -50,6 +56,9 @@ const SHARED_TAGS = [
   "modelDoGenerate",
   "modelDoStream",
   "abortModelCall",
+  "chatSendMessages",
+  "chatReconnectStream",
+  "abortChatStream",
 ] as const;
 
 describe("runtime rpc contracts", () => {

@@ -677,6 +677,50 @@ export type RuntimeModelCallOptions = Schema.Schema.Type<
   typeof RuntimeModelCallOptionsSchema
 >;
 
+export const RuntimeChatMessageSchema = JsonObjectSchema;
+export type RuntimeChatMessage = Schema.Schema.Type<
+  typeof RuntimeChatMessageSchema
+>;
+
+export const RuntimeChatStreamChunkSchema = JsonObjectSchema;
+export type RuntimeChatStreamChunk = Schema.Schema.Type<
+  typeof RuntimeChatStreamChunkSchema
+>;
+
+export const RuntimeChatSendTriggerSchema = Schema.Literal(
+  "submit-message",
+  "regenerate-message",
+);
+export type RuntimeChatSendTrigger = Schema.Schema.Type<
+  typeof RuntimeChatSendTriggerSchema
+>;
+
+export const RuntimeChatCallOptionsSchema = Schema.Struct({
+  system: Schema.optional(Schema.String),
+  maxOutputTokens: Schema.optional(Schema.Number),
+  temperature: Schema.optional(Schema.Number),
+  stopSequences: Schema.optional(Schema.Array(Schema.String)),
+  topP: Schema.optional(Schema.Number),
+  topK: Schema.optional(Schema.Number),
+  presencePenalty: Schema.optional(Schema.Number),
+  frequencyPenalty: Schema.optional(Schema.Number),
+  responseFormat: Schema.optional(RuntimeResponseFormatSchema),
+  seed: Schema.optional(Schema.Number),
+  tools: Schema.optional(Schema.Array(RuntimeToolSchema)),
+  toolChoice: Schema.optional(RuntimeToolChoiceSchema),
+  includeRawChunks: Schema.optional(Schema.Boolean),
+  headers: Schema.optional(
+    Schema.Record({
+      key: Schema.String,
+      value: Schema.String,
+    }),
+  ),
+  providerOptions: Schema.optional(RuntimeProviderOptionsSchema),
+});
+export type RuntimeChatCallOptions = Schema.Schema.Type<
+  typeof RuntimeChatCallOptionsSchema
+>;
+
 export const RuntimeAcquireModelInputSchema = Schema.Struct({
   origin: Schema.String,
   requestId: Schema.String,
@@ -957,6 +1001,35 @@ export type BridgePermissionRequest = Schema.Schema.Type<
   typeof BridgePermissionRequestSchema
 >;
 
+export const RuntimeChatSendMessagesInputSchema = Schema.Struct({
+  origin: Schema.String,
+  chatId: Schema.String,
+  modelId: Schema.String,
+  trigger: RuntimeChatSendTriggerSchema,
+  messageId: Schema.optional(Schema.String),
+  messages: Schema.Array(RuntimeChatMessageSchema),
+  options: Schema.optional(RuntimeChatCallOptionsSchema),
+});
+export type RuntimeChatSendMessagesInput = Schema.Schema.Type<
+  typeof RuntimeChatSendMessagesInputSchema
+>;
+
+export const RuntimeChatReconnectStreamInputSchema = Schema.Struct({
+  origin: Schema.String,
+  chatId: Schema.String,
+});
+export type RuntimeChatReconnectStreamInput = Schema.Schema.Type<
+  typeof RuntimeChatReconnectStreamInputSchema
+>;
+
+export const RuntimeAbortChatStreamInputSchema = Schema.Struct({
+  origin: Schema.String,
+  chatId: Schema.String,
+});
+export type RuntimeAbortChatStreamInput = Schema.Schema.Type<
+  typeof RuntimeAbortChatStreamInputSchema
+>;
+
 export const BridgeModelRequestSchema = Schema.Struct({
   modelId: Schema.String,
   requestId: Schema.optional(Schema.String),
@@ -982,6 +1055,32 @@ export const BridgeAbortRequestSchema = Schema.Struct({
 });
 export type BridgeAbortRequest = Schema.Schema.Type<
   typeof BridgeAbortRequestSchema
+>;
+
+export const BridgeChatSendMessagesRequestSchema = Schema.Struct({
+  chatId: Schema.String,
+  modelId: Schema.String,
+  trigger: RuntimeChatSendTriggerSchema,
+  messageId: Schema.optional(Schema.String),
+  messages: Schema.Array(RuntimeChatMessageSchema),
+  options: Schema.optional(RuntimeChatCallOptionsSchema),
+});
+export type BridgeChatSendMessagesRequest = Schema.Schema.Type<
+  typeof BridgeChatSendMessagesRequestSchema
+>;
+
+export const BridgeChatReconnectStreamRequestSchema = Schema.Struct({
+  chatId: Schema.String,
+});
+export type BridgeChatReconnectStreamRequest = Schema.Schema.Type<
+  typeof BridgeChatReconnectStreamRequestSchema
+>;
+
+export const BridgeAbortChatStreamRequestSchema = Schema.Struct({
+  chatId: Schema.String,
+});
+export type BridgeAbortChatStreamRequest = Schema.Schema.Type<
+  typeof BridgeAbortChatStreamRequestSchema
 >;
 
 export const BridgeProviderStateSchema = Schema.Struct({

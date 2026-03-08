@@ -6,6 +6,8 @@ import {
   RuntimeDefectError,
   isPageBridgePortControlMessage,
   type BridgeModelCallRequest,
+  type BridgeChatReconnectStreamRequest,
+  type BridgeChatSendMessagesRequest,
   type PageBridgePortControlMessage,
 } from "@llm-bridge/contracts";
 import * as RpcServer from "@effect/rpc/RpcServer";
@@ -34,6 +36,23 @@ function normalizeModelCallInput(input: BridgeModelCallRequest) {
     sessionID,
     modelId: input.modelId,
     options: input.options,
+  };
+}
+
+function normalizeChatSendInput(input: BridgeChatSendMessagesRequest) {
+  return {
+    chatId: input.chatId,
+    modelId: input.modelId,
+    trigger: input.trigger,
+    messageId: input.messageId,
+    messages: input.messages,
+    options: input.options,
+  };
+}
+
+function normalizeChatReconnectInput(input: BridgeChatReconnectStreamRequest) {
+  return {
+    chatId: input.chatId,
   };
 }
 
@@ -152,6 +171,43 @@ function createPageBridgeHandlers() {
         options,
       });
     },
+
+    chatSendMessages: (input) => {
+      const normalized = normalizeChatSendInput(input);
+
+      return runtime.chatSendMessages({
+        origin: window.location.origin,
+        chatId: normalized.chatId,
+        modelId: normalized.modelId,
+        trigger: normalized.trigger,
+        messageId: normalized.messageId,
+        messages: normalized.messages,
+        options: normalized.options,
+      });
+    },
+
+    chatReconnectStream: (input) => {
+      const normalized = normalizeChatReconnectInput(input);
+
+      return runtime.chatReconnectStream({
+        origin: window.location.origin,
+        chatId: normalized.chatId,
+      });
+    },
+
+    abortChatStream: (input) =>
+      mapRuntimeEffect(
+        Effect.gen(function* () {
+          yield* runtime.abortChatStream({
+            origin: window.location.origin,
+            chatId: input.chatId,
+          });
+
+          return {
+            ok: true,
+          };
+        }),
+      ),
   });
 }
 

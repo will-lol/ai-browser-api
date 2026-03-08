@@ -44,6 +44,12 @@ export function createRuntimePublicRpcClient(input: {
       Stream.unwrap(Effect.map(input.ensureClient, (client) => client.modelDoStream(payload))),
     abortModelCall: (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["abortModelCall"]>[0]) =>
       Effect.flatMap(input.ensureClient, (client) => client.abortModelCall(payload)),
+    chatSendMessages: (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["chatSendMessages"]>[0]) =>
+      Stream.unwrap(Effect.map(input.ensureClient, (client) => client.chatSendMessages(payload))),
+    chatReconnectStream: (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["chatReconnectStream"]>[0]) =>
+      Stream.unwrap(Effect.map(input.ensureClient, (client) => client.chatReconnectStream(payload))),
+    abortChatStream: (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["abortChatStream"]>[0]) =>
+      Effect.flatMap(input.ensureClient, (client) => client.abortChatStream(payload)),
     requestPermission: (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["requestPermission"]>[0]) =>
       Effect.flatMap(input.ensureClient, (client) => client.requestPermission(payload)),
   };

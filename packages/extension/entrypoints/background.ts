@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import {
+  PermissionServiceLive,
   RuntimeApplication,
   RuntimeApplicationLive,
 } from "@llm-bridge/runtime-core";
@@ -21,6 +22,7 @@ import { subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events";
 import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager";
 import { makeRuntimeCoreInfrastructureLayer } from "@/lib/runtime-app/runtime-adapters";
 import { initializeRuntimeSecurityLayer } from "@/lib/runtime/security/runtime-security";
+import { ChatExecutionServiceLive } from "@/lib/runtime/ai/chat-execution-service";
 import {
   RuntimeAdminRpcHandlersLive,
   RuntimePublicRpcHandlersLive,
@@ -260,17 +262,25 @@ async function updateActionState() {
 
 function createRuntimeLayer() {
   const infrastructureLayer = makeRuntimeCoreInfrastructureLayer();
+  const permissionLayer = PermissionServiceLive.pipe(
+    Layer.provide(infrastructureLayer),
+  );
 
   const runtimeApplicationLayer = RuntimeApplicationLive.pipe(
     Layer.provide(infrastructureLayer),
   );
 
+  const runtimeRpcDependencyLayer = Layer.merge(
+    runtimeApplicationLayer,
+    ChatExecutionServiceLive.pipe(Layer.provide(permissionLayer)),
+  );
+
   const runtimePublicRpcHandlersLayer = RuntimePublicRpcHandlersLive.pipe(
-    Layer.provide(runtimeApplicationLayer),
+    Layer.provide(runtimeRpcDependencyLayer),
   );
 
   const runtimeAdminRpcHandlersLayer = RuntimeAdminRpcHandlersLive.pipe(
-    Layer.provide(runtimeApplicationLayer),
+    Layer.provide(runtimeRpcDependencyLayer),
   );
 
   return {

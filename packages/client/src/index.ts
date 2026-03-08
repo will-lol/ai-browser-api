@@ -12,17 +12,27 @@ import {
   BridgeInitializationTimeoutError,
   BridgeAbortError,
   RuntimeDefectError,
+  RuntimeChatStreamNotFoundError,
+  JsonValueSchema,
   RuntimeUpstreamServiceError,
   decodeSupportedUrls,
   type BridgePermissionRequest,
   type BridgeModelDescriptorResponse,
   type PageBridgeRpc,
+  type RuntimeChatCallOptions,
   type RuntimeCreatePermissionRequestResponse,
   type RuntimeModelSummary,
   type RuntimeRpcError,
   type PageBridgePortControlMessage,
+  type JsonValue,
 } from "@llm-bridge/contracts";
 import { makeResettableConnectionLifecycle } from "@llm-bridge/runtime-core";
+import {
+  validateUIMessages,
+  type ChatTransport,
+  type UIMessage,
+  type UIMessageChunk,
+} from "ai";
 import {
   APICallError,
   type LanguageModelV3,
@@ -39,6 +49,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -60,12 +71,37 @@ export type BridgeClientOptions = {
   timeoutMs?: number;
 };
 
+export type BridgeChatTransportPrepareSendMessagesArgs = {
+  chatId: string;
+  modelId: string;
+  messages: ReadonlyArray<UIMessage>;
+  trigger: "submit-message" | "regenerate-message";
+  messageId: string | undefined;
+  body: object | undefined;
+  metadata: UIMessage["metadata"] | undefined;
+};
+
+export type BridgeChatTransportOptions = {
+  prepareSendMessages?: (
+    args: BridgeChatTransportPrepareSendMessagesArgs,
+  ) => RuntimeChatCallOptions | Promise<RuntimeChatCallOptions>;
+};
+
 export type BridgeModelSummary = RuntimeModelSummary;
 export type BridgePermissionResult = RuntimeCreatePermissionRequestResponse;
+
+const decodeJsonValue = Schema.decodeUnknownSync(JsonValueSchema);
 
 function createAbortError() {
   return new BridgeAbortError({
     message: "The operation was aborted",
+  });
+}
+
+function createUnsupportedChatTransportHeadersError() {
+  return new RuntimeValidationError({
+    message:
+      "Bridge chat transport does not support per-request headers. Use prepareSendMessages to set model call headers instead.",
   });
 }
 
@@ -113,6 +149,126 @@ function isBootstrapRuntimeStreamPart(part: { type: string }) {
     part.type === "response-metadata" ||
     part.type === "raw"
   );
+}
+
+function isJsonObject(
+  value: JsonValue,
+): value is { readonly [key: string]: JsonValue } {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toOpaqueJsonObject(
+  value: object,
+  operation: string,
+): { readonly [key: string]: JsonValue } {
+  const serialized = JSON.stringify(value);
+
+  if (serialized === undefined) {
+    throw new RuntimeValidationError({
+      message: `${operation} must be JSON serializable`,
+    });
+  }
+
+  const parsed = decodeJsonValue(JSON.parse(serialized));
+  if (!isJsonObject(parsed)) {
+    throw new RuntimeValidationError({
+      message: `${operation} must encode to a JSON object`,
+    });
+  }
+
+  return parsed;
+}
+
+function hasRequestHeaders(headers: Headers | Record<string, string> | undefined) {
+  if (!headers) {
+    return false;
+  }
+
+  if (headers instanceof Headers) {
+    return [...headers.keys()].length > 0;
+  }
+
+  return Object.keys(headers).length > 0;
+}
+
+function toBridgeDefect(error: RuntimeRpcError | Error): RuntimeRpcError | Error {
+  return error instanceof Error
+    ? error
+    : new RuntimeDefectError({
+        defect: String(error),
+      });
+}
+
+function createChatReadableStream(input: {
+  chatId: string;
+  reader: ReadableStreamDefaultReader<{ readonly [key: string]: JsonValue }>;
+  abortSignal?: AbortSignal;
+  abortChatStream: (chatId: string) => Promise<void>;
+  bufferedChunk?: { readonly [key: string]: JsonValue };
+  streamFinished?: boolean;
+}): ReadableStream<UIMessageChunk> {
+  let bufferedChunk = input.bufferedChunk;
+  let streamFinished = input.streamFinished ?? false;
+
+  const abortActiveChatStream = () =>
+    input.abortChatStream(input.chatId).catch(() => undefined);
+
+  const onAbort = () => {
+    void abortActiveChatStream();
+  };
+
+  input.abortSignal?.addEventListener("abort", onAbort, { once: true });
+
+  const cleanup = () => {
+    input.abortSignal?.removeEventListener("abort", onAbort);
+  };
+
+  return new ReadableStream<UIMessageChunk>({
+    async pull(controller) {
+      try {
+        if (bufferedChunk) {
+          controller.enqueue(bufferedChunk as UIMessageChunk);
+          bufferedChunk = undefined;
+          return;
+        }
+
+        if (streamFinished) {
+          cleanup();
+          controller.close();
+          return;
+        }
+
+        const next = await input.reader.read();
+        if (next.done) {
+          streamFinished = true;
+          cleanup();
+          controller.close();
+          return;
+        }
+
+        // The runtime contract constrains chat chunks to JSON objects.
+        // The extension side produces these chunks from AI SDK UI streams.
+        controller.enqueue(next.value as UIMessageChunk);
+      } catch (error) {
+        cleanup();
+        throw toBridgeDefect(
+          error instanceof Error
+            ? error
+            : new RuntimeDefectError({
+                defect: String(error),
+              }),
+        );
+      }
+    },
+    async cancel() {
+      try {
+        await input.reader.cancel();
+      } finally {
+        cleanup();
+        void abortActiveChatStream();
+      }
+    },
+  });
 }
 
 function logBridgeDebug(event: string, details?: unknown) {
@@ -313,6 +469,7 @@ function nextRequestId(sequence: number) {
 function makeBridgeClientApi(input: {
   ensureConnection: Effect.Effect<BridgeConnection, RuntimeRpcError>;
   destroy: Effect.Effect<void, never>;
+  abortChatStream: (chatId: string) => Promise<void>;
   createLanguageModel: (
     modelId: string,
     descriptor: BridgeModelDescriptorResponse,
@@ -342,9 +499,115 @@ function makeBridgeClientApi(input: {
       return input.createLanguageModel(modelId, descriptor);
     });
 
+  const getChatTransport = (
+    modelId: string,
+    options: BridgeChatTransportOptions = {},
+  ): ChatTransport<UIMessage> => ({
+    async sendMessages({
+      chatId,
+      trigger,
+      messageId,
+      messages,
+      abortSignal,
+      headers,
+      body,
+      metadata,
+    }: Parameters<ChatTransport<UIMessage>["sendMessages"]>[0]) {
+      if (hasRequestHeaders(headers)) {
+        throw createUnsupportedChatTransportHeadersError();
+      }
+
+      const validatedMessages = await validateUIMessages({
+        messages,
+      });
+
+      const runtimeOptions = options.prepareSendMessages
+        ? await options.prepareSendMessages({
+            chatId,
+            modelId,
+            messages: validatedMessages,
+            trigger,
+            messageId,
+            body,
+            metadata,
+          })
+        : undefined;
+
+      const runtimeStream = await Effect.runPromise(
+        Effect.gen(function* () {
+          const current = yield* input.ensureConnection;
+
+          return yield* Effect.scoped(
+            Stream.toReadableStreamEffect(
+              current.client.chatSendMessages({
+                chatId,
+                modelId,
+                trigger,
+                messageId,
+                messages: validatedMessages.map((message: UIMessage) =>
+                  toOpaqueJsonObject(message, "chat message"),
+                ),
+                options: runtimeOptions,
+              }),
+            ),
+          );
+        }),
+      );
+
+      return createChatReadableStream({
+        chatId,
+        reader: runtimeStream.getReader(),
+        abortSignal,
+        abortChatStream: input.abortChatStream,
+      });
+    },
+    async reconnectToStream({
+      chatId,
+      headers,
+    }: Parameters<ChatTransport<UIMessage>["reconnectToStream"]>[0]) {
+      if (hasRequestHeaders(headers)) {
+        throw createUnsupportedChatTransportHeadersError();
+      }
+
+      try {
+        const runtimeStream = await Effect.runPromise(
+          Effect.gen(function* () {
+            const current = yield* input.ensureConnection;
+
+            return yield* Effect.scoped(
+              Stream.toReadableStreamEffect(
+                current.client.chatReconnectStream({
+                  chatId,
+                }),
+              ),
+            );
+          }),
+        );
+
+        const reader = runtimeStream.getReader();
+        const firstChunk = await reader.read();
+
+        return createChatReadableStream({
+          chatId,
+          reader,
+          bufferedChunk: firstChunk.done ? undefined : firstChunk.value,
+          streamFinished: firstChunk.done,
+          abortChatStream: input.abortChatStream,
+        });
+      } catch (error) {
+        if (error instanceof RuntimeChatStreamNotFoundError) {
+          return null;
+        }
+
+        throw error;
+      }
+    },
+  });
+
   return {
     listModels,
     getModel,
+    getChatTransport,
     requestPermission,
     destroy: input.destroy,
   };
@@ -387,6 +650,18 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
             }),
           ),
           Effect.asVoid,
+        );
+
+      const abortChatStream = (chatId: string) =>
+        Effect.runPromise(
+          ensureConnection.pipe(
+            Effect.flatMap((current) =>
+              current.client.abortChatStream({
+                chatId,
+              }),
+            ),
+            Effect.asVoid,
+          ),
         );
 
       const destroy = lifecycle.destroy.pipe(
@@ -616,6 +891,7 @@ export function BridgeClientLive(options: BridgeClientOptions = {}) {
       return makeBridgeClientApi({
         ensureConnection,
         destroy,
+        abortChatStream,
         createLanguageModel,
         nextModelRequestId: () => {
           sequence += 1;
