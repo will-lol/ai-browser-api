@@ -36,10 +36,7 @@ import { RetryError } from "ai";
 import { getAuth } from "@/lib/runtime/auth-store";
 import type { AuthRecord } from "@/lib/runtime/auth-store";
 import { normalizeValueForCache } from "@/lib/runtime/ai/adapter-state";
-import {
-  wrapExtensionError,
-  wrapProviderError,
-} from "@/lib/runtime/errors";
+import { wrapExtensionError, wrapProviderError } from "@/lib/runtime/errors";
 import type {
   RuntimeAdapterContext,
   RuntimeAdapterState,
@@ -889,21 +886,21 @@ export async function prepareRuntimeChatModelCall(input: {
   });
 
   const merged = mergeRecord(
-    mergeRecord(
-      (input.options ?? {}) as Record<string, unknown>,
-      {
-        model: runtime.model.api.id,
-        messages: toLegacyChatMessages({
-          messages: input.messages,
-          system: input.options?.system,
-        }),
-      },
-    ),
+    mergeRecord(input.options ?? {}, {
+      model: runtime.model.api.id,
+      messages: toLegacyChatMessages({
+        messages: input.messages,
+        system: input.options?.system,
+      }),
+    }),
     authOptions.requestOptions,
   );
 
   const chatPatched = await plugins.applyChatParams(context, merged);
-  const requestPatched = await plugins.applyRequestOptions(context, chatPatched);
+  const requestPatched = await plugins.applyRequestOptions(
+    context,
+    chatPatched,
+  );
   const finalHeaders = await plugins.applyChatHeaders(context, {
     ...toHeaderRecord(input.options?.headers),
     ...toHeaderRecord(requestPatched.headers),
