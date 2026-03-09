@@ -75,50 +75,6 @@ export type RuntimePendingRequest = Schema.Schema.Type<
   typeof RuntimePendingRequestSchema
 >;
 
-const AuthFieldConditionSchema = Schema.Struct({
-  key: Schema.String,
-  equals: Schema.String,
-});
-
-const AuthFieldValidationSchema = Schema.Struct({
-  regex: Schema.optional(Schema.String),
-  message: Schema.optional(Schema.String),
-  minLength: Schema.optional(Schema.Number),
-  maxLength: Schema.optional(Schema.Number),
-});
-
-const AuthFieldOptionSchema = Schema.Struct({
-  label: Schema.String,
-  value: Schema.String,
-  hint: Schema.optional(Schema.String),
-});
-
-const AuthFieldBaseFields = {
-  key: Schema.String,
-  label: Schema.String,
-  placeholder: Schema.optional(Schema.String),
-  defaultValue: Schema.optional(Schema.String),
-  required: Schema.optional(Schema.Boolean),
-  description: Schema.optional(Schema.String),
-  condition: Schema.optional(AuthFieldConditionSchema),
-  validate: Schema.optional(AuthFieldValidationSchema),
-} as const;
-
-export const RuntimeAuthFieldSchema = Schema.Union(
-  Schema.Struct({
-    ...AuthFieldBaseFields,
-    type: Schema.Literal("text", "secret"),
-  }),
-  Schema.Struct({
-    ...AuthFieldBaseFields,
-    type: Schema.Literal("select"),
-    options: Schema.Array(AuthFieldOptionSchema),
-  }),
-);
-export type RuntimeAuthField = Schema.Schema.Type<
-  typeof RuntimeAuthFieldSchema
->;
-
 export const RuntimeAuthMethodTypeSchema = Schema.Literal(
   "oauth",
   "pat",
@@ -132,7 +88,6 @@ export const RuntimeAuthMethodSchema = Schema.Struct({
   id: Schema.String,
   type: RuntimeAuthMethodTypeSchema,
   label: Schema.String,
-  fields: Schema.optional(Schema.Array(RuntimeAuthFieldSchema)),
 });
 export type RuntimeAuthMethod = Schema.Schema.Type<
   typeof RuntimeAuthMethodSchema

@@ -43,17 +43,21 @@ export function defineAuthSchema<TShape extends AuthSchemaShape>(shape: TShape) 
   return schema;
 }
 
-export function serializeAuthSchema(
+export function getAuthSchemaFields(
   schema?: z.ZodTypeAny,
-): RuntimeAuthMethod["fields"] {
-  if (!schema) return undefined;
+): ReadonlyArray<AuthField> {
+  if (!schema) return [];
+
   const fields = (schema as SchemaWithAuthFields)[AUTH_FIELD_METADATA];
-  if (!fields || fields.length === 0) return undefined;
+  if (!fields || fields.length === 0) return [];
+
   return fields.map((field) => ({
     ...field,
     options:
-      field.type === "select" ? field.options.map((option) => ({ ...option })) : undefined,
-  })) as RuntimeAuthMethod["fields"];
+      field.type === "select"
+        ? field.options.map((option) => ({ ...option }))
+        : undefined,
+  })) as AuthField[];
 }
 
 export function toRuntimeAuthMethod(
@@ -63,7 +67,6 @@ export function toRuntimeAuthMethod(
     id: method.id.trim(),
     type: method.type,
     label: method.label.trim() || method.id.trim(),
-    fields: serializeAuthSchema(method.inputSchema),
   };
 }
 

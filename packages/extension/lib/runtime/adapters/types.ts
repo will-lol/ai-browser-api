@@ -145,7 +145,6 @@ export type RuntimeAuthMethod = {
   id: string;
   type: AuthMethodType;
   label: string;
-  fields?: AuthField[];
 };
 
 export interface ResolvedAuthMethod {
@@ -226,7 +225,7 @@ export type RegisteredAdapter = {
   ) => Promise<ProviderInfo | void> | ProviderInfo | void;
 };
 
-export type AdapterCreateModel<TState = unknown> = (
+export type AdapterCreateModel = (
   context: RuntimeAdapterContext,
 ) => Promise<LanguageModelV3>;
 

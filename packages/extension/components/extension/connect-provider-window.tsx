@@ -2,7 +2,7 @@ import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react";
 import { Check } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ProviderAuthMethodForm } from "@/components/extension/provider-auth-method-form";
+import { ProviderAuthSchemaForm } from "@/components/extension/provider-auth-schema-form";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -12,7 +12,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import type { ExtensionAuthMethod } from "@/lib/extension-runtime-api";
+import {
+  resolveExtensionAuthMethods,
+  type ExtensionResolvedAuthMethod,
+} from "@/lib/extension-auth-methods";
 import {
   providerConnectDataResultAtom,
 } from "@/lib/extension-runtime-atoms";
@@ -20,83 +23,6 @@ import {
   cancelProviderAuthFlowAtom,
   startProviderAuthFlowAtom,
 } from "@/lib/extension-runtime-mutations";
-
-type AuthField = NonNullable<ExtensionAuthMethod["fields"]>[number];
-
-function shouldRenderField(field: AuthField, values: Record<string, string>) {
-  const condition = field.condition;
-  if (!condition) return true;
-  return values[condition.key] === condition.equals;
-}
-
-function normalizeFieldValues(
-  fields: ReadonlyArray<AuthField>,
-  values: Record<string, string>,
-) {
-  const normalized: Record<string, string> = {};
-  const errors: Record<string, string> = {};
-
-  for (const field of fields) {
-    if (!shouldRenderField(field, values)) continue;
-
-    const rawValue = values[field.key] ?? "";
-    const value = rawValue.trim();
-    normalized[field.key] = value;
-
-    if (field.required && !value) {
-      errors[field.key] = `${field.label} is required`;
-      continue;
-    }
-
-    if (!value || !field.validate) continue;
-
-    if (
-      typeof field.validate.minLength === "number" &&
-      value.length < field.validate.minLength
-    ) {
-      errors[field.key] =
-        field.validate.message ??
-        `Must be at least ${field.validate.minLength} characters`;
-      continue;
-    }
-
-    if (
-      typeof field.validate.maxLength === "number" &&
-      value.length > field.validate.maxLength
-    ) {
-      errors[field.key] =
-        field.validate.message ??
-        `Must be no more than ${field.validate.maxLength} characters`;
-      continue;
-    }
-
-    if (field.validate.regex) {
-      try {
-        const expression = new RegExp(field.validate.regex);
-        if (!expression.test(value)) {
-          errors[field.key] = field.validate.message ?? "Invalid value";
-        }
-      } catch {
-        errors[field.key] = "Invalid validation rule";
-      }
-    }
-  }
-
-  return {
-    values: normalized,
-    errors,
-  };
-}
-
-function buildInitialValues(fields: ReadonlyArray<AuthField>) {
-  const next: Record<string, string> = {};
-  for (const field of fields) {
-    if (field.defaultValue != null) {
-      next[field.key] = field.defaultValue;
-    }
-  }
-  return next;
-}
 
 export function ConnectProviderWindow({ providerID }: { providerID: string }) {
   const [busyAction, setBusyAction] = useState<"cancel" | "start" | null>(
@@ -124,29 +50,68 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
   const instruction = flow?.instruction;
 
   const [selectedMethodID, setSelectedMethodID] = useState<string | null>(null);
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [resolvedMethods, setResolvedMethods] = useState<
+    ReadonlyArray<ExtensionResolvedAuthMethod>
+  >([]);
+  const [resolveError, setResolveError] = useState<string | null>(null);
   const [flowError, setFlowError] = useState<string | null>(null);
   const [successToastShown, setSuccessToastShown] = useState(false);
 
-  const selectedMethod = useMemo(
-    () => methods.find((method) => method.id === selectedMethodID),
+  const hasSelectedMethod = useMemo(
+    () => methods.some((method) => method.id === selectedMethodID),
     [methods, selectedMethodID],
   );
+  const resolvedMethodsByID = useMemo(
+    () => new Map(resolvedMethods.map((method) => [method.id, method])),
+    [resolvedMethods],
+  );
+  const selectedResolvedMethod = useMemo(
+    () =>
+      selectedMethodID ? resolvedMethodsByID.get(selectedMethodID) ?? null : null,
+    [resolvedMethodsByID, selectedMethodID],
+  );
+
+  useEffect(() => {
+    let canceled = false;
+
+    if (methods.length === 0) {
+      setResolvedMethods([]);
+      setResolveError(null);
+      return;
+    }
+
+    void resolveExtensionAuthMethods({
+      providerID,
+      provider,
+      methodIDs: methods.map((method) => method.id),
+    })
+      .then((nextMethods) => {
+        if (canceled) return;
+        setResolvedMethods(nextMethods);
+        setResolveError(null);
+      })
+      .catch((error) => {
+        if (canceled) return;
+        setResolvedMethods([]);
+        setResolveError(error instanceof Error ? error.message : String(error));
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [methods, provider, providerID]);
 
   useEffect(() => {
     if (!selectedMethodID) return;
     const exists = methods.some((method) => method.id === selectedMethodID);
     if (!exists) {
       setSelectedMethodID(null);
-      setValues({});
     }
   }, [methods, selectedMethodID]);
 
   useEffect(() => {
     if (flow?.status !== "error" && flow?.status !== "canceled") return;
     setSelectedMethodID(null);
-    setValues({});
   }, [flow?.status]);
 
   useEffect(() => {
@@ -173,23 +138,16 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
     toast.success(`${provider?.name ?? providerID} connected`);
   }, [flow, provider?.name, providerID, successToastShown]);
 
-  async function handleStart() {
-    if (!selectedMethod) {
-      setFlowError("Select an authentication method");
-      return;
-    }
-
-    const fields = selectedMethod.fields ?? [];
-    const validated = normalizeFieldValues(fields, values);
-    setFieldErrors(validated.errors);
-    if (Object.keys(validated.errors).length > 0) return;
-
+  async function handleStart(
+    methodID: string,
+    values: Record<string, string>,
+  ) {
     setFlowError(null);
     setBusyAction("start");
     await startAuthFlow({
       providerID,
-      methodID: selectedMethod.id,
-      values: validated.values,
+      methodID,
+      values,
     }).finally(() => {
       setBusyAction((current) => (current === "start" ? null : current));
     });
@@ -234,6 +192,7 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
     connectDataResult._tag === "Failure" && connectData == null;
 
   const displayError =
+    resolveError ??
     flowError ??
     (status === "error" || status === "canceled" ? flow?.error : null);
 
@@ -380,8 +339,6 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
                       key={method.id}
                       onClick={() => {
                         setSelectedMethodID(method.id);
-                        setValues(buildInitialValues(method.fields ?? []));
-                        setFieldErrors({});
                         setFlowError(null);
                       }}
                       variant="outline"
@@ -397,68 +354,59 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
                   ))}
                 </div>
 
-                {selectedMethod && (
-                  <div className="mt-2 flex flex-col gap-4 bg-secondary/20 px-4 py-4">
-                    <p className="text-xs font-medium text-foreground">
-                      {selectedMethod.label}
-                    </p>
-
-                    {selectedMethod.fields &&
-                      selectedMethod.fields.length > 0 && (
-                        <ProviderAuthMethodForm
-                          fields={selectedMethod.fields}
-                          values={values}
-                          errors={fieldErrors}
-                          disabled={isBusy}
-                          onChange={(key, value) => {
-                            setValues((previous) => ({
-                              ...previous,
-                              [key]: value,
-                            }));
-                            setFieldErrors((previous) => ({
-                              ...previous,
-                              [key]: "",
-                            }));
-                          }}
-                        />
-                      )}
-
-                    {displayError && (
-                      <p className="text-xs text-destructive">{displayError}</p>
+                {hasSelectedMethod && (
+                  <>
+                    {!selectedResolvedMethod && !resolveError && (
+                      <div className="mt-2 bg-secondary/20 px-4 py-4">
+                        <p className="text-xs text-muted-foreground">
+                          Loading authentication form...
+                        </p>
+                      </div>
                     )}
 
-                    <div className="mt-2 flex items-center justify-end gap-2">
-                      <Button
-                        onClick={() => {
+                    {!selectedResolvedMethod && resolveError && (
+                      <div className="mt-2 flex flex-col gap-4 bg-secondary/20 px-4 py-4">
+                        <p className="text-xs text-destructive">
+                          {displayError}
+                        </p>
+
+                        <div className="mt-2 flex items-center justify-end gap-2">
+                          <Button
+                            onClick={() => {
+                              setSelectedMethodID(null);
+                              setFlowError(null);
+                            }}
+                            disabled={isBusy}
+                            variant="ghost"
+                          >
+                            Back
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedResolvedMethod && (
+                      <ProviderAuthSchemaForm
+                        key={selectedResolvedMethod.id}
+                        method={selectedResolvedMethod}
+                        disabled={isBusy}
+                        error={displayError}
+                        submitLabel={
+                          busyAction === "start" ? "Starting..." : "Continue"
+                        }
+                        onBack={() => {
                           setSelectedMethodID(null);
-                          setValues({});
-                          setFieldErrors({});
                           setFlowError(null);
                         }}
-                        disabled={isBusy}
-                        variant="ghost"
-                      >
-                        Back
-                      </Button>
-                      <Button
-                        onClick={() => {
-                          void handleStart().catch((error) => {
-                            setFlowError(
-                              error instanceof Error
-                                ? error.message
-                                : String(error),
-                            );
-                          });
-                        }}
-                        disabled={isBusy}
-                      >
-                        {busyAction === "start" ? "Starting..." : "Continue"}
-                      </Button>
-                    </div>
-                  </div>
+                        onSubmit={(values) =>
+                          handleStart(selectedResolvedMethod.id, values)
+                        }
+                      />
+                    )}
+                  </>
                 )}
 
-                {!selectedMethod && (
+                {!hasSelectedMethod && (
                   <div className="mt-2 flex items-center justify-between">
                     <div className="flex-1">
                       {displayError && (
