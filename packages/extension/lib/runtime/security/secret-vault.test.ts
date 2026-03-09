@@ -28,6 +28,8 @@ describe("SecretVault", () => {
     const record: AuthRecord = {
       type: "api",
       key: "sk-test",
+      methodID: "apikey",
+      methodType: "apikey",
       metadata: { scope: "dev" },
       createdAt: 1,
       updatedAt: 2,
@@ -58,6 +60,8 @@ describe("SecretVault", () => {
       refresh: "refresh-token",
       expiresAt: 500,
       accountId: "acct_123",
+      methodID: "oauth",
+      methodType: "oauth",
       metadata: { authMode: "oauth" },
       createdAt: 10,
       updatedAt: 11,
@@ -82,6 +86,8 @@ describe("SecretVault", () => {
         record: {
           type: "api",
           key: "sk-live",
+          methodID: "apikey",
+          methodType: "apikey",
           createdAt: 1,
           updatedAt: 2,
         },

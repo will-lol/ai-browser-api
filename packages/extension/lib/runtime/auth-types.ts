@@ -30,8 +30,8 @@ export type AuthRecord<TMetadata extends JsonObject | undefined = JsonObject | u
   | {
       type: "api";
       key: string;
-      methodID?: string;
-      methodType?: AuthMethodType;
+      methodID: string;
+      methodType: AuthMethodType;
       metadata?: TMetadata;
       createdAt: number;
       updatedAt: number;
@@ -42,16 +42,16 @@ export type AuthRecord<TMetadata extends JsonObject | undefined = JsonObject | u
       refresh?: string;
       expiresAt?: number;
       accountId?: string;
-      methodID?: string;
-      methodType?: AuthMethodType;
+      methodID: string;
+      methodType: AuthMethodType;
       metadata?: TMetadata;
       createdAt: number;
       updatedAt: number;
     };
 
 const authRecordBaseSchema = z.object({
-  methodID: z.string().optional(),
-  methodType: authMethodTypeSchema.optional(),
+  methodID: z.string(),
+  methodType: authMethodTypeSchema,
   metadata: jsonObjectSchema.optional(),
 });
 
@@ -77,8 +77,8 @@ export type AuthResult<TMetadata extends JsonObject | undefined = JsonObject | u
   | {
       type: "api";
       key: string;
-      methodID?: string;
-      methodType?: AuthMethodType;
+      methodID: string;
+      methodType: AuthMethodType;
       metadata?: TMetadata;
     }
   | {
@@ -87,14 +87,14 @@ export type AuthResult<TMetadata extends JsonObject | undefined = JsonObject | u
       refresh?: string;
       expiresAt?: number;
       accountId?: string;
-      methodID?: string;
-      methodType?: AuthMethodType;
+      methodID: string;
+      methodType: AuthMethodType;
       metadata?: TMetadata;
     };
 
 const authResultBaseSchema = z.object({
-  methodID: z.string().optional(),
-  methodType: authMethodTypeSchema.optional(),
+  methodID: z.string(),
+  methodType: authMethodTypeSchema,
   metadata: jsonObjectSchema.optional(),
 });
 

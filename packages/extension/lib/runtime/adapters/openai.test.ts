@@ -215,9 +215,11 @@ describe("loadCodexOAuthState", () => {
 });
 
 describe("openaiAdapter.auth.parseStoredAuth", () => {
-  it("normalizes oauth records into the current method-aware shape", () => {
+  it("preserves method-aware oauth records and normalizes metadata", () => {
     const parsed = openaiAdapter.auth.parseStoredAuth({
       type: "oauth",
+      methodID: "oauth-device",
+      methodType: "oauth",
       access: "legacy-access",
       refresh: "legacy-refresh",
       expiresAt: Date.now() + 60_000,

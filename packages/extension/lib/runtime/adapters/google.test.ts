@@ -147,9 +147,11 @@ describe("loadGeminiOAuthState", () => {
 });
 
 describe("googleAdapter.auth.parseStoredAuth", () => {
-  it("normalizes legacy oauth metadata and method identity", () => {
+  it("preserves method-aware oauth metadata", () => {
     const parsed = googleAdapter.auth.parseStoredAuth({
       type: "oauth",
+      methodID: "oauth",
+      methodType: "oauth",
       access: "oauth-access",
       refresh: "oauth-refresh",
       expiresAt: Date.now() + 60_000,

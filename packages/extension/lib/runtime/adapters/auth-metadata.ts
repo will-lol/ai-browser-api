@@ -1,6 +1,4 @@
 import { z } from "zod";
-import type { AuthRecord, JsonObject } from "@/lib/runtime/auth-store";
-import type { ParsedAuthRecord } from "./types";
 
 export const optionalMetadataString = z
   .string()
@@ -20,20 +18,4 @@ export function parseOptionalMetadataObject<
   );
   if (Object.keys(normalized).length === 0) return undefined;
   return normalized as z.output<TSchema>;
-}
-
-export function ensureMethodIdentity<
-  TMetadata extends JsonObject | undefined = JsonObject | undefined,
->(input: {
-  auth: AuthRecord;
-  defaultMethodID: string;
-  defaultMethodType: "oauth" | "pat" | "apikey";
-  metadata?: TMetadata;
-}): ParsedAuthRecord<TMetadata> {
-  return {
-    ...input.auth,
-    methodID: input.auth.methodID ?? input.defaultMethodID,
-    methodType: input.auth.methodType ?? input.defaultMethodType,
-    metadata: input.metadata,
-  } as ParsedAuthRecord<TMetadata>;
 }

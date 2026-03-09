@@ -1,9 +1,8 @@
 import { z } from "zod";
 import {
-  ensureMethodIdentity,
   optionalMetadataString,
   parseOptionalMetadataObject,
-} from "./auth-legacy";
+} from "./auth-metadata";
 import { defineAuthSchema } from "./schema";
 import type {
   AIAdapter,
@@ -38,12 +37,6 @@ const GITLAB_PROVIDER_ID = "gitlab";
 
 type GitLabAuthMetadata = {
   instanceUrl?: string;
-};
-
-type GitLabTokenResponse = {
-  access_token: string;
-  refresh_token: string;
-  expires_in: number;
 };
 
 const gitLabAuthMetadataSchema = z.object({
@@ -223,6 +216,8 @@ async function authorizeGitLabOAuth(
 
   return {
     type: "oauth" as const,
+    methodID: "oauth" as const,
+    methodType: "oauth" as const,
     access: tokens.access_token,
     refresh: tokens.refresh_token,
     expiresAt: Date.now() + tokens.expires_in * 1000,
@@ -261,6 +256,8 @@ async function authorizeGitLabPat(
   return {
     type: "api" as const,
     key: token,
+    methodID: "pat" as const,
+    methodType: "pat" as const,
     metadata: {
       instanceUrl,
     },
@@ -277,20 +274,16 @@ function parseGitLabStoredAuth(
   );
 
   if (auth.type === "api") {
-    return ensureMethodIdentity({
-      auth,
-      defaultMethodID: "pat",
-      defaultMethodType: "pat",
+    return {
+      ...auth,
       metadata,
-    });
+    };
   }
 
-  return ensureMethodIdentity({
-    auth,
-    defaultMethodID: "oauth",
-    defaultMethodType: "oauth",
+  return {
+    ...auth,
     metadata,
-  });
+  };
 }
 
 function serializeGitLabAuth(input: {
@@ -302,8 +295,6 @@ function serializeGitLabAuth(input: {
 }) {
   return {
     ...input.result,
-    methodID: input.result.methodID ?? input.method.id,
-    methodType: input.result.methodType ?? input.method.type,
     metadata: parseOptionalMetadataObject(
       gitLabAuthMetadataSchema,
       input.result.metadata,

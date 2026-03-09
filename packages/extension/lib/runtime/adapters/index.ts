@@ -154,7 +154,7 @@ export function serializeAdapterAuthResult(input: {
   adapter: RegisteredAdapter;
   method: Pick<AnyAuthMethodDefinition, "id" | "type">;
   result: AuthResult;
-}) {
+}): AuthResult {
   return input.adapter.auth.serializeAuth({
     method: input.method,
     result: input.result,

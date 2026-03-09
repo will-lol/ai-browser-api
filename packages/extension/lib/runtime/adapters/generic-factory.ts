@@ -37,6 +37,8 @@ export function createApiKeyMethod(
       return {
         type: "api",
         key: input.values.apiKey,
+        methodID: "apikey" as const,
+        methodType: "apikey" as const,
       };
     },
   };
@@ -47,22 +49,14 @@ function parseGenericStoredAuth(
 ): ParsedAuthRecord | undefined {
   if (!auth) return undefined;
   if (auth.type !== "api") return undefined;
-  return {
-    ...auth,
-    methodID: auth.methodID ?? "apikey",
-    methodType: auth.methodType ?? "apikey",
-  };
+  return auth;
 }
 
 function serializeGenericAuth(input: {
   result: AuthResult;
   method: Pick<AuthMethodDefinition, "id" | "type">;
 }) {
-  return {
-    ...input.result,
-    methodID: input.result.methodID ?? input.method.id,
-    methodType: input.result.methodType ?? input.method.type,
-  };
+  return input.result;
 }
 
 function createUnsupportedModelError(npm: string) {

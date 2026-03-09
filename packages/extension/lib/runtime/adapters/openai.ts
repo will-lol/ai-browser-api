@@ -8,10 +8,9 @@ import {
 } from "@llm-bridge/contracts";
 import { createFactoryLanguageModel } from "./factory-language-model";
 import {
-  ensureMethodIdentity,
   optionalMetadataString,
   parseOptionalMetadataObject,
-} from "./auth-legacy";
+} from "./auth-metadata";
 import { createApiKeyMethod } from "./generic-factory";
 import { wrapLanguageModel } from "./helpers";
 import {
@@ -104,20 +103,16 @@ function parseOpenAIStoredAuth(
 ): ParsedAuthRecord<OpenAIAuthMetadata> | undefined {
   if (!auth) return undefined;
   if (auth.type === "api") {
-    return ensureMethodIdentity({
-      auth,
-      defaultMethodID: "apikey",
-      defaultMethodType: "apikey",
+    return {
+      ...auth,
       metadata: undefined,
-    });
+    };
   }
 
-  return ensureMethodIdentity({
-    auth,
-    defaultMethodID: "oauth-device",
-    defaultMethodType: "oauth",
+  return {
+    ...auth,
     metadata: normalizeOpenAIAuthMetadata(auth),
-  });
+  };
 }
 
 function serializeOpenAIAuth(input: {
@@ -130,8 +125,6 @@ function serializeOpenAIAuth(input: {
   if (input.result.type === "api") {
     return {
       ...input.result,
-      methodID: input.result.methodID ?? input.method.id,
-      methodType: input.result.methodType ?? input.method.type,
       metadata: undefined,
     };
   }
@@ -141,8 +134,6 @@ function serializeOpenAIAuth(input: {
 
   return {
     ...input.result,
-    methodID: input.result.methodID ?? input.method.id,
-    methodType: input.result.methodType ?? input.method.type,
     metadata: parseOptionalMetadataObject(openAIAuthMetadataSchema, {
       accountId,
     }),
@@ -466,6 +457,8 @@ async function authorizeBrowser(input: AdapterAuthorizeContext) {
 
   return {
     type: "oauth" as const,
+    methodID: "oauth-browser" as const,
+    methodType: "oauth" as const,
     access: tokens.access_token,
     refresh: tokens.refresh_token,
     expiresAt: input.runtime.now() + (tokens.expires_in ?? 3600) * 1000,
@@ -580,6 +573,8 @@ async function authorizeDevice(input: AdapterAuthorizeContext) {
       const accountId = extractAccountId(tokens);
       return {
         type: "oauth" as const,
+        methodID: "oauth-device" as const,
+        methodType: "oauth" as const,
         access: tokens.access_token,
         refresh: tokens.refresh_token,
         expiresAt: input.runtime.now() + (tokens.expires_in ?? 3600) * 1000,

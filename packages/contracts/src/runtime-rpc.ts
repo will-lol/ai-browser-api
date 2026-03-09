@@ -36,9 +36,6 @@ import { RuntimeRpcErrorSchema } from "./errors";
 export const RUNTIME_PUBLIC_RPC_PORT_NAME = "llm-bridge-runtime-public-rpc-v1";
 export const RUNTIME_ADMIN_RPC_PORT_NAME = "llm-bridge-runtime-admin-rpc-v1";
 
-// Backward compatibility for callers that have not switched to explicit role-based clients.
-export const RUNTIME_RPC_PORT_NAME = RUNTIME_ADMIN_RPC_PORT_NAME;
-
 const RuntimeListModelsRpc = Rpc.make("listModels", {
   payload: {
     origin: Schema.optional(Schema.String),

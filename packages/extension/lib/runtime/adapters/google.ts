@@ -2,10 +2,9 @@ import { browser } from "@wxt-dev/browser";
 import { z } from "zod";
 import { createFactoryLanguageModel } from "./factory-language-model";
 import {
-  ensureMethodIdentity,
   optionalMetadataString,
   parseOptionalMetadataObject,
-} from "./auth-legacy";
+} from "./auth-metadata";
 import { createGeminiCodeAssistFetch, GEMINI_CODE_ASSIST_HEADERS } from "./gemini-code-assist-transport";
 import { createApiKeyMethod } from "./generic-factory";
 import { wrapLanguageModel } from "./helpers";
@@ -47,12 +46,6 @@ const ONBOARD_POLL_DELAY_MS = 3_000;
 const GEMINI_PROJECT_REQUIRED_MESSAGE =
   "Google Gemini requires a Google Cloud project. Enable the Gemini for Google Cloud API on a project you control, then reconnect and set projectId in the Google OAuth form if needed.";
 
-type GoogleTokenResponse = {
-  access_token: string;
-  expires_in: number;
-  refresh_token?: string;
-};
-
 type LoadCodeAssistPayload = {
   cloudaicompanionProject?: string | { id?: string };
   currentTier?: {
@@ -67,16 +60,6 @@ type LoadCodeAssistPayload = {
   ineligibleTiers?: Array<{
     reasonMessage?: string;
   }>;
-};
-
-type OnboardUserPayload = {
-  name?: string;
-  done?: boolean;
-  response?: {
-    cloudaicompanionProject?: {
-      id?: string;
-    };
-  };
 };
 
 export type GeminiProjectContextResult = {
@@ -309,12 +292,10 @@ function parseGoogleStoredAuth(
 ): ParsedAuthRecord<GoogleAuthMetadata> | undefined {
   if (!auth) return undefined;
   if (auth.type === "api") {
-    return ensureMethodIdentity({
-      auth,
-      defaultMethodID: "apikey",
-      defaultMethodType: "apikey",
+    return {
+      ...auth,
       metadata: undefined,
-    });
+    };
   }
 
   const metadata = parseOptionalMetadataObject(
@@ -322,12 +303,10 @@ function parseGoogleStoredAuth(
     auth.metadata,
   );
 
-  return ensureMethodIdentity({
-    auth,
-    defaultMethodID: "oauth",
-    defaultMethodType: "oauth",
+  return {
+    ...auth,
     metadata,
-  });
+  };
 }
 
 function serializeGoogleAuth(input: {
@@ -340,16 +319,12 @@ function serializeGoogleAuth(input: {
   if (input.result.type === "api") {
     return {
       ...input.result,
-      methodID: input.result.methodID ?? input.method.id,
-      methodType: input.result.methodType ?? input.method.type,
       metadata: undefined,
     };
   }
 
   return {
     ...input.result,
-    methodID: input.result.methodID ?? input.method.id,
-    methodType: input.result.methodType ?? input.method.type,
     metadata: parseOptionalMetadataObject(
       googleAuthMetadataSchema,
       input.result.metadata,
@@ -723,6 +698,8 @@ async function authorizeGeminiOAuth(input: AdapterAuthorizeContext<{ projectId?:
   const email = await resolveUserEmail(tokens.access_token);
   return {
     type: "oauth" as const,
+    methodID: "oauth" as const,
+    methodType: "oauth" as const,
     access: tokens.access_token,
     refresh: tokens.refresh_token,
     expiresAt: Date.now() + tokens.expires_in * 1000,

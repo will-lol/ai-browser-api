@@ -34,6 +34,8 @@ function buildAuthRecord(
     return {
       type: "api",
       key: value.key,
+      methodID: value.methodID,
+      methodType: value.methodType,
       metadata: value.metadata,
       createdAt,
       updatedAt,
@@ -46,6 +48,8 @@ function buildAuthRecord(
     refresh: value.refresh,
     expiresAt: value.expiresAt,
     accountId: value.accountId,
+    methodID: value.methodID,
+    methodType: value.methodType,
     metadata: value.metadata,
     createdAt,
     updatedAt,

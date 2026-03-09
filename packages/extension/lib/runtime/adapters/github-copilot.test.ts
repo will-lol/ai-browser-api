@@ -70,9 +70,11 @@ describe("loadCopilotOAuthState", () => {
 });
 
 describe("githubCopilotAdapter.auth.parseStoredAuth", () => {
-  it("normalizes legacy oauth records into enterprise-aware metadata", () => {
+  it("preserves method-aware oauth metadata", () => {
     const parsed = githubCopilotAdapter.auth.parseStoredAuth({
       type: "oauth",
+      methodID: "oauth-device",
+      methodType: "oauth",
       access: "legacy-access",
       refresh: "legacy-refresh",
       expiresAt: Date.now() + 60_000,

@@ -187,6 +187,8 @@ describe("AuthVaultStore", () => {
       store.setAuth("openai", {
         type: "api",
         key: "sk-test",
+        methodID: "apikey",
+        methodType: "apikey",
         metadata: { scope: "dev" },
       }),
     );
@@ -194,6 +196,8 @@ describe("AuthVaultStore", () => {
     expect(stored).toEqual({
       type: "api",
       key: "sk-test",
+      methodID: "apikey",
+      methodType: "apikey",
       metadata: { scope: "dev" },
       createdAt: 101,
       updatedAt: 102,
@@ -225,6 +229,8 @@ describe("AuthVaultStore", () => {
         type: "oauth",
         access: "access-token",
         refresh: "refresh-token",
+        methodID: "oauth",
+        methodType: "oauth",
       }),
     );
     publishedEvents.length = 0;
@@ -247,6 +253,8 @@ describe("AuthVaultStore", () => {
       store.setAuth("broken", {
         type: "api",
         key: "sk-corrupt",
+        methodID: "apikey",
+        methodType: "apikey",
       }),
     );
 

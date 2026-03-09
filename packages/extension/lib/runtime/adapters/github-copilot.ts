@@ -1,10 +1,9 @@
 import { z } from "zod";
 import { createFactoryLanguageModel, mergeModelHeaders } from "./factory-language-model";
 import {
-  ensureMethodIdentity,
   optionalMetadataString,
   parseOptionalMetadataObject,
-} from "./auth-legacy";
+} from "./auth-metadata";
 import { wrapLanguageModel } from "./helpers";
 import { defineAuthSchema } from "./schema";
 import type {
@@ -200,12 +199,10 @@ function parseCopilotStoredAuth(
 ): ParsedAuthRecord<CopilotAuthMetadata> | undefined {
   if (!auth || auth.type !== "oauth") return undefined;
 
-  return ensureMethodIdentity({
-    auth,
-    defaultMethodID: "oauth-device",
-    defaultMethodType: "oauth",
+  return {
+    ...auth,
     metadata: parseOptionalMetadataObject(copilotAuthMetadataSchema, auth.metadata),
-  });
+  };
 }
 
 function serializeCopilotAuth(input: {
@@ -217,8 +214,6 @@ function serializeCopilotAuth(input: {
 }) {
   return {
     ...input.result,
-    methodID: input.result.methodID ?? input.method.id,
-    methodType: input.result.methodType ?? input.method.type,
     metadata:
       input.result.type === "oauth"
         ? parseOptionalMetadataObject(
@@ -346,6 +341,8 @@ async function authorizeCopilotDevice(
     if (data.access_token) {
       return {
         type: "oauth" as const,
+        methodID: "oauth-device" as const,
+        methodType: "oauth" as const,
         access: "",
         refresh: data.access_token,
         expiresAt: 0,
