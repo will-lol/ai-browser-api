@@ -4,7 +4,7 @@ import {
   createGeminiCodeAssistFetch,
   normalizeGeminiCodeAssistResponse,
   rewriteGeminiCodeAssistRequest,
-} from "@/lib/runtime/plugins/gemini-code-assist-transport";
+} from "@/lib/runtime/adapters/gemini-code-assist-transport";
 
 describe("gemini-code-assist transport request rewrite", () => {
   it("rewrites generateContent requests to code assist envelope", async () => {
@@ -143,7 +143,7 @@ describe("gemini-code-assist fetch wrapper", () => {
   it("rewrites and forwards a single fetch attempt", async () => {
     let callCount = 0;
 
-    const fetchFn = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
       callCount += 1;
 
       assert.equal(
@@ -167,13 +167,11 @@ describe("gemini-code-assist fetch wrapper", () => {
           },
         },
       );
-    };
+    }) as typeof fetch;
 
     const wrappedFetch = createGeminiCodeAssistFetch({
       projectId: "managed-project-3",
       fetchFn,
-      maxAttempts: 5,
-      baseRetryDelayMs: 1,
     });
 
     const response = await wrappedFetch(

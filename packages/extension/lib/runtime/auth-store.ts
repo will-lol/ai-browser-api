@@ -4,7 +4,13 @@ import type { AuthResult } from "@/lib/runtime/auth-types";
 import { AuthVaultStore } from "@/lib/runtime/security/auth-vault-store";
 import { runSecurityEffect } from "@/lib/runtime/security/runtime-security";
 
-export type { AuthRecord, AuthResult } from "@/lib/runtime/auth-types";
+export type {
+  AuthMethodType,
+  AuthRecord,
+  AuthResult,
+  JsonObject,
+  JsonValue,
+} from "@/lib/runtime/auth-types";
 
 function authStoreInternalError(message: string) {
   return new RuntimeInternalError({

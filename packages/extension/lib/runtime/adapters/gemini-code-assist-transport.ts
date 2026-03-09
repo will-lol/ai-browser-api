@@ -1,4 +1,5 @@
-import type { RuntimeFetch } from "@/lib/runtime/plugin-manager";
+import { z } from "zod";
+import type { RuntimeFetch } from "./types";
 
 const GENERATIVE_LANGUAGE_HOST = "generativelanguage.googleapis.com";
 const CODE_ASSIST_BASE_URL = "https://cloudcode-pa.googleapis.com";
@@ -17,8 +18,6 @@ export const GEMINI_CODE_ASSIST_HEADERS = {
 export interface GeminiCodeAssistFetchOptions {
   projectId: string;
   fetchFn?: RuntimeFetch;
-  maxAttempts?: number;
-  baseRetryDelayMs?: number;
 }
 
 export interface GeminiRewriteMetadata {
@@ -31,6 +30,16 @@ export interface RewrittenTransportRequest<TMetadata = void> {
   init: RequestInit;
   metadata: TMetadata;
 }
+
+const jsonRecordSchema: z.ZodType<Record<string, unknown>> = z.record(
+  z.string(),
+  z.unknown(),
+);
+
+const geminiResponseEnvelopeSchema = z.object({
+  traceId: z.string().optional(),
+  response: jsonRecordSchema.optional(),
+});
 
 function randomRequestID() {
   if (
@@ -67,15 +76,11 @@ function getAuthorizationHeader(headers: Headers) {
 }
 
 function transformRequestPayload(
-  input: unknown,
+  input: Record<string, unknown>,
   projectId: string,
   model: string,
 ) {
-  if (!input || typeof input !== "object") {
-    throw new Error("Gemini OAuth request body must be a JSON object.");
-  }
-
-  const body = { ...(input as Record<string, unknown>) };
+  const body = { ...input };
 
   if (
     typeof body.project === "string" &&
@@ -164,9 +169,13 @@ export async function rewriteGeminiCodeAssistRequest(
       throw new Error("Gemini OAuth request body is empty.");
     }
 
-    const parsedBody = JSON.parse(bodyText) as unknown;
+    const parsedJson = JSON.parse(bodyText) as unknown;
+    const parsedBodyResult = jsonRecordSchema.safeParse(parsedJson);
+    if (!parsedBodyResult.success) {
+      throw new Error("Gemini OAuth request body must be a JSON object.");
+    }
     const wrapped = transformRequestPayload(
-      parsedBody,
+      parsedBodyResult.data,
       options.projectId,
       parsed.effectiveModel,
     );
@@ -203,23 +212,24 @@ export function transformGeminiCodeAssistSSELine(line: string): string {
   }
 
   try {
-    const parsed = JSON.parse(payload) as Record<string, unknown>;
-    const responsePayload = parsed.response;
-    if (!responsePayload || typeof responsePayload !== "object") {
+    const parsedResult = geminiResponseEnvelopeSchema.safeParse(
+      JSON.parse(payload) as unknown,
+    );
+    if (!parsedResult.success || !parsedResult.data.response) {
       return line;
     }
 
-    if (typeof parsed.traceId === "string") {
-      const responseRecord = responsePayload as Record<string, unknown>;
+    const { traceId, response } = parsedResult.data;
+    if (typeof traceId === "string") {
       if (
-        typeof responseRecord.responseId !== "string" ||
-        !responseRecord.responseId
+        typeof response.responseId !== "string" ||
+        !response.responseId
       ) {
-        responseRecord.responseId = parsed.traceId;
+        response.responseId = traceId;
       }
     }
 
-    return `data: ${JSON.stringify(responsePayload)}`;
+    return `data: ${JSON.stringify(response)}`;
   } catch {
     return line;
   }
@@ -279,22 +289,22 @@ function transformGeminiCodeAssistStream(stream: ReadableStream<Uint8Array>) {
 }
 
 function unwrapGeminiCodeAssistPayload(payload: Record<string, unknown>) {
-  const response = payload.response;
-  if (!response || typeof response !== "object") {
+  const parsedResult = geminiResponseEnvelopeSchema.safeParse(payload);
+  if (!parsedResult.success || !parsedResult.data.response) {
     return payload;
   }
 
-  const responseRecord = response as Record<string, unknown>;
-  if (typeof payload.traceId === "string") {
+  const { traceId, response } = parsedResult.data;
+  if (typeof traceId === "string") {
     if (
-      typeof responseRecord.responseId !== "string" ||
-      !responseRecord.responseId
+      typeof response.responseId !== "string" ||
+      !response.responseId
     ) {
-      responseRecord.responseId = payload.traceId;
+      response.responseId = traceId;
     }
   }
 
-  return responseRecord;
+  return response;
 }
 
 export async function normalizeGeminiCodeAssistResponse(
@@ -331,10 +341,18 @@ export async function normalizeGeminiCodeAssistResponse(
   }
 
   try {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    const unwrapped = unwrapGeminiCodeAssistPayload(parsed);
+    const parsedResult = jsonRecordSchema.safeParse(JSON.parse(text) as unknown);
+    if (!parsedResult.success) {
+      return new Response(text, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    }
 
-    if (unwrapped === parsed) {
+    const unwrapped = unwrapGeminiCodeAssistPayload(parsedResult.data);
+
+    if (unwrapped === parsedResult.data) {
       return new Response(text, {
         status: response.status,
         statusText: response.statusText,
@@ -361,7 +379,7 @@ export function createGeminiCodeAssistFetch(
 ): RuntimeFetch {
   const fetchFn = options.fetchFn ?? fetch;
 
-  return async (input: RequestInfo | URL, init?: RequestInit) => {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const rewritten = await rewriteGeminiCodeAssistRequest(input, init, {
       projectId: options.projectId,
     });
@@ -372,5 +390,5 @@ export function createGeminiCodeAssistFetch(
 
     const response = await fetchFn(rewritten.request, rewritten.init);
     return normalizeGeminiCodeAssistResponse(response, rewritten.metadata);
-  };
+  }) as RuntimeFetch;
 }

@@ -7,30 +7,28 @@ import {
   it,
   mock,
 } from "bun:test";
-import type { AuthContext } from "@/lib/runtime/plugin-manager";
+import {
+  loadCodexOAuthState,
+  openaiAdapter,
+} from "@/lib/runtime/adapters/openai";
+import type { AdapterAuthContext } from "@/lib/runtime/adapters/types";
 
 const setAuthMock = mock(async () => undefined);
 mock.module("@/lib/runtime/auth-store", () => ({
   setAuth: setAuthMock,
 }));
 
-const { codexAuthPlugin } = await import("@/lib/runtime/plugins/codex");
-
-function createProvider(): AuthContext["provider"] {
+function createContext(): AdapterAuthContext {
   return {
-    id: "openai",
-    name: "OpenAI",
-    source: "models.dev",
-    env: ["OPENAI_API_KEY"],
-    connected: true,
-    options: {},
-  };
-}
-
-function createAuthContext(provider = createProvider()): AuthContext {
-  return {
-    providerID: provider.id,
-    provider,
+    providerID: "openai",
+    provider: {
+      id: "openai",
+      name: "OpenAI",
+      source: "models.dev",
+      env: ["OPENAI_API_KEY"],
+      connected: true,
+      options: {},
+    },
   };
 }
 
@@ -40,15 +38,7 @@ function makeJwt(claims: Record<string, unknown>) {
   return `${encode({ alg: "none", typ: "JWT" })}.${encode(claims)}.`;
 }
 
-function getLoader() {
-  const loader = codexAuthPlugin.hooks.auth?.loader;
-  if (!loader) {
-    throw new Error("codex auth loader is unavailable");
-  }
-  return loader;
-}
-
-describe("codex loader account header consistency", () => {
+describe("loadCodexOAuthState", () => {
   const originalFetch = globalThis.fetch;
   const originalWarn = console.warn;
 
@@ -69,8 +59,6 @@ describe("codex loader account header consistency", () => {
   });
 
   it("uses refreshed account id for header and persisted auth", async () => {
-    const loader = getLoader();
-
     globalThis.fetch = mock(
       async () =>
         new Response(
@@ -87,24 +75,24 @@ describe("codex loader account header consistency", () => {
         ),
     );
 
-    const provider = createProvider();
-    const output = await loader(
-      {
+    const output = await loadCodexOAuthState({
+      ...createContext(),
+      auth: {
         type: "oauth",
+        methodID: "oauth-device",
+        methodType: "oauth",
         access: "stale-access",
         refresh: "stale-refresh",
         expiresAt: Date.now() - 1_000,
         accountId: "acct-old",
-        metadata: { authMode: "codex_oauth", accountId: "acct-old" },
+        metadata: { accountId: "acct-old" },
         createdAt: Date.now() - 10_000,
         updatedAt: Date.now() - 10_000,
       },
-      provider,
-      createAuthContext(provider),
-    );
+    });
 
-    expect(output?.transport?.apiKey).toBe("refreshed-access");
-    expect(output?.transport?.headers?.["chatgpt-account-id"]).toBe("acct-new");
+    expect(output.transport.apiKey).toBe("refreshed-access");
+    expect(output.transport.headers?.["chatgpt-account-id"]).toBe("acct-new");
 
     expect(setAuthMock).toHaveBeenCalledTimes(1);
     const [, payload] = setAuthMock.mock.calls[0];
@@ -113,8 +101,6 @@ describe("codex loader account header consistency", () => {
   });
 
   it("keeps prior account id when refreshed token has no claim", async () => {
-    const loader = getLoader();
-
     globalThis.fetch = mock(
       async () =>
         new Response(
@@ -130,23 +116,23 @@ describe("codex loader account header consistency", () => {
         ),
     );
 
-    const provider = createProvider();
-    const output = await loader(
-      {
+    const output = await loadCodexOAuthState({
+      ...createContext(),
+      auth: {
         type: "oauth",
+        methodID: "oauth-device",
+        methodType: "oauth",
         access: "stale-access",
         refresh: "stale-refresh",
         expiresAt: Date.now() - 1_000,
         accountId: "acct-existing",
-        metadata: { authMode: "codex_oauth", accountId: "acct-existing" },
+        metadata: { accountId: "acct-existing" },
         createdAt: Date.now() - 10_000,
         updatedAt: Date.now() - 10_000,
       },
-      provider,
-      createAuthContext(provider),
-    );
+    });
 
-    expect(output?.transport?.headers?.["chatgpt-account-id"]).toBe(
+    expect(output.transport.headers?.["chatgpt-account-id"]).toBe(
       "acct-existing",
     );
     const [, payload] = setAuthMock.mock.calls[0];
@@ -155,8 +141,6 @@ describe("codex loader account header consistency", () => {
   });
 
   it("omits header and warns when account id remains missing after refresh", async () => {
-    const loader = getLoader();
-
     globalThis.fetch = mock(
       async () =>
         new Response(
@@ -172,64 +156,83 @@ describe("codex loader account header consistency", () => {
         ),
     );
 
-    const provider = createProvider();
-    const output = await loader(
-      {
+    const output = await loadCodexOAuthState({
+      ...createContext(),
+      auth: {
         type: "oauth",
+        methodID: "oauth-device",
+        methodType: "oauth",
         access: "stale-access",
         refresh: "stale-refresh",
         expiresAt: Date.now() - 1_000,
-        metadata: { authMode: "codex_oauth" },
         createdAt: Date.now() - 10_000,
         updatedAt: Date.now() - 10_000,
       },
-      provider,
-      createAuthContext(provider),
-    );
+    });
 
-    expect(output?.transport?.headers?.["chatgpt-account-id"]).toBeUndefined();
-
+    expect(output.transport.headers?.["chatgpt-account-id"]).toBeUndefined();
     expect(setAuthMock).toHaveBeenCalledTimes(1);
     const [, payload] = setAuthMock.mock.calls[0];
     expect(payload.accountId).toBeUndefined();
-    expect(payload.metadata.accountId).toBeUndefined();
+    expect(payload.metadata).toBeUndefined();
 
     expect(console.warn).toHaveBeenCalledTimes(1);
     expect(console.warn).toHaveBeenCalledWith(
-      "[builtin-codex-auth] oauth accountId is missing; Codex requests may fail until token claims include chatgpt_account_id.",
+      "[adapter:openai] oauth accountId is missing; Codex requests may fail until token claims include chatgpt_account_id.",
     );
   });
 
   it("keeps existing behavior when refresh is not needed", async () => {
-    const loader = getLoader();
-
     const fetchMock = mock(async () => {
       throw new Error("fetch should not be called");
     });
     globalThis.fetch = fetchMock;
 
-    const provider = createProvider();
-    const output = await loader(
-      {
+    const output = await loadCodexOAuthState({
+      ...createContext(),
+      auth: {
         type: "oauth",
+        methodID: "oauth-device",
+        methodType: "oauth",
         access: "current-access",
         refresh: "refresh-token",
         expiresAt: Date.now() + 30 * 60_000,
         accountId: "acct-steady",
-        metadata: { authMode: "codex_oauth", accountId: "acct-steady" },
+        metadata: { accountId: "acct-steady" },
         createdAt: Date.now() - 10_000,
         updatedAt: Date.now() - 10_000,
       },
-      provider,
-      createAuthContext(provider),
-    );
+    });
 
-    expect(output?.transport?.apiKey).toBe("current-access");
-    expect(output?.transport?.headers?.["chatgpt-account-id"]).toBe(
+    expect(output.transport.apiKey).toBe("current-access");
+    expect(output.transport.headers?.["chatgpt-account-id"]).toBe(
       "acct-steady",
     );
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expect(setAuthMock).toHaveBeenCalledTimes(0);
     expect(console.warn).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe("openaiAdapter.auth.parseStoredAuth", () => {
+  it("normalizes oauth records into the current method-aware shape", () => {
+    const parsed = openaiAdapter.auth.parseStoredAuth({
+      type: "oauth",
+      access: "legacy-access",
+      refresh: "legacy-refresh",
+      expiresAt: Date.now() + 60_000,
+      metadata: {
+        accountId: "acct-legacy",
+      },
+      createdAt: Date.now() - 10_000,
+      updatedAt: Date.now() - 10_000,
+    });
+
+    expect(parsed).toBeDefined();
+    expect(parsed?.methodID).toBe("oauth-device");
+    expect(parsed?.methodType).toBe("oauth");
+    expect(parsed?.metadata).toEqual({
+      accountId: "acct-legacy",
+    });
   });
 });

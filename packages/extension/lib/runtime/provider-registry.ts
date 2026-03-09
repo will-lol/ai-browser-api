@@ -1,11 +1,14 @@
 import { getRuntimeConfig } from "@/lib/runtime/config-store";
 import type { RuntimeProviderConfig } from "@/lib/runtime/config-store";
+import {
+  parseAdapterStoredAuth,
+  resolveAdapterForProvider,
+} from "@/lib/runtime/adapters";
 import { getModelsDevData } from "@/lib/runtime/models-dev";
 import type {
   ModelsDevModel,
   ModelsDevProvider,
 } from "@/lib/runtime/models-dev";
-import { getPluginManager } from "@/lib/runtime/plugins";
 import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 import { runtimeModelKey } from "@/lib/runtime/db/runtime-db-types";
 import { afterCommit, runTx } from "@/lib/runtime/db/runtime-db-tx";
@@ -68,7 +71,7 @@ export interface ProviderModelInfo {
 export interface ProviderRuntimeInfo {
   id: string;
   name: string;
-  source: "models.dev" | "config" | "plugin";
+  source: "models.dev" | "config";
   env: string[];
   connected: boolean;
   options: Record<string, unknown>;
@@ -317,22 +320,25 @@ async function buildProviderFromSource(input: {
     models,
   };
 
-  const pluginManager = getPluginManager();
   const auth = input.authMap[input.providerID];
-  const patchedProvider = await pluginManager.patchProvider(
-    { providerID: input.providerID, provider, auth },
-    provider,
-  );
-  const patchedModels: Record<string, ProviderModelInfo> = {};
-  for (const [modelID, model] of Object.entries(patchedProvider.models)) {
-    patchedModels[modelID] = await pluginManager.patchModel(
-      { providerID: input.providerID, provider: patchedProvider, auth },
-      model,
-    );
+  const adapter = resolveAdapterForProvider({
+    providerID: input.providerID,
+    source: input.source,
+  });
+  if (!adapter?.patchCatalog) {
+    return provider;
   }
-  patchedProvider.models = patchedModels;
 
-  return patchedProvider;
+  return (
+    (await adapter.patchCatalog(
+      {
+        providerID: input.providerID,
+        provider,
+        auth: parseAdapterStoredAuth(adapter, auth),
+      },
+      provider,
+    )) ?? provider
+  );
 }
 
 async function setCatalogInitialized(updatedAt: number) {

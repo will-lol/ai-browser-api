@@ -5,7 +5,7 @@ import {
   isRuntimeRpcError,
   type RuntimeAuthFlowInstruction,
 } from "@llm-bridge/contracts";
-import type { RuntimeAuthMethod } from "@/lib/runtime/plugin-manager";
+import type { RuntimeAuthMethod } from "@/lib/runtime/adapters/types";
 import {
   listProviderAuthMethods,
   startProviderAuth,

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { RuntimeAdapterValidationState } from "@/lib/runtime/plugin-manager";
 import {
-  geminiOAuthPlugin,
+  googleAdapter,
+  loadGeminiOAuthState,
   resolveGeminiProjectContext,
-} from "@/lib/runtime/plugins/gemini";
+} from "@/lib/runtime/adapters/google";
 
 describe("resolveGeminiProjectContext", () => {
   it("uses configured project without loading managed project", async () => {
@@ -112,73 +112,10 @@ describe("resolveGeminiProjectContext", () => {
   });
 });
 
-describe("gemini adapter hooks", () => {
-  it("loader returns structured transport state for oauth auth", async () => {
-    const loader = geminiOAuthPlugin.hooks.auth?.loader;
-    assert.ok(loader);
-
-    const output = await loader(
-      {
-        type: "oauth",
-        access: "oauth-access",
-        refresh: "oauth-refresh",
-        expiresAt: Date.now() + 5 * 60_000,
-        createdAt: Date.now() - 1_000,
-        updatedAt: Date.now() - 1_000,
-        metadata: {
-          authMode: "gemini_oauth",
-          projectId: "configured-project",
-        },
-      },
-      {
-        id: "google",
-        name: "Google",
-        source: "models.dev",
-        env: ["GOOGLE_API_KEY"],
-        connected: true,
-        options: {},
-      },
-      {
-        providerID: "google",
-        provider: {
-          id: "google",
-          name: "Google",
-          source: "models.dev",
-          env: ["GOOGLE_API_KEY"],
-          connected: true,
-          options: {},
-        },
-      },
-    );
-
-    assert.deepEqual(output?.requestOptions ?? {}, {});
-    assert.equal(output?.transport?.authType, "bearer");
-    assert.equal(output?.transport?.apiKey, "oauth-access");
-    assert.equal(
-      (output?.transport?.metadata as Record<string, unknown>)?.geminiProjectId,
-      "configured-project",
-    );
-  });
-
-  it("validate fails when gemini project resolution produced an error", async () => {
-    const validate = geminiOAuthPlugin.hooks.adapter?.validate;
-    assert.ok(validate);
-
-    const context = {
+describe("loadGeminiOAuthState", () => {
+  it("returns structured transport state for oauth auth", async () => {
+    const output = await loadGeminiOAuthState({
       providerID: "google",
-      modelID: "gemini-2.5-pro",
-      origin: "https://example.test",
-      sessionID: "session-1",
-      requestID: "request-1",
-      auth: {
-        type: "oauth",
-        access: "oauth-access",
-        createdAt: Date.now() - 1_000,
-        updatedAt: Date.now() - 1_000,
-        metadata: {
-          authMode: "gemini_oauth",
-        },
-      },
       provider: {
         id: "google",
         name: "Google",
@@ -187,11 +124,83 @@ describe("gemini adapter hooks", () => {
         connected: true,
         options: {},
       },
+      auth: {
+        type: "oauth",
+        methodID: "oauth",
+        methodType: "oauth",
+        access: "oauth-access",
+        refresh: "oauth-refresh",
+        expiresAt: Date.now() + 5 * 60_000,
+        createdAt: Date.now() - 1_000,
+        updatedAt: Date.now() - 1_000,
+        metadata: {
+          projectId: "configured-project",
+        },
+      },
+    });
+
+    assert.equal(output.transport.authType, "bearer");
+    assert.equal(output.transport.apiKey, "oauth-access");
+    assert.equal(output.state.kind, "oauth");
+    assert.equal(output.state.projectId, "configured-project");
+  });
+});
+
+describe("googleAdapter.auth.parseStoredAuth", () => {
+  it("normalizes legacy oauth metadata and method identity", () => {
+    const parsed = googleAdapter.auth.parseStoredAuth({
+      type: "oauth",
+      access: "oauth-access",
+      refresh: "oauth-refresh",
+      expiresAt: Date.now() + 60_000,
+      createdAt: Date.now() - 1_000,
+      updatedAt: Date.now() - 1_000,
+      metadata: {
+        email: "dev@example.com",
+        projectId: "configured-project",
+        managedProjectId: "managed-project",
+      },
+    });
+
+    assert.equal(parsed?.methodID, "oauth");
+    assert.equal(parsed?.methodType, "oauth");
+    assert.deepEqual(parsed?.metadata, {
+      email: "dev@example.com",
+      projectId: "configured-project",
+      managedProjectId: "managed-project",
+    });
+  });
+});
+
+describe("googleAdapter.createModel", () => {
+  it("fails early when project resolution produced an error", async () => {
+    const context = {
+      providerID: "google",
+      modelID: "gemini-2.5-pro",
+      origin: "https://example.test",
+      sessionID: "session-1",
+      requestID: "request-1",
+      auth: {
+        type: "oauth" as const,
+        methodID: "oauth" as const,
+        methodType: "oauth" as const,
+        access: "oauth-access",
+        createdAt: Date.now() - 1_000,
+        updatedAt: Date.now() - 1_000,
+      },
+      provider: {
+        id: "google",
+        name: "Google",
+        source: "models.dev" as const,
+        env: ["GOOGLE_API_KEY"],
+        connected: true,
+        options: {},
+      },
       model: {
         id: "gemini-2.5-pro",
         providerID: "google",
         name: "Gemini 2.5 Pro",
-        status: "active",
+        status: "active" as const,
         api: {
           id: "gemini-2.5-pro",
           url: "https://generativelanguage.googleapis.com",
@@ -234,27 +243,20 @@ describe("gemini adapter hooks", () => {
       },
     };
 
-    const state: RuntimeAdapterValidationState = {
-      factory: {
-        npm: "@ai-sdk/google",
-        factory: (() => {
-          throw new Error("not used");
-        }) as RuntimeAdapterValidationState["factory"]["factory"],
-      },
-      transport: {
-        authType: "bearer",
-        apiKey: "oauth-access",
-        headers: {},
-        metadata: {
-          geminiProjectError: "project resolution failed",
-        },
-      },
-      cacheKeyParts: {},
-      factoryOptions: {},
-    };
-
     await assert.rejects(
-      () => validate(context as never, state),
+      () =>
+        googleAdapter.createModel({
+          context,
+          transport: {
+            authType: "bearer",
+            apiKey: "oauth-access",
+            headers: {},
+          },
+          state: {
+            kind: "oauth",
+            projectResolutionError: "project resolution failed",
+          },
+        }),
       /project resolution failed/,
     );
   });

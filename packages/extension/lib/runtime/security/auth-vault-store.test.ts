@@ -127,6 +127,21 @@ mock.module("@/lib/runtime/util", () => ({
     nowValue += 1;
     return nowValue;
   },
+  randomId: (prefix: string) => `${prefix}_test`,
+  mergeRecord: <T extends Record<string, unknown>>(
+    base: T,
+    patch?: Record<string, unknown>,
+  ) => ({ ...base, ...(patch ?? {}) }) as T,
+  isObject: (value: unknown): value is Record<string, unknown> =>
+    !!value && typeof value === "object" && !Array.isArray(value),
+  parseProviderModel: (model: string) => {
+    const [providerID, ...rest] = model.split("/");
+    return {
+      providerID,
+      modelID: rest.join("/"),
+    };
+  },
+  getModelCapabilities: (_modelID: string) => ["text"],
 }));
 
 const { makeAuthVaultStore } = await import("./auth-vault-store");

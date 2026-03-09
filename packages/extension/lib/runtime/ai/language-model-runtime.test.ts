@@ -90,29 +90,19 @@ const doStreamMock = mock(async () => {
   });
 });
 
-const pluginManager = {
-  loadAuthOptions: mock(async () => ({
-    requestOptions: {},
-    transport: {},
+const adapter = {
+  auth: {
+    load: mock(async () => ({
+      transport: {},
+    })),
+  },
+  createModel: mock(async () => ({
+    provider: "openai",
+    modelId: "gpt-4o-mini",
+    specificationVersion: "v3",
+    doGenerate: doGenerateMock,
+    doStream: doStreamMock,
   })),
-  applyAdapterState: mock(async (_ctx: unknown, state: any) => ({
-    ...state,
-    factory: {
-      npm: "test-factory",
-      factory: () => ({
-        languageModel: () => ({
-          provider: "openai",
-          doGenerate: doGenerateMock,
-          doStream: doStreamMock,
-        }),
-      }),
-    },
-  })),
-  applyAdapterFactoryOptions: mock(async (_ctx: unknown, options: unknown) => options),
-  validateAdapterState: mock(async () => undefined),
-  applyChatParams: mock(async (_ctx: unknown, options: unknown) => options),
-  applyRequestOptions: mock(async (_ctx: unknown, options: unknown) => options),
-  applyChatHeaders: mock(async (_ctx: unknown, headers: unknown) => headers),
 };
 
 mock.module("@/lib/runtime/auth-store", () => ({
@@ -131,8 +121,14 @@ mock.module("@/lib/runtime/provider-registry", () => ({
   refreshProviderCatalogForProvider: mock(async () => undefined),
 }));
 
-mock.module("@/lib/runtime/plugins", () => ({
-  getPluginManager: () => pluginManager,
+mock.module("@/lib/runtime/adapters", () => ({
+  resolveAdapterForModel: () => adapter,
+  createResolvedAdapterSession: async ({ auth, baseTransport }: { auth?: unknown; baseTransport: unknown }) => ({
+    adapter,
+    auth,
+    transport: baseTransport,
+    createModel: adapter.createModel,
+  }),
 }));
 
 const { runLanguageModelGenerate, runLanguageModelStream } = await import(
@@ -147,13 +143,8 @@ beforeEach(() => {
   getModelMock.mockClear();
   doGenerateMock.mockClear();
   doStreamMock.mockClear();
-  pluginManager.loadAuthOptions.mockClear();
-  pluginManager.applyAdapterState.mockClear();
-  pluginManager.applyAdapterFactoryOptions.mockClear();
-  pluginManager.validateAdapterState.mockClear();
-  pluginManager.applyChatParams.mockClear();
-  pluginManager.applyRequestOptions.mockClear();
-  pluginManager.applyChatHeaders.mockClear();
+  adapter.auth.load.mockClear();
+  adapter.createModel.mockClear();
 });
 
 afterAll(() => {

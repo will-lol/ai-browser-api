@@ -52,8 +52,8 @@ export function buildExtensionRedirectPath(
   providerID: string,
   methodID: string,
 ) {
-  const sanitize = (value: string) =>
-    value.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+  const sanitize = (input: string) =>
+    input.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
   return `${sanitize(providerID)}-${sanitize(methodID)}`;
 }
 

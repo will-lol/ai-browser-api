@@ -5,7 +5,7 @@ import {
   type OAuthCallbackRequestDetails,
   type OAuthWebRequestOnBeforeRequest,
   waitForOAuthCallback,
-} from "@/lib/runtime/plugins/oauth-browser-callback-util";
+} from "@/lib/runtime/oauth-browser-callback-util";
 
 type Listener = OAuthCallbackRequestListener;
 

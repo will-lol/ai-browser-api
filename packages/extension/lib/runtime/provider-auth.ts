@@ -1,3 +1,4 @@
+import { browser } from "@wxt-dev/browser";
 import { getAuth, removeAuth, setAuth } from "@/lib/runtime/auth-store";
 import {
   RuntimeValidationError,
@@ -6,14 +7,21 @@ import {
 import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import type { RuntimeAuthFlowInstruction } from "@llm-bridge/contracts";
 import {
+  parseAdapterStoredAuth,
+  resolveAdapterForProvider,
+  serializeAdapterAuthResult,
+} from "@/lib/runtime/adapters";
+import { parseAuthMethodValues, toRuntimeAuthMethod } from "@/lib/runtime/adapters/schema";
+import type {
+  ResolvedAuthMethod,
+  RuntimeAuthMethod,
+} from "@/lib/runtime/adapters/types";
+import {
   wrapAuthPluginError,
   wrapExtensionError,
 } from "@/lib/runtime/errors";
-import type {
-  AuthMethodType,
-  RuntimeAuthMethod,
-} from "@/lib/runtime/plugin-manager";
-import { getPluginManager } from "@/lib/runtime/plugins";
+import { getModelsDevData } from "@/lib/runtime/models-dev";
+import { parseOAuthCallbackUrl } from "@/lib/runtime/oauth-util";
 import { getProvider } from "@/lib/runtime/provider-registry";
 import type { ProviderRuntimeInfo } from "@/lib/runtime/provider-registry";
 
@@ -27,6 +35,27 @@ export type StartProviderAuthResult = {
   methodID: string;
   connected: true;
 };
+
+async function listResolvedAuthMethods(
+  ctx: AuthContextResolved,
+): Promise<ResolvedAuthMethod[]> {
+  const modelsDev = await getModelsDevData();
+  const adapter = resolveAdapterForProvider({
+    providerID: ctx.providerID,
+    source: modelsDev[ctx.providerID],
+  });
+  if (!adapter) return [];
+
+  const definitions = await adapter.auth.methods({
+    ...ctx,
+    auth: parseAdapterStoredAuth(adapter, ctx.auth),
+  });
+  return definitions.map((definition) => ({
+    adapter,
+    definition,
+    method: toRuntimeAuthMethod(definition),
+  }));
+}
 
 async function resolveAuthContext(
   providerID: string,
@@ -51,33 +80,19 @@ async function resolveAuthContext(
 
 async function persistAuth(
   providerID: string,
-  methodType: AuthMethodType,
-  result: AuthResult,
+  input: {
+    adapter: ResolvedAuthMethod["adapter"];
+    definition: ResolvedAuthMethod["definition"];
+    result: AuthResult;
+  },
 ) {
-  if (result.type === "api") {
-    const metadata = {
-      ...(result.metadata ?? {}),
-      ...(methodType === "pat" || methodType === "apikey"
-        ? { authMethod: methodType }
-        : {}),
-    };
-
-    await setAuth(providerID, {
-      type: "api",
-      key: result.key,
-      metadata,
-    });
-    return;
-  }
-
-  await setAuth(providerID, {
-    type: "oauth",
-    access: result.access,
-    refresh: result.refresh,
-    expiresAt: result.expiresAt,
-    accountId: result.accountId,
-    metadata: result.metadata,
+  const serialized = serializeAdapterAuthResult({
+    adapter: input.adapter,
+    method: input.definition,
+    result: input.result,
   });
+
+  await setAuth(providerID, serialized);
 }
 
 export async function listProviderAuthMethods(
@@ -88,14 +103,9 @@ export async function listProviderAuthMethods(
   } = {},
 ): Promise<RuntimeAuthMethod[]> {
   try {
-    const provider = options.provider ?? (await getProvider(providerID));
-    if (!provider) return [];
-    const pluginManager = getPluginManager();
-    return pluginManager.listAuthMethods({
-      providerID,
-      provider,
-      auth: options.auth ?? (await getAuth(providerID)),
-    });
+    const ctx = await resolveAuthContext(providerID, options);
+    const methods = await listResolvedAuthMethods(ctx);
+    return methods.map((item) => item.method);
   } catch (error) {
     if (isRuntimeRpcError(error)) throw error;
     throw wrapAuthPluginError(error, providerID, "auth.methods");
@@ -113,23 +123,66 @@ export async function startProviderAuth(input: {
 }): Promise<StartProviderAuthResult> {
   try {
     const ctx = await resolveAuthContext(input.providerID);
-    const pluginManager = getPluginManager();
-    const resolved = await pluginManager.resolveAuthMethod(ctx, input.methodID);
+    const methods = await listResolvedAuthMethods(ctx);
+    const resolved = methods.find((item) => item.method.id === input.methodID);
     if (!resolved) {
       throw new RuntimeValidationError({
         message: `Auth method ${input.methodID} was not found for provider ${input.providerID}`,
       });
     }
 
-    const result = await pluginManager.authorize(
-      ctx,
-      resolved,
+    const parsedValues = parseAuthMethodValues(
+      resolved.definition,
       input.values ?? {},
-      input.signal,
-      input.onInstruction,
     );
+    const result = await resolved.definition.authorize({
+      ...ctx,
+      auth: parseAdapterStoredAuth(resolved.adapter, ctx.auth),
+      values: parsedValues,
+      signal: input.signal,
+      oauth: {
+        getRedirectURL(path = "oauth") {
+          if (!browser.identity?.getRedirectURL) {
+            throw new Error("Browser OAuth flow is unavailable");
+          }
+          return browser.identity.getRedirectURL(path);
+        },
+        async launchWebAuthFlow(url: string) {
+          if (!browser.identity?.launchWebAuthFlow) {
+            throw new Error("Browser OAuth flow is unavailable");
+          }
 
-    await persistAuth(input.providerID, resolved.method.type, result);
+          const callbackUrl = await browser.identity.launchWebAuthFlow({
+            url,
+            interactive: true,
+          });
+
+          if (!callbackUrl) {
+            throw new Error("OAuth flow did not return a callback URL");
+          }
+
+          return callbackUrl;
+        },
+        parseCallback(url: string) {
+          return parseOAuthCallbackUrl(url);
+        },
+      },
+      authFlow: {
+        async publish(instruction) {
+          if (!input.onInstruction) return;
+          await input.onInstruction(instruction);
+        },
+      },
+      runtime: {
+        now: () => Date.now(),
+      },
+    });
+
+    await persistAuth(input.providerID, {
+      adapter: resolved.adapter,
+      definition: resolved.definition,
+      result,
+    });
 
     return {
       methodID: resolved.method.id,

@@ -1,4 +1,4 @@
-import type { AuthRecord } from "@/lib/runtime/auth-types";
+import { authRecordSchema, type AuthRecord } from "@/lib/runtime/auth-types";
 import type { RuntimeDbAuth } from "@/lib/runtime/db/runtime-db-types";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -16,45 +16,6 @@ import {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const AUTH_VAULT_VERSION = 1 as const;
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isStringRecord(value: unknown): value is Record<string, string> {
-  if (!isObjectRecord(value)) return false;
-  return Object.values(value).every((item) => typeof item === "string");
-}
-
-function isAuthRecord(value: unknown): value is AuthRecord {
-  if (!isObjectRecord(value)) return false;
-  if (
-    typeof value.createdAt !== "number" ||
-    typeof value.updatedAt !== "number"
-  ) {
-    return false;
-  }
-  if (value.metadata != null && !isStringRecord(value.metadata)) {
-    return false;
-  }
-
-  if (value.type === "api") {
-    return typeof value.key === "string";
-  }
-
-  if (value.type === "oauth") {
-    if (typeof value.access !== "string") return false;
-    if (value.refresh != null && typeof value.refresh !== "string")
-      return false;
-    if (value.expiresAt != null && typeof value.expiresAt !== "number")
-      return false;
-    if (value.accountId != null && typeof value.accountId !== "string")
-      return false;
-    return true;
-  }
-
-  return false;
-}
 
 function authAdditionalData(
   providerID: string,
@@ -162,14 +123,15 @@ export function makeSecretVault(
             }),
         });
 
-        if (!isAuthRecord(parsed)) {
+        const authRecordResult = authRecordSchema.safeParse(parsed);
+        if (!authRecordResult.success) {
           return yield* new VaultDecryptError({
             providerID: row.providerID,
             message: `Auth payload for provider ${row.providerID} is invalid.`,
           });
         }
 
-        return parsed;
+        return authRecordResult.data as AuthRecord;
       }),
   };
 }

@@ -1,24 +1,44 @@
 import { browser } from "@wxt-dev/browser";
+import type { LanguageModelV3CallOptions } from "@ai-sdk/provider";
+import { z } from "zod";
 import {
   RuntimeAuthProviderError,
   RuntimeUpstreamServiceError,
   RuntimeValidationError,
 } from "@llm-bridge/contracts";
-import { setAuth } from "@/lib/runtime/auth-store";
-import type { AuthRecord } from "@/lib/runtime/auth-store";
+import { createFactoryLanguageModel } from "./factory-language-model";
+import {
+  ensureMethodIdentity,
+  optionalMetadataString,
+  parseOptionalMetadataObject,
+} from "./auth-legacy";
+import { createApiKeyMethod } from "./generic-factory";
+import { wrapLanguageModel } from "./helpers";
+import {
+  mergeModelHeaders,
+  mergeModelProviderOptions,
+} from "./factory-language-model";
 import type {
-  PluginAuthorizeContext,
-  RuntimePlugin,
-} from "@/lib/runtime/plugin-manager";
+  AIAdapter,
+  AdapterAuthContext,
+  AdapterAuthorizeContext,
+  LoadedAdapterState,
+  ParsedAuthRecord,
+} from "./types";
+import {
+  setAuth,
+  type AuthRecord,
+  type AuthResult,
+} from "@/lib/runtime/auth-store";
+import {
+  waitForOAuthCallback,
+  type OAuthWebRequestOnBeforeRequest,
+} from "@/lib/runtime/oauth-browser-callback-util";
 import {
   generatePKCE,
   generateState,
   sleep,
-} from "@/lib/runtime/plugins/oauth-util";
-import {
-  type OAuthWebRequestOnBeforeRequest,
-  waitForOAuthCallback,
-} from "@/lib/runtime/plugins/oauth-browser-callback-util";
+} from "@/lib/runtime/oauth-util";
 import type {
   ProviderInfo,
   ProviderModelInfo,
@@ -41,6 +61,109 @@ type TokenResponse = {
   expires_in?: number;
 };
 
+type OpenAIAuthMetadata = {
+  accountId?: string;
+};
+
+const openAIAuthMetadataSchema = z.object({
+  accountId: optionalMetadataString,
+});
+
+const tokenResponseSchema = z.object({
+  id_token: z.string().optional(),
+  access_token: z.string(),
+  refresh_token: z.string(),
+  expires_in: z.number().optional(),
+});
+
+const codexDeviceStartSchema = z.object({
+  device_auth_id: z.string(),
+  user_code: z.string(),
+  interval: z.string(),
+});
+
+const codexDevicePollSchema = z.object({
+  authorization_code: z.string(),
+  code_verifier: z.string(),
+});
+
+export function isCodexOAuth(
+  auth?: ParsedAuthRecord<OpenAIAuthMetadata>,
+): auth is Extract<ParsedAuthRecord<OpenAIAuthMetadata>, { type: "oauth" }> {
+  return auth?.type === "oauth" && auth.methodType === "oauth";
+}
+
+function normalizeOpenAIAuthMetadata(
+  auth?: AuthRecord,
+): OpenAIAuthMetadata | undefined {
+  return parseOptionalMetadataObject(openAIAuthMetadataSchema, auth?.metadata);
+}
+
+function parseOpenAIStoredAuth(
+  auth?: AuthRecord,
+): ParsedAuthRecord<OpenAIAuthMetadata> | undefined {
+  if (!auth) return undefined;
+  if (auth.type === "api") {
+    return ensureMethodIdentity({
+      auth,
+      defaultMethodID: "apikey",
+      defaultMethodType: "apikey",
+      metadata: undefined,
+    });
+  }
+
+  return ensureMethodIdentity({
+    auth,
+    defaultMethodID: "oauth-device",
+    defaultMethodType: "oauth",
+    metadata: normalizeOpenAIAuthMetadata(auth),
+  });
+}
+
+function serializeOpenAIAuth(input: {
+  result: AuthResult<OpenAIAuthMetadata>;
+  method: {
+    id: string;
+    type: "oauth" | "pat" | "apikey";
+  };
+}) {
+  if (input.result.type === "api") {
+    return {
+      ...input.result,
+      methodID: input.result.methodID ?? input.method.id,
+      methodType: input.result.methodType ?? input.method.type,
+      metadata: undefined,
+    };
+  }
+
+  const accountId =
+    input.result.accountId ?? input.result.metadata?.accountId;
+
+  return {
+    ...input.result,
+    methodID: input.result.methodID ?? input.method.id,
+    methodType: input.result.methodType ?? input.method.type,
+    metadata: parseOptionalMetadataObject(openAIAuthMetadataSchema, {
+      accountId,
+    }),
+  };
+}
+
+async function parseOpenAIJson<TSchema extends z.ZodTypeAny>(input: {
+  response: Response;
+  schema: TSchema;
+  operation: string;
+}): Promise<z.output<TSchema>> {
+  const payload = await input.response.json().catch(() => undefined);
+  const result = input.schema.safeParse(payload);
+  if (result.success) return result.data;
+
+  throw codexAuthProviderError({
+    operation: input.operation,
+    message: "OpenAI authentication response was invalid.",
+  });
+}
+
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
     throw new RuntimeAuthProviderError({
@@ -57,7 +180,7 @@ function codexUpstreamError(input: {
   statusCode: number;
   detail?: string;
 }) {
-  console.error("[builtin-codex-auth] upstream auth request failed", {
+  console.error("[adapter:openai] upstream auth request failed", {
     operation: input.operation,
     statusCode: input.statusCode,
     detail: input.detail?.slice(0, 500),
@@ -103,7 +226,7 @@ function decodeJwtPayload(token: string) {
 
 function extractAccountId(tokens: TokenResponse) {
   const candidates = [tokens.id_token, tokens.access_token].filter(
-    (token): token is string => !!token,
+    (token): token is string => Boolean(token),
   );
   for (const token of candidates) {
     const claims = decodeJwtPayload(token);
@@ -132,6 +255,7 @@ function extractAccountId(tokens: TokenResponse) {
       }
     }
   }
+
   return undefined;
 }
 
@@ -194,7 +318,7 @@ async function waitForCodexOAuthCallback(
   onBeforeRequest: OAuthWebRequestOnBeforeRequest | undefined = browser
     ?.webRequest?.onBeforeRequest,
 ) {
-  return await waitForOAuthCallback({
+  return waitForOAuthCallback({
     signal,
     onBeforeRequest,
     urlPattern: CODEX_REDIRECT_URL_PATTERN,
@@ -237,7 +361,11 @@ async function exchangeCodeForTokens(
     });
   }
 
-  return (await response.json()) as TokenResponse;
+  return parseOpenAIJson({
+    response,
+    schema: tokenResponseSchema,
+    operation: "oauth.exchangeCodeForTokens.parse",
+  });
 }
 
 async function refreshAccessToken(refreshToken: string) {
@@ -262,10 +390,14 @@ async function refreshAccessToken(refreshToken: string) {
     });
   }
 
-  return (await response.json()) as TokenResponse;
+  return parseOpenAIJson({
+    response,
+    schema: tokenResponseSchema,
+    operation: "oauth.refreshAccessToken.parse",
+  });
 }
 
-async function authorizeBrowser(input: PluginAuthorizeContext) {
+async function authorizeBrowser(input: AdapterAuthorizeContext) {
   throwIfAborted(input.signal);
   const pkce = await generatePKCE();
   const state = generateState();
@@ -308,7 +440,6 @@ async function authorizeBrowser(input: PluginAuthorizeContext) {
   }
 
   const parsed = input.oauth.parseCallback(callbackUrl);
-
   if (parsed.error) {
     throw codexAuthProviderError({
       operation: "oauth.authorizeBrowser",
@@ -339,14 +470,11 @@ async function authorizeBrowser(input: PluginAuthorizeContext) {
     refresh: tokens.refresh_token,
     expiresAt: input.runtime.now() + (tokens.expires_in ?? 3600) * 1000,
     accountId,
-    metadata: {
-      authMode: "codex_oauth",
-      ...(accountId ? { accountId } : {}),
-    },
+    metadata: accountId ? { accountId } : undefined,
   };
 }
 
-async function authorizeDevice(input: PluginAuthorizeContext) {
+async function authorizeDevice(input: AdapterAuthorizeContext) {
   const response = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
     method: "POST",
     headers: {
@@ -367,11 +495,11 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
     });
   }
 
-  const data = (await response.json()) as {
-    device_auth_id: string;
-    user_code: string;
-    interval: string;
-  };
+  const data = await parseOpenAIJson({
+    response,
+    schema: codexDeviceStartSchema,
+    operation: "oauth.authorizeDevice.start.parse",
+  });
 
   const verificationUrl = `${ISSUER}/codex/device`;
   let autoOpened = false;
@@ -395,11 +523,10 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
   );
 
   const intervalMs = Math.max(parseInt(data.interval, 10) || 5, 1) * 1000;
-  const signal = input.signal;
   const deadline = Date.now() + 5 * 60_000;
 
   while (Date.now() < deadline) {
-    throwIfAborted(signal);
+    throwIfAborted(input.signal);
     const tokenPollResponse = await fetch(
       `${ISSUER}/api/accounts/deviceauth/token`,
       {
@@ -416,10 +543,11 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
     );
 
     if (tokenPollResponse.ok) {
-      const payload = (await tokenPollResponse.json()) as {
-        authorization_code: string;
-        code_verifier: string;
-      };
+      const payload = await parseOpenAIJson({
+        response: tokenPollResponse,
+        schema: codexDevicePollSchema,
+        operation: "oauth.authorizeDevice.poll.parse",
+      });
 
       const tokenResponse = await fetch(`${ISSUER}/oauth/token`, {
         method: "POST",
@@ -444,7 +572,11 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
         });
       }
 
-      const tokens = (await tokenResponse.json()) as TokenResponse;
+      const tokens = await parseOpenAIJson({
+        response: tokenResponse,
+        schema: tokenResponseSchema,
+        operation: "oauth.authorizeDevice.exchangeToken.parse",
+      });
       const accountId = extractAccountId(tokens);
       return {
         type: "oauth" as const,
@@ -452,10 +584,7 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
         refresh: tokens.refresh_token,
         expiresAt: input.runtime.now() + (tokens.expires_in ?? 3600) * 1000,
         accountId,
-        metadata: {
-          authMode: "codex_oauth",
-          ...(accountId ? { accountId } : {}),
-        },
+        metadata: accountId ? { accountId } : undefined,
       };
     }
 
@@ -469,7 +598,7 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
     }
 
     await sleep(intervalMs + OAUTH_POLLING_SAFETY_MARGIN_MS);
-    throwIfAborted(signal);
+    throwIfAborted(input.signal);
   }
 
   throw codexAuthProviderError({
@@ -477,6 +606,19 @@ async function authorizeDevice(input: PluginAuthorizeContext) {
     message: "Codex device authorization timed out.",
     retryable: true,
   });
+}
+
+export function buildCodexChatHeaders(
+  headers: Record<string, string>,
+  sessionID: string,
+) {
+  return {
+    ...headers,
+    originator: "codex_cli_rs",
+    "OpenAI-Beta": "responses=experimental",
+    session_id: sessionID,
+    "User-Agent": "llm-bridge",
+  };
 }
 
 function buildCodexOAuthProvider(provider: ProviderInfo) {
@@ -568,124 +710,141 @@ function buildCodexOAuthProvider(provider: ProviderInfo) {
   };
 }
 
-function isCodexOAuth(
-  auth?: AuthRecord,
-): auth is Extract<AuthRecord, { type: "oauth" }> {
-  return auth?.type === "oauth" && auth.metadata?.authMode === "codex_oauth";
-}
+export async function loadCodexOAuthState(
+  ctx: AdapterAuthContext<OpenAIAuthMetadata>,
+): Promise<LoadedAdapterState<void>> {
+  if (!isCodexOAuth(ctx.auth)) {
+    return {
+      transport: {},
+      state: undefined,
+    };
+  }
 
-function buildCodexChatHeaders(
-  headers: Record<string, string>,
-  sessionID: string,
-): Record<string, string> {
+  let access = ctx.auth.access;
+  let refresh = ctx.auth.refresh;
+  let expiresAt = ctx.auth.expiresAt;
+  let effectiveAccountId = ctx.auth.accountId ?? ctx.auth.metadata?.accountId;
+
+  if (refresh && (!expiresAt || expiresAt <= Date.now() + 60_000)) {
+    const refreshed = await refreshAccessToken(refresh);
+    effectiveAccountId = extractAccountId(refreshed) ?? effectiveAccountId;
+    access = refreshed.access_token;
+    refresh = refreshed.refresh_token;
+    expiresAt = Date.now() + (refreshed.expires_in ?? 3600) * 1000;
+
+    await setAuth(ctx.providerID, {
+      type: "oauth",
+      access,
+      refresh,
+      expiresAt,
+      accountId: effectiveAccountId,
+      methodID: ctx.auth.methodID,
+      methodType: ctx.auth.methodType,
+      metadata: effectiveAccountId ? { accountId: effectiveAccountId } : undefined,
+    });
+  }
+
+  if (!effectiveAccountId) {
+    console.warn(
+      "[adapter:openai] oauth accountId is missing; Codex requests may fail until token claims include chatgpt_account_id.",
+    );
+  }
+
   return {
-    ...headers,
-    originator: "codex_cli_rs",
-    "OpenAI-Beta": "responses=experimental",
-    session_id: sessionID,
-    "User-Agent": "llm-bridge",
+    transport: {
+      baseURL: CODEX_API_BASE,
+      apiKey: access,
+      authType: "bearer",
+      headers: {
+        ...(effectiveAccountId
+          ? { "chatgpt-account-id": effectiveAccountId }
+          : {}),
+      },
+    },
+    state: undefined,
   };
 }
 
-export const codexAuthPlugin: RuntimePlugin = {
-  id: "builtin-codex-auth",
-  name: "Builtin Codex Auth",
-  supportedProviders: ["openai"],
-  hooks: {
-    auth: {
-      provider: "openai",
-      async methods() {
-        return [
-          {
-            id: "oauth-browser",
-            type: "oauth",
-            label: "ChatGPT Pro/Plus (browser)",
-            authorize: authorizeBrowser,
-          },
-          {
-            id: "oauth-device",
-            type: "oauth",
-            label: "ChatGPT Pro/Plus (headless)",
-            authorize: authorizeDevice,
-          },
-        ];
-      },
-      async loader(auth, _provider, ctx) {
-        if (!isCodexOAuth(auth)) return {};
+function wrapCodexCallOptions(
+  options: LanguageModelV3CallOptions,
+  sessionID: string,
+) {
+  const withProviderOptions = mergeModelProviderOptions(options, "openai", {
+    store: false,
+    instructions: CODEX_DEFAULT_INSTRUCTIONS,
+  });
 
-        let access = auth.access;
-        let refresh = auth.refresh;
-        let expiresAt = auth.expiresAt;
-        let effectiveAccountId = auth.accountId ?? auth.metadata?.accountId;
+  return mergeModelHeaders(
+    withProviderOptions,
+    buildCodexChatHeaders(
+      (withProviderOptions.headers as Record<string, string> | undefined) ?? {},
+      sessionID,
+    ),
+  );
+}
 
-        if (refresh && (!expiresAt || expiresAt <= Date.now() + 60_000)) {
-          const refreshed = await refreshAccessToken(refresh);
-          effectiveAccountId =
-            extractAccountId(refreshed) ?? effectiveAccountId;
-          access = refreshed.access_token;
-          refresh = refreshed.refresh_token;
-          expiresAt = Date.now() + (refreshed.expires_in ?? 3600) * 1000;
+export const openaiAdapter: AIAdapter<OpenAIAuthMetadata, void> = {
+  key: "provider:openai",
+  displayName: "OpenAI",
+  match: {
+    providerIDs: ["openai"],
+  },
+  auth: {
+    parseStoredAuth: parseOpenAIStoredAuth,
+    serializeAuth: serializeOpenAIAuth,
+    async methods(ctx) {
+      return [
+        createApiKeyMethod(ctx),
+        {
+          id: "oauth-browser",
+          type: "oauth",
+          label: "ChatGPT Pro/Plus (browser)",
+          authorize: authorizeBrowser,
+        },
+        {
+          id: "oauth-device",
+          type: "oauth",
+          label: "ChatGPT Pro/Plus (headless)",
+          authorize: authorizeDevice,
+        },
+      ];
+    },
+    async load(ctx) {
+      if (!ctx.auth) {
+        return {
+          transport: {},
+          state: undefined,
+        };
+      }
 
-          await setAuth(ctx.providerID, {
-            type: "oauth",
-            access,
-            refresh,
-            expiresAt,
-            accountId: effectiveAccountId,
-            metadata: {
-              ...(auth.metadata ?? {}),
-              authMode: "codex_oauth",
-              ...(effectiveAccountId ? { accountId: effectiveAccountId } : {}),
-            },
-          });
-        }
-
-        if (!effectiveAccountId) {
-          console.warn(
-            "[builtin-codex-auth] oauth accountId is missing; Codex requests may fail until token claims include chatgpt_account_id.",
-          );
-        }
-
+      if (ctx.auth.type === "api") {
         return {
           transport: {
-            baseURL: CODEX_API_BASE,
-            apiKey: access,
-            authType: "bearer",
-            headers: {
-              ...(effectiveAccountId
-                ? { "chatgpt-account-id": effectiveAccountId }
-                : {}),
-            },
+            apiKey: ctx.auth.key,
           },
+          state: undefined,
         };
-      },
+      }
+      return loadCodexOAuthState(ctx);
     },
-    provider: {
-      async patchProvider(ctx, provider) {
-        if (!isCodexOAuth(ctx.auth)) return undefined;
-        return buildCodexOAuthProvider(provider);
-      },
-      async requestOptions(ctx, _options) {
-        if (ctx.providerID !== "openai" || !isCodexOAuth(ctx.auth))
-          return undefined;
-        return {
-          strategy: "merge",
-          value: {
-            store: false,
-            instructions: CODEX_DEFAULT_INSTRUCTIONS,
-          },
-        };
-      },
-    },
-    chat: {
-      async headers(ctx, headers) {
-        if (ctx.providerID !== "openai" || !isCodexOAuth(ctx.auth))
-          return undefined;
-        return {
-          strategy: "merge",
-          value: buildCodexChatHeaders(headers, ctx.sessionID),
-        };
-      },
-    },
+  },
+  async patchCatalog(ctx, provider) {
+    if (!isCodexOAuth(ctx.auth)) return provider;
+    return buildCodexOAuthProvider(provider);
+  },
+  async createModel({ context, transport }) {
+    const baseModel = await createFactoryLanguageModel({
+      provider: context.provider,
+      model: context.model,
+      transport,
+    });
+
+    if (!isCodexOAuth(context.auth)) {
+      return baseModel;
+    }
+
+    return wrapLanguageModel(baseModel, async (options) =>
+      wrapCodexCallOptions(options, context.sessionID),
+    );
   },
 };
