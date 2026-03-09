@@ -31,11 +31,15 @@ export type { RegisteredAdapter, ResolvedAdapterSession } from "./types";
 function registerAdapter<
   TPersistedAuthMeta extends ParsedAuthRecord["metadata"],
   TRuntimeState,
->(adapter: AIAdapter<TPersistedAuthMeta, TRuntimeState>): RegisteredAdapter {
+  TProviderOptions extends Record<string, unknown>,
+>(
+  adapter: AIAdapter<TPersistedAuthMeta, TRuntimeState, TProviderOptions>,
+): RegisteredAdapter {
   return {
     key: adapter.key,
     displayName: adapter.displayName,
     match: adapter.match,
+    parseProviderOptions: (provider) => adapter.parseProviderOptions(provider),
     auth: {
       methods: (ctx) =>
         adapter.auth.methods(ctx as AdapterAuthContext<TPersistedAuthMeta>),
@@ -50,9 +54,10 @@ function registerAdapter<
             adapter.auth.load?.(ctx as AdapterAuthContext<TPersistedAuthMeta>)
         : undefined,
     },
-    createModel: ({ context, transport, state }) =>
+    createModel: ({ context, providerOptions, transport, state }) =>
       adapter.createModel({
         context: context as RuntimeAdapterContext<TPersistedAuthMeta>,
+        providerOptions: providerOptions as TProviderOptions,
         transport,
         state: state as TRuntimeState,
       }),
@@ -157,6 +162,7 @@ export function serializeAdapterAuthResult(input: {
 function createOpaqueModelFactory(input: {
   adapter: RegisteredAdapter;
   parsedAuth?: ParsedAuthRecord;
+  providerOptions: Record<string, unknown>;
   transport: RuntimeTransportConfig;
   state: unknown;
 }) {
@@ -166,6 +172,7 @@ function createOpaqueModelFactory(input: {
         ...context,
         auth: input.parsedAuth,
       },
+      providerOptions: input.providerOptions,
       transport: input.transport,
       state: input.state,
     });
@@ -179,6 +186,7 @@ export async function createResolvedAdapterSession(input: {
   baseTransport: RuntimeTransportConfig;
 }): Promise<ResolvedAdapterSession> {
   const parsedAuth = parseAdapterStoredAuth(input.adapter, input.auth);
+  const providerOptions = input.adapter.parseProviderOptions(input.provider);
   const loaded = await input.adapter.auth.load?.({
     providerID: input.providerID,
     provider: input.provider,
@@ -195,6 +203,7 @@ export async function createResolvedAdapterSession(input: {
     createModel: createOpaqueModelFactory({
       adapter: input.adapter,
       parsedAuth,
+      providerOptions,
       transport,
       state,
     }),

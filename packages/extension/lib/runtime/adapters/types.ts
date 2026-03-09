@@ -156,6 +156,7 @@ export interface ResolvedAuthMethod {
 export interface AIAdapter<
   TPersistedAuthMeta extends JsonObject | undefined = JsonObject | undefined,
   TRuntimeState = void,
+  TProviderOptions extends Record<string, unknown> = Record<string, unknown>,
 > {
   key: string;
   displayName: string;
@@ -163,6 +164,7 @@ export interface AIAdapter<
     npm?: string;
     providerIDs?: readonly string[];
   };
+  parseProviderOptions: (provider: ProviderRuntimeInfo) => TProviderOptions;
   auth: {
     methods: (
       ctx: AdapterAuthContext<TPersistedAuthMeta>,
@@ -185,6 +187,7 @@ export interface AIAdapter<
   };
   createModel: (input: {
     context: RuntimeAdapterContext<TPersistedAuthMeta>;
+    providerOptions: TProviderOptions;
     transport: RuntimeTransportConfig;
     state: TRuntimeState;
   }) => Promise<LanguageModelV3>;
@@ -201,6 +204,9 @@ export type RegisteredAdapter = {
     readonly npm?: string;
     readonly providerIDs?: readonly string[];
   };
+  readonly parseProviderOptions: (
+    provider: ProviderRuntimeInfo,
+  ) => Record<string, unknown>;
   readonly auth: {
     methods: (
       ctx: AdapterAuthContext,
@@ -216,6 +222,7 @@ export type RegisteredAdapter = {
   };
   readonly createModel: (input: {
     context: RuntimeAdapterContext;
+    providerOptions: Record<string, unknown>;
     transport: RuntimeTransportConfig;
     state: unknown;
   }) => Promise<LanguageModelV3>;

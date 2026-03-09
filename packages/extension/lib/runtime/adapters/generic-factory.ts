@@ -16,6 +16,13 @@ import { createTogetherAI } from "@ai-sdk/togetherai";
 import { createVercel } from "@ai-sdk/vercel";
 import { createXai } from "@ai-sdk/xai";
 import { z } from "zod";
+import {
+  optionalBooleanSchema,
+  optionalNumberSchema,
+  optionalStringRecordSchema,
+  optionalTrimmedStringSchema,
+  parseProviderOptions,
+} from "./provider-options";
 import { defineAuthSchema } from "./schema";
 import type {
   AIAdapter,
@@ -24,17 +31,57 @@ import type {
   ParsedAuthRecord,
   RuntimeTransportConfig,
 } from "./types";
-import type {
-  AuthRecord,
-  AuthResult,
-} from "@/lib/runtime/auth-store";
+import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import type {
   ProviderModelInfo,
   ProviderRuntimeInfo,
 } from "@/lib/runtime/provider-registry";
 
-type AdapterModelContext = {
+const baseProviderOptionsSchema = z.object({
+  baseURL: optionalTrimmedStringSchema,
+  name: optionalTrimmedStringSchema,
+});
+
+const openAICompatibleProviderOptionsSchema = baseProviderOptionsSchema.extend({
+  queryParams: optionalStringRecordSchema,
+  includeUsage: optionalBooleanSchema,
+  supportsStructuredOutputs: optionalBooleanSchema,
+});
+
+const openAIProviderOptionsSchema = baseProviderOptionsSchema.extend({
+  organization: optionalTrimmedStringSchema,
+  project: optionalTrimmedStringSchema,
+});
+
+const azureProviderOptionsSchema = baseProviderOptionsSchema.extend({
+  apiVersion: optionalTrimmedStringSchema,
+  resourceName: optionalTrimmedStringSchema,
+  useDeploymentBasedUrls: optionalBooleanSchema,
+});
+
+const bedrockProviderOptionsSchema = baseProviderOptionsSchema.extend({
+  region: optionalTrimmedStringSchema,
+  accessKeyId: optionalTrimmedStringSchema,
+  secretAccessKey: optionalTrimmedStringSchema,
+  sessionToken: optionalTrimmedStringSchema,
+});
+
+const gatewayProviderOptionsSchema = baseProviderOptionsSchema.extend({
+  metadataCacheRefreshMillis: optionalNumberSchema,
+});
+
+type BaseProviderOptions = z.output<typeof baseProviderOptionsSchema>;
+type OpenAICompatibleProviderOptions = z.output<
+  typeof openAICompatibleProviderOptionsSchema
+>;
+type OpenAIProviderOptions = z.output<typeof openAIProviderOptionsSchema>;
+type AzureProviderOptions = z.output<typeof azureProviderOptionsSchema>;
+type BedrockProviderOptions = z.output<typeof bedrockProviderOptionsSchema>;
+type GatewayProviderOptions = z.output<typeof gatewayProviderOptionsSchema>;
+
+type AdapterModelContext<TProviderOptions extends Record<string, unknown>> = {
   provider: ProviderRuntimeInfo;
+  providerOptions: TProviderOptions;
   model: ProviderModelInfo;
   transport: RuntimeTransportConfig;
 };
@@ -43,39 +90,20 @@ function apiKeyLabel(ctx: AdapterAuthContext) {
   return ctx.provider.env[0] ?? `${ctx.providerID.toUpperCase()}_API_KEY`;
 }
 
-function readString(value: unknown) {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function readBoolean(value: unknown) {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function readStringRecord(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-
-  const output: Record<string, string> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry !== "string") continue;
-    output[key] = entry;
-  }
-
-  return Object.keys(output).length > 0 ? output : undefined;
-}
-
-function resolveBaseURL(input: AdapterModelContext, options?: {
-  fallbackToModelURL?: boolean;
-}) {
+function resolveBaseURL(
+  input: AdapterModelContext<BaseProviderOptions>,
+  options?: {
+    fallbackToModelURL?: boolean;
+  },
+) {
   return (
-    readString(input.transport.baseURL) ??
-    readString(input.provider.options.baseURL) ??
-    (options?.fallbackToModelURL ? readString(input.model.api.url) : undefined)
+    input.transport.baseURL ??
+    input.providerOptions.baseURL ??
+    (options?.fallbackToModelURL ? input.model.api.url : undefined)
   );
 }
 
-function mergeHeaders(input: AdapterModelContext) {
+function mergeHeaders(input: AdapterModelContext<Record<string, unknown>>) {
   return {
     ...input.model.headers,
     ...input.transport.headers,
@@ -83,117 +111,114 @@ function mergeHeaders(input: AdapterModelContext) {
 }
 
 function buildOpenAICompatibleSettings(
-  input: AdapterModelContext,
+  input: AdapterModelContext<OpenAICompatibleProviderOptions>,
 ): Parameters<typeof createOpenAICompatible>[0] {
   return {
     baseURL:
-      resolveBaseURL(input, { fallbackToModelURL: true }) ?? input.model.api.url,
-    name: readString(input.provider.options.name) ?? input.provider.id,
-    apiKey: readString(input.transport.apiKey),
+      resolveBaseURL(input, { fallbackToModelURL: true }) ??
+      input.model.api.url,
+    name: input.providerOptions.name ?? input.provider.id,
+    apiKey: input.transport.apiKey,
     headers: mergeHeaders(input),
-    queryParams: readStringRecord(input.provider.options.queryParams),
+    queryParams: input.providerOptions.queryParams,
     fetch: input.transport.fetch,
-    includeUsage: readBoolean(input.provider.options.includeUsage),
-    supportsStructuredOutputs: readBoolean(
-      input.provider.options.supportsStructuredOutputs,
-    ),
+    includeUsage: input.providerOptions.includeUsage,
+    supportsStructuredOutputs: input.providerOptions.supportsStructuredOutputs,
   };
 }
 
 function buildOpenAISettings(
-  input: AdapterModelContext,
+  input: AdapterModelContext<OpenAIProviderOptions>,
 ): Parameters<typeof createOpenAI>[0] {
   return {
     baseURL: resolveBaseURL(input),
-    apiKey: readString(input.transport.apiKey),
+    apiKey: input.transport.apiKey,
     headers: mergeHeaders(input),
-    name: readString(input.provider.options.name) ?? input.provider.id,
-    organization: readString(input.provider.options.organization),
-    project: readString(input.provider.options.project),
+    name: input.providerOptions.name ?? input.provider.id,
+    organization: input.providerOptions.organization,
+    project: input.providerOptions.project,
     fetch: input.transport.fetch,
   };
 }
 
 function buildAnthropicSettings(
-  input: AdapterModelContext,
+  input: AdapterModelContext<BaseProviderOptions>,
 ): Parameters<typeof createAnthropic>[0] {
   return {
     baseURL: resolveBaseURL(input),
-    apiKey: readString(input.transport.apiKey),
+    apiKey: input.transport.apiKey,
     headers: mergeHeaders(input),
-    name: readString(input.provider.options.name) ?? input.provider.id,
+    name: input.providerOptions.name ?? input.provider.id,
     fetch: input.transport.fetch,
   };
 }
 
 function buildGoogleSettings(
-  input: AdapterModelContext,
+  input: AdapterModelContext<BaseProviderOptions>,
 ): Parameters<typeof createGoogleGenerativeAI>[0] {
   return {
     baseURL: resolveBaseURL(input),
-    apiKey: readString(input.transport.apiKey),
+    apiKey: input.transport.apiKey,
     headers: mergeHeaders(input),
-    name: readString(input.provider.options.name) ?? input.provider.id,
+    name: input.providerOptions.name ?? input.provider.id,
     fetch: input.transport.fetch,
   };
 }
 
 function buildAzureSettings(
-  input: AdapterModelContext,
+  input: AdapterModelContext<AzureProviderOptions>,
 ): Parameters<typeof createAzure>[0] {
   return {
     baseURL: resolveBaseURL(input),
-    apiKey: readString(input.transport.apiKey),
+    apiKey: input.transport.apiKey,
     headers: mergeHeaders(input),
     fetch: input.transport.fetch,
-    apiVersion: readString(input.provider.options.apiVersion),
-    resourceName: readString(input.provider.options.resourceName),
-    useDeploymentBasedUrls: readBoolean(
-      input.provider.options.useDeploymentBasedUrls,
-    ),
+    apiVersion: input.providerOptions.apiVersion,
+    resourceName: input.providerOptions.resourceName,
+    useDeploymentBasedUrls: input.providerOptions.useDeploymentBasedUrls,
   };
 }
 
-function buildApiKeySettings(input: AdapterModelContext) {
+function buildApiKeySettings(
+  input: AdapterModelContext<BaseProviderOptions>,
+) {
   return {
     baseURL: resolveBaseURL(input),
-    apiKey: readString(input.transport.apiKey),
+    apiKey: input.transport.apiKey,
     headers: mergeHeaders(input),
     fetch: input.transport.fetch,
   };
 }
 
 function buildBedrockSettings(
-  input: AdapterModelContext,
+  input: AdapterModelContext<BedrockProviderOptions>,
 ): Parameters<typeof createAmazonBedrock>[0] {
   return {
     ...buildApiKeySettings(input),
-    region: readString(input.provider.options.region),
-    accessKeyId: readString(input.provider.options.accessKeyId),
-    secretAccessKey: readString(input.provider.options.secretAccessKey),
-    sessionToken: readString(input.provider.options.sessionToken),
+    region: input.providerOptions.region,
+    accessKeyId: input.providerOptions.accessKeyId,
+    secretAccessKey: input.providerOptions.secretAccessKey,
+    sessionToken: input.providerOptions.sessionToken,
   };
 }
 
 function buildGatewaySettings(
-  input: AdapterModelContext,
+  input: AdapterModelContext<GatewayProviderOptions>,
 ): Parameters<typeof createGateway>[0] {
   return {
     ...buildApiKeySettings(input),
-    metadataCacheRefreshMillis:
-      typeof input.provider.options.metadataCacheRefreshMillis === "number"
-        ? input.provider.options.metadataCacheRefreshMillis
-        : undefined,
+    metadataCacheRefreshMillis: input.providerOptions.metadataCacheRefreshMillis,
   };
 }
 
-type DirectFactoryAdapterInput = {
+type DirectFactoryAdapterInput<TProviderOptions extends Record<string, unknown>> = {
   key: string;
   displayName: string;
   npm: string;
   browserSupported?: boolean;
+  parseProviderOptions: (provider: ProviderRuntimeInfo) => TProviderOptions;
   createLanguageModel?: (
-    input: AdapterModelContext,
+    input: AdapterModelContext<TProviderOptions>,
   ) => LanguageModelV3 | Promise<LanguageModelV3>;
 };
 
@@ -230,30 +255,38 @@ export function createApiKeyMethod(
 
 function parseGenericStoredAuth(
   auth?: AuthRecord,
-): ParsedAuthRecord | undefined {
+): ParsedAuthRecord<undefined> | undefined {
   if (!auth) return undefined;
   if (auth.type !== "api") return undefined;
-  return auth;
+  return {
+    ...auth,
+    metadata: undefined,
+  };
 }
 
 function serializeGenericAuth(input: {
-  result: AuthResult;
+  result: AuthResult<undefined>;
   method: Pick<AuthMethodDefinition, "id" | "type">;
 }) {
   return input.result;
 }
 
 function createUnsupportedModelError(npm: string) {
-  return new Error(`Provider SDK package is not supported in browser runtime: ${npm}`);
+  return new Error(
+    `Provider SDK package is not supported in browser runtime: ${npm}`,
+  );
 }
 
-function createDirectFactoryAdapter(input: DirectFactoryAdapterInput) {
-  const adapter: AIAdapter = {
+function createDirectFactoryAdapter<TProviderOptions extends Record<string, unknown>>(
+  input: DirectFactoryAdapterInput<TProviderOptions>,
+) {
+  const adapter: AIAdapter<undefined, void, TProviderOptions> = {
     key: input.key,
     displayName: input.displayName,
     match: {
       npm: input.npm,
     },
+    parseProviderOptions: input.parseProviderOptions,
     auth: {
       methods(ctx) {
         return [createApiKeyMethod(ctx)];
@@ -276,13 +309,14 @@ function createDirectFactoryAdapter(input: DirectFactoryAdapterInput) {
         };
       },
     },
-    async createModel({ context, transport }) {
+    async createModel({ context, providerOptions, transport }) {
       if (input.browserSupported === false || !input.createLanguageModel) {
         throw createUnsupportedModelError(context.model.api.npm);
       }
 
       return input.createLanguageModel({
         provider: context.provider,
+        providerOptions,
         model: context.model,
         transport,
       });
@@ -297,6 +331,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/openai-compatible",
     displayName: "OpenAI Compatible",
     npm: "@ai-sdk/openai-compatible",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(openAICompatibleProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createOpenAICompatible(
         buildOpenAICompatibleSettings(input),
@@ -307,6 +343,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/openai",
     displayName: "OpenAI",
     npm: "@ai-sdk/openai",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(openAIProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createOpenAI(buildOpenAISettings(input)).responses(
         input.model.api.id,
@@ -317,6 +355,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/anthropic",
     displayName: "Anthropic",
     npm: "@ai-sdk/anthropic",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createAnthropic(buildAnthropicSettings(input)).languageModel(
         input.model.api.id,
@@ -327,6 +367,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/google",
     displayName: "Google",
     npm: "@ai-sdk/google",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createGoogleGenerativeAI(buildGoogleSettings(input)).languageModel(
         input.model.api.id,
@@ -337,6 +379,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/azure",
     displayName: "Azure",
     npm: "@ai-sdk/azure",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(azureProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createAzure(buildAzureSettings(input)).responses(
         input.model.api.id,
@@ -347,6 +391,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/amazon-bedrock",
     displayName: "Amazon Bedrock",
     npm: "@ai-sdk/amazon-bedrock",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(bedrockProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createAmazonBedrock(buildBedrockSettings(input)).languageModel(
         input.model.api.id,
@@ -357,6 +403,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/cerebras",
     displayName: "Cerebras",
     npm: "@ai-sdk/cerebras",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createCerebras(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
@@ -367,6 +415,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/cohere",
     displayName: "Cohere",
     npm: "@ai-sdk/cohere",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createCohere(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
@@ -377,6 +427,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/deepinfra",
     displayName: "DeepInfra",
     npm: "@ai-sdk/deepinfra",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createDeepInfra(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
@@ -387,6 +439,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/gateway",
     displayName: "Gateway",
     npm: "@ai-sdk/gateway",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(gatewayProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createGateway(buildGatewaySettings(input)).languageModel(
         input.model.api.id,
@@ -397,6 +451,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/groq",
     displayName: "Groq",
     npm: "@ai-sdk/groq",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createGroq(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
@@ -407,6 +463,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/mistral",
     displayName: "Mistral",
     npm: "@ai-sdk/mistral",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createMistral(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
@@ -417,6 +475,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/perplexity",
     displayName: "Perplexity",
     npm: "@ai-sdk/perplexity",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createPerplexity(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
@@ -427,6 +487,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/togetherai",
     displayName: "Together AI",
     npm: "@ai-sdk/togetherai",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createTogetherAI(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
@@ -437,6 +499,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/vercel",
     displayName: "Vercel",
     npm: "@ai-sdk/vercel",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createVercel(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
@@ -447,6 +511,8 @@ export const genericFactoryAdapters = {
     key: "@ai-sdk/xai",
     displayName: "xAI",
     npm: "@ai-sdk/xai",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     createLanguageModel(input) {
       return createXai(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
@@ -457,18 +523,24 @@ export const genericFactoryAdapters = {
     key: "@openrouter/ai-sdk-provider",
     displayName: "OpenRouter",
     npm: "@openrouter/ai-sdk-provider",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     browserSupported: false,
   }),
   "@ai-sdk/google-vertex": createDirectFactoryAdapter({
     key: "@ai-sdk/google-vertex",
     displayName: "Google Vertex",
     npm: "@ai-sdk/google-vertex",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     browserSupported: false,
   }),
   "@ai-sdk/google-vertex/anthropic": createDirectFactoryAdapter({
     key: "@ai-sdk/google-vertex/anthropic",
     displayName: "Google Vertex Anthropic",
     npm: "@ai-sdk/google-vertex/anthropic",
+    parseProviderOptions: (provider) =>
+      parseProviderOptions(baseProviderOptionsSchema, provider.options),
     browserSupported: false,
   }),
 } as const;

@@ -6,6 +6,10 @@ import {
   parseOptionalMetadataObject,
 } from "./auth-metadata";
 import { wrapLanguageModel } from "./helpers";
+import {
+  optionalTrimmedStringSchema,
+  parseProviderOptions,
+} from "./provider-options";
 import { defineAuthSchema } from "./schema";
 import type {
   AIAdapter,
@@ -31,6 +35,13 @@ const OAUTH_POLLING_SAFETY_MARGIN_MS = 3_000;
 type CopilotAuthMetadata = {
   enterpriseUrl?: string;
 };
+
+const copilotProviderOptionsSchema = z.object({
+  baseURL: optionalTrimmedStringSchema,
+  name: optionalTrimmedStringSchema,
+});
+
+type CopilotProviderOptions = z.output<typeof copilotProviderOptionsSchema>;
 
 const copilotAuthMetadataSchema = z.object({
   enterpriseUrl: optionalMetadataString,
@@ -88,13 +99,9 @@ function getUrls(domain: string) {
   };
 }
 
-function readString(value: unknown) {
-  return typeof value === "string" ? value : undefined;
-}
-
 function buildCopilotSettings(input: {
   providerID: string;
-  providerOptions: Record<string, unknown>;
+  providerOptions: CopilotProviderOptions;
   modelURL: string;
   modelHeaders?: Record<string, string>;
   transport: {
@@ -106,18 +113,16 @@ function buildCopilotSettings(input: {
 }): Parameters<typeof createOpenAICompatible>[0] {
   return {
     baseURL:
-      readString(input.transport.baseURL)?.trim() ||
-      readString(input.providerOptions.baseURL)?.trim() ||
+      input.transport.baseURL ||
+      input.providerOptions.baseURL ||
       input.modelURL,
-    apiKey: readString(input.transport.apiKey)?.trim(),
+    apiKey: input.transport.apiKey,
     headers: {
       ...(input.modelHeaders ?? {}),
       ...(input.transport.headers ?? {}),
     },
     fetch: input.transport.fetch,
-    name:
-      readString(input.providerOptions.name)?.trim() ||
-      input.providerID,
+    name: input.providerOptions.name || input.providerID,
   };
 }
 
@@ -152,7 +157,7 @@ function inspectCopilotRequest(options: Record<string, unknown>) {
   if (messages && messages.length > 0) {
     const last = messages[messages.length - 1];
     if (isObject(last)) {
-      const role = readString(last.role);
+      const role = optionalTrimmedStringSchema.parse(last.role);
       isAgent = role === "assistant" || role === "tool";
     }
 
@@ -170,8 +175,8 @@ function inspectCopilotRequest(options: Record<string, unknown>) {
   if (input && input.length > 0) {
     const lastInput = input[input.length - 1];
     if (isObject(lastInput)) {
-      const role = readString(lastInput.role);
-      const inputType = readString(lastInput.type);
+      const role = optionalTrimmedStringSchema.parse(lastInput.role);
+      const inputType = optionalTrimmedStringSchema.parse(lastInput.type);
       const hasAgentType = Boolean(
         inputType && RESPONSES_API_ALTERNATE_INPUT_TYPES.has(inputType),
       );
@@ -488,12 +493,18 @@ export async function loadCopilotOAuthState(
   };
 }
 
-export const githubCopilotAdapter: AIAdapter<CopilotAuthMetadata, void> = {
+export const githubCopilotAdapter: AIAdapter<
+  CopilotAuthMetadata,
+  void,
+  CopilotProviderOptions
+> = {
   key: "provider:github-copilot",
   displayName: "GitHub Copilot",
   match: {
     providerIDs: ["github-copilot"],
   },
+  parseProviderOptions: (provider) =>
+    parseProviderOptions(copilotProviderOptionsSchema, provider.options),
   auth: {
     parseStoredAuth: parseCopilotStoredAuth,
     serializeAuth: serializeCopilotAuth,
@@ -578,11 +589,11 @@ export const githubCopilotAdapter: AIAdapter<CopilotAuthMetadata, void> = {
       models: Object.fromEntries(models),
     };
   },
-  async createModel({ context, transport }) {
+  async createModel({ context, providerOptions, transport }) {
     const provider = createOpenAICompatible(
       buildCopilotSettings({
         providerID: context.providerID,
-        providerOptions: context.provider.options,
+        providerOptions,
         modelURL: context.model.api.url,
         modelHeaders: context.model.headers,
         transport,

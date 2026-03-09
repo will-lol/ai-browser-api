@@ -11,6 +11,10 @@ import {
   optionalMetadataString,
   parseOptionalMetadataObject,
 } from "./auth-metadata";
+import {
+  optionalTrimmedStringSchema,
+  parseProviderOptions,
+} from "./provider-options";
 import { createApiKeyMethod } from "./generic-factory";
 import { wrapLanguageModel } from "./helpers";
 import {
@@ -64,6 +68,15 @@ type TokenResponse = {
 type OpenAIAuthMetadata = {
   accountId?: string;
 };
+
+const openAIProviderOptionsSchema = z.object({
+  baseURL: optionalTrimmedStringSchema,
+  name: optionalTrimmedStringSchema,
+  organization: optionalTrimmedStringSchema,
+  project: optionalTrimmedStringSchema,
+});
+
+type OpenAIProviderOptions = z.output<typeof openAIProviderOptionsSchema>;
 
 const openAIAuthMetadataSchema = z.object({
   accountId: optionalMetadataString,
@@ -267,13 +280,9 @@ function buildCodexDeviceInstruction(input: {
   };
 }
 
-function readString(value: unknown) {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
 function buildOpenAISettings(input: {
   providerID: string;
-  provider: ProviderRuntimeInfo;
+  providerOptions: OpenAIProviderOptions;
   headers?: Record<string, string>;
   transport: {
     baseURL?: string;
@@ -284,17 +293,17 @@ function buildOpenAISettings(input: {
 }): Parameters<typeof createOpenAI>[0] {
   return {
     baseURL:
-      readString(input.transport.baseURL) ??
-      readString(input.provider.options.baseURL),
-    apiKey: readString(input.transport.apiKey),
+      input.transport.baseURL ??
+      input.providerOptions.baseURL,
+    apiKey: input.transport.apiKey,
     headers: {
       ...(input.headers ?? {}),
       ...(input.transport.headers ?? {}),
     },
     fetch: input.transport.fetch,
-    name: readString(input.provider.options.name) ?? input.providerID,
-    organization: readString(input.provider.options.organization),
-    project: readString(input.provider.options.project),
+    name: input.providerOptions.name ?? input.providerID,
+    organization: input.providerOptions.organization,
+    project: input.providerOptions.project,
   };
 }
 
@@ -810,12 +819,18 @@ function wrapCodexCallOptions(
   );
 }
 
-export const openaiAdapter: AIAdapter<OpenAIAuthMetadata, void> = {
+export const openaiAdapter: AIAdapter<
+  OpenAIAuthMetadata,
+  void,
+  OpenAIProviderOptions
+> = {
   key: "provider:openai",
   displayName: "OpenAI",
   match: {
     providerIDs: ["openai"],
   },
+  parseProviderOptions: (provider) =>
+    parseProviderOptions(openAIProviderOptionsSchema, provider.options),
   auth: {
     parseStoredAuth: parseOpenAIStoredAuth,
     serializeAuth: serializeOpenAIAuth,
@@ -859,11 +874,11 @@ export const openaiAdapter: AIAdapter<OpenAIAuthMetadata, void> = {
     if (!isCodexOAuth(ctx.auth)) return provider;
     return buildCodexOAuthProvider(provider);
   },
-  async createModel({ context, transport }) {
+  async createModel({ context, providerOptions, transport }) {
     const provider = createOpenAI(
       buildOpenAISettings({
         providerID: context.providerID,
-        provider: context.provider,
+        providerOptions,
         headers: context.model.headers,
         transport,
       }),

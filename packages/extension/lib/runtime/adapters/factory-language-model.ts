@@ -1,6 +1,4 @@
-import type {
-  LanguageModelV3CallOptions,
-} from "@ai-sdk/provider";
+import type { LanguageModelV3CallOptions } from "@ai-sdk/provider";
 import { isObject } from "@/lib/runtime/util";
 import type { RuntimeTransportConfig } from "./types";
 
@@ -16,10 +14,6 @@ function toHeaderRecord(value: unknown) {
     headers[key] = item;
   }
   return headers;
-}
-
-function readString(value: unknown) {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 export type SupportedFactoryNpm =
@@ -91,8 +85,8 @@ export function normalizeTransport(
   input: Partial<RuntimeTransportConfig>,
 ): RuntimeTransportConfig {
   return {
-    baseURL: readString(input.baseURL),
-    apiKey: readString(input.apiKey),
+    baseURL: input.baseURL,
+    apiKey: input.apiKey,
     authType: input.authType,
     headers: toHeaderRecord(input.headers),
     fetch: typeof input.fetch === "function" ? input.fetch : undefined,

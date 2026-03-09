@@ -90,10 +90,6 @@ function resolveDefaultToken(auth?: AuthRecord) {
   return auth.type === "api" ? auth.key : auth.access;
 }
 
-function readString(value: unknown) {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
 function toHeaderRecord(value: unknown) {
   if (!isObject(value)) return {};
   const headers: Record<string, string> = {};
@@ -243,7 +239,7 @@ function buildBaseTransport(
 
   return {
     ...normalized,
-    baseURL: normalized.baseURL ?? readString(runtime.model.api.url),
+    baseURL: normalized.baseURL ?? (runtime.model.api.url.trim() || undefined),
     apiKey: normalized.apiKey ?? resolveDefaultToken(runtime.auth),
     headers: {
       ...normalized.headers,

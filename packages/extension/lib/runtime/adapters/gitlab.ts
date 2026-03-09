@@ -3,6 +3,7 @@ import {
   optionalMetadataString,
   parseOptionalMetadataObject,
 } from "./auth-metadata";
+import { parseProviderOptions } from "./provider-options";
 import { defineAuthSchema } from "./schema";
 import type {
   AIAdapter,
@@ -38,6 +39,8 @@ const GITLAB_PROVIDER_ID = "gitlab";
 type GitLabAuthMetadata = {
   instanceUrl?: string;
 };
+
+const gitLabProviderOptionsSchema = z.object({});
 
 const gitLabAuthMetadataSchema = z.object({
   instanceUrl: optionalMetadataString,
@@ -384,6 +387,8 @@ export const gitlabAdapter: AIAdapter<GitLabAuthMetadata, void> = {
   match: {
     providerIDs: ["gitlab"],
   },
+  parseProviderOptions: (provider) =>
+    parseProviderOptions(gitLabProviderOptionsSchema, provider.options),
   auth: {
     parseStoredAuth: parseGitLabStoredAuth,
     serializeAuth: serializeGitLabAuth,

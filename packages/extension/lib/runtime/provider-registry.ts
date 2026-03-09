@@ -68,16 +68,20 @@ export interface ProviderModelInfo {
   variants?: Record<string, Record<string, unknown>>;
 }
 
-export interface ProviderRuntimeInfo {
+export interface ProviderRuntimeInfo<
+  TOptions extends Record<string, unknown> = Record<string, unknown>,
+> {
   id: string;
   name: string;
   source: "models.dev" | "config";
   env: string[];
   connected: boolean;
-  options: Record<string, unknown>;
+  options: TOptions;
 }
 
-export interface ProviderInfo extends ProviderRuntimeInfo {
+export interface ProviderInfo<
+  TOptions extends Record<string, unknown> = Record<string, unknown>,
+> extends ProviderRuntimeInfo<TOptions> {
   models: Record<string, ProviderModelInfo>;
 }
 

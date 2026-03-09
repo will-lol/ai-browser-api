@@ -8,6 +8,10 @@ import {
 import { createGeminiCodeAssistFetch, GEMINI_CODE_ASSIST_HEADERS } from "./gemini-code-assist-transport";
 import { createApiKeyMethod } from "./generic-factory";
 import { wrapLanguageModel } from "./helpers";
+import {
+  optionalTrimmedStringSchema,
+  parseProviderOptions,
+} from "./provider-options";
 import { defineAuthSchema } from "./schema";
 import { mergeModelHeaders } from "./factory-language-model";
 import type {
@@ -24,7 +28,7 @@ import {
 } from "@/lib/runtime/auth-store";
 import { waitForOAuthCallback } from "@/lib/runtime/oauth-browser-callback-util";
 import { generatePKCE, generateState } from "@/lib/runtime/oauth-util";
-import type { ProviderInfo, ProviderRuntimeInfo } from "@/lib/runtime/provider-registry";
+import type { ProviderInfo } from "@/lib/runtime/provider-registry";
 
 const GEMINI_CLIENT_ID =
   "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
@@ -72,6 +76,13 @@ type GoogleAuthMetadata = {
   projectId?: string;
   managedProjectId?: string;
 };
+
+const googleProviderOptionsSchema = z.object({
+  baseURL: optionalTrimmedStringSchema,
+  name: optionalTrimmedStringSchema,
+});
+
+type GoogleProviderOptions = z.output<typeof googleProviderOptionsSchema>;
 
 const googleAuthMetadataSchema = z.object({
   email: optionalMetadataString,
@@ -180,7 +191,7 @@ function readMetadataValue(value: unknown) {
 
 function buildGoogleSettings(input: {
   providerID: string;
-  provider: ProviderRuntimeInfo;
+  providerOptions: GoogleProviderOptions;
   headers?: Record<string, string>;
   transport: {
     baseURL?: string;
@@ -193,7 +204,7 @@ function buildGoogleSettings(input: {
   return {
     baseURL:
       readMetadataValue(input.transport.baseURL) ??
-      readMetadataValue(input.provider.options.baseURL),
+      input.providerOptions.baseURL,
     apiKey:
       readMetadataValue(input.transport.apiKey) ??
       (input.state.kind === "oauth" ? "gemini-oauth-placeholder" : undefined),
@@ -202,7 +213,7 @@ function buildGoogleSettings(input: {
       ...(input.transport.headers ?? {}),
     },
     fetch: input.transport.fetch,
-    name: readMetadataValue(input.provider.options.name) ?? input.providerID,
+    name: input.providerOptions.name ?? input.providerID,
   };
 }
 
@@ -847,12 +858,18 @@ export async function loadGeminiOAuthState(
   };
 }
 
-export const googleAdapter: AIAdapter<GoogleAuthMetadata, GoogleRuntimeState> = {
+export const googleAdapter: AIAdapter<
+  GoogleAuthMetadata,
+  GoogleRuntimeState,
+  GoogleProviderOptions
+> = {
   key: "provider:google",
   displayName: "Google",
   match: {
     providerIDs: ["google"],
   },
+  parseProviderOptions: (provider) =>
+    parseProviderOptions(googleProviderOptionsSchema, provider.options),
   auth: {
     parseStoredAuth: parseGoogleStoredAuth,
     serializeAuth: serializeGoogleAuth,
@@ -925,7 +942,7 @@ export const googleAdapter: AIAdapter<GoogleAuthMetadata, GoogleRuntimeState> = 
       models,
     } satisfies ProviderInfo;
   },
-  async createModel({ context, transport, state }) {
+  async createModel({ context, providerOptions, transport, state }) {
     if (state.kind === "oauth" && state.projectResolutionError) {
       throw new Error(state.projectResolutionError);
     }
@@ -933,7 +950,7 @@ export const googleAdapter: AIAdapter<GoogleAuthMetadata, GoogleRuntimeState> = 
     const provider = createGoogleGenerativeAI(
       buildGoogleSettings({
         providerID: context.providerID,
-        provider: context.provider,
+        providerOptions,
         headers: context.model.headers,
         transport,
         state,

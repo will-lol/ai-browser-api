@@ -249,6 +249,7 @@ describe("googleAdapter.createModel", () => {
       () =>
         googleAdapter.createModel({
           context,
+          providerOptions: {},
           transport: {
             authType: "bearer",
             apiKey: "oauth-access",
