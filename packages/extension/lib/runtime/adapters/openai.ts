@@ -1,12 +1,12 @@
 import { browser } from "@wxt-dev/browser";
 import type { LanguageModelV3CallOptions } from "@ai-sdk/provider";
+import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 import {
   RuntimeAuthProviderError,
   RuntimeUpstreamServiceError,
   RuntimeValidationError,
 } from "@llm-bridge/contracts";
-import { createFactoryLanguageModel } from "./factory-language-model";
 import {
   optionalMetadataString,
   parseOptionalMetadataObject,
@@ -41,6 +41,7 @@ import {
 import type {
   ProviderInfo,
   ProviderModelInfo,
+  ProviderRuntimeInfo,
 } from "@/lib/runtime/provider-registry";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -263,6 +264,37 @@ function buildCodexDeviceInstruction(input: {
     code: input.code,
     url: input.url,
     autoOpened: input.autoOpened,
+  };
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function buildOpenAISettings(input: {
+  providerID: string;
+  provider: ProviderRuntimeInfo;
+  headers?: Record<string, string>;
+  transport: {
+    baseURL?: string;
+    apiKey?: string;
+    headers?: Record<string, string>;
+    fetch?: typeof fetch;
+  };
+}): Parameters<typeof createOpenAI>[0] {
+  return {
+    baseURL:
+      readString(input.transport.baseURL) ??
+      readString(input.provider.options.baseURL),
+    apiKey: readString(input.transport.apiKey),
+    headers: {
+      ...(input.headers ?? {}),
+      ...(input.transport.headers ?? {}),
+    },
+    fetch: input.transport.fetch,
+    name: readString(input.provider.options.name) ?? input.providerID,
+    organization: readString(input.provider.options.organization),
+    project: readString(input.provider.options.project),
   };
 }
 
@@ -828,11 +860,15 @@ export const openaiAdapter: AIAdapter<OpenAIAuthMetadata, void> = {
     return buildCodexOAuthProvider(provider);
   },
   async createModel({ context, transport }) {
-    const baseModel = await createFactoryLanguageModel({
-      provider: context.provider,
-      model: context.model,
-      transport,
-    });
+    const provider = createOpenAI(
+      buildOpenAISettings({
+        providerID: context.providerID,
+        provider: context.provider,
+        headers: context.model.headers,
+        transport,
+      }),
+    );
+    const baseModel = provider.responses(context.model.api.id);
 
     if (!isCodexOAuth(context.auth)) {
       return baseModel;

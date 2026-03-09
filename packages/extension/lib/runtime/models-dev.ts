@@ -1,7 +1,4 @@
 import snapshotData from "@/lib/runtime/models-snapshot.json";
-import { runtimeDb } from "@/lib/runtime/db/runtime-db";
-import { runTx } from "@/lib/runtime/db/runtime-db-tx";
-import { MODELS_DEV_API_URL } from "@/lib/runtime/constants";
 import { isObject } from "@/lib/runtime/util";
 
 export interface ModelsDevModel {
@@ -48,9 +45,6 @@ export interface ModelsDevProvider {
   models: Record<string, ModelsDevModel>;
 }
 
-const MODELS_CACHE_KEY = "modelsCacheData";
-const MODELS_CACHE_UPDATED_AT_KEY = "modelsCacheUpdatedAt";
-
 function normalizeModels(input: unknown): Record<string, ModelsDevModel> {
   if (!isObject(input)) return {};
 
@@ -89,55 +83,6 @@ function normalizeProviders(input: unknown): Record<string, ModelsDevProvider> {
   return out;
 }
 
-export async function getModelsDevUpdatedAt() {
-  const updated = await runtimeDb.meta.get(MODELS_CACHE_UPDATED_AT_KEY);
-  return typeof updated?.value === "number" ? updated.value : 0;
-}
-
 export async function getModelsDevData() {
-  const cached = await runtimeDb.meta.get(MODELS_CACHE_KEY);
-  if (
-    cached?.value &&
-    isObject(cached.value) &&
-    Object.keys(cached.value).length > 0
-  ) {
-    return normalizeProviders(cached.value);
-  }
-
   return normalizeProviders(snapshotData);
-}
-
-async function setModelsDevCache(
-  data: Record<string, ModelsDevProvider>,
-  updatedAt: number,
-) {
-  await runTx([runtimeDb.meta], async () => {
-    await runtimeDb.meta.put({
-      key: MODELS_CACHE_KEY,
-      value: data,
-      updatedAt,
-    });
-
-    await runtimeDb.meta.put({
-      key: MODELS_CACHE_UPDATED_AT_KEY,
-      value: updatedAt,
-      updatedAt,
-    });
-  });
-}
-
-export async function refreshModelsDevData(options?: { url?: string }) {
-  const url = options?.url ?? MODELS_DEV_API_URL;
-
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-    },
-  });
-  if (!response.ok)
-    throw new Error(`Failed to fetch models.dev: ${response.status}`);
-
-  const parsed = normalizeProviders(await response.json());
-  await setModelsDevCache(parsed, Date.now());
-  return parsed;
 }

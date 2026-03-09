@@ -7,14 +7,8 @@ import {
 } from "@llm-bridge/runtime-core";
 import { browser } from "@wxt-dev/browser";
 import { defineBackground } from "wxt/utils/define-background";
-import { MODELS_REFRESH_INTERVAL_MS } from "@/lib/runtime/constants";
-import {
-  getModelsDevUpdatedAt,
-  refreshModelsDevData,
-} from "@/lib/runtime/models-dev";
 import {
   ensureProviderCatalog,
-  refreshProviderCatalog,
 } from "@/lib/runtime/provider-registry";
 import { sanitizePendingPermissionRequests } from "@/lib/runtime/permissions";
 import { runtimeDb } from "@/lib/runtime/db/runtime-db";
@@ -36,7 +30,6 @@ import {
 const BADGE_BG = "#d97706";
 const SOURCE_ICON_PATH = "/icon-32x32.png";
 const ICON_SIZES = [16, 32] as const;
-const MODELS_REFRESH_ALARM = "models-dev-refresh";
 
 const ACTIVE_ICON_COLORS = {
   dark: { r: 0, g: 198, b: 109 },
@@ -54,44 +47,7 @@ type IconState = "active" | "inactive";
 let sourceIconPromise: Promise<ImageData> | null = null;
 const iconImageCache: Partial<Record<IconState, Record<number, ImageData>>> =
   {};
-let modelsRefreshInFlight: Promise<void> | null = null;
 let actionStateRevision = 0;
-
-async function refreshModelsSnapshot() {
-  try {
-    const updatedAt = await getModelsDevUpdatedAt();
-    if (updatedAt > 0 && Date.now() - updatedAt < MODELS_REFRESH_INTERVAL_MS) {
-      return;
-    }
-
-    await refreshModelsDevData();
-    await refreshProviderCatalog();
-  } catch (error) {
-    console.warn("models.dev refresh failed", error);
-  }
-}
-
-function refreshModelsSnapshotOnce() {
-  if (modelsRefreshInFlight) return modelsRefreshInFlight;
-
-  modelsRefreshInFlight = refreshModelsSnapshot().finally(() => {
-    modelsRefreshInFlight = null;
-  });
-
-  return modelsRefreshInFlight;
-}
-
-async function scheduleModelsRefreshAlarm() {
-  if (!browser.alarms?.create) return;
-
-  const periodInMinutes = Math.max(
-    1,
-    Math.floor(MODELS_REFRESH_INTERVAL_MS / 60_000),
-  );
-  await browser.alarms.create(MODELS_REFRESH_ALARM, {
-    periodInMinutes,
-  });
-}
 
 function iconColors(iconState: IconState): { dark: Rgb; light: Rgb } {
   return iconState === "active" ? ACTIVE_ICON_COLORS : INACTIVE_ICON_COLORS;
@@ -325,9 +281,6 @@ function startRuntimeCore(layers: ReturnType<typeof createRuntimeLayer>) {
 export default defineBackground(() => {
   const runtimeLayer = createRuntimeLayer();
 
-  // Avoid eager network fetches on worker boot to keep popup open fast.
-  // Models stay fresh through startup/install hooks and the periodic alarm.
-  void scheduleModelsRefreshAlarm();
   void ensureProviderCatalog();
 
   void startRuntimeCore(runtimeLayer).finally(() => {
@@ -335,18 +288,12 @@ export default defineBackground(() => {
   });
 
   browser.runtime.onInstalled.addListener(() => {
-    void refreshModelsSnapshotOnce();
-    void refreshProviderCatalog();
-    void scheduleModelsRefreshAlarm();
     void sanitizePendingRequests().finally(() => {
       void updateActionState();
     });
   });
 
   browser.runtime.onStartup.addListener(() => {
-    void refreshModelsSnapshotOnce();
-    void refreshProviderCatalog();
-    void scheduleModelsRefreshAlarm();
     void sanitizePendingRequests().finally(() => {
       void updateActionState();
     });
@@ -364,11 +311,6 @@ export default defineBackground(() => {
 
   browser.windows?.onFocusChanged.addListener(() => {
     void updateActionState();
-  });
-
-  browser.alarms?.onAlarm.addListener((alarm) => {
-    if (alarm.name !== MODELS_REFRESH_ALARM) return;
-    void refreshModelsSnapshotOnce();
   });
 
   browser.windows?.onRemoved.addListener((windowId) => {

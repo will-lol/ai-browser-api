@@ -1,5 +1,6 @@
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
-import { createFactoryLanguageModel, mergeModelHeaders } from "./factory-language-model";
+import { mergeModelHeaders } from "./factory-language-model";
 import {
   optionalMetadataString,
   parseOptionalMetadataObject,
@@ -89,6 +90,35 @@ function getUrls(domain: string) {
 
 function readString(value: unknown) {
   return typeof value === "string" ? value : undefined;
+}
+
+function buildCopilotSettings(input: {
+  providerID: string;
+  providerOptions: Record<string, unknown>;
+  modelURL: string;
+  modelHeaders?: Record<string, string>;
+  transport: {
+    baseURL?: string;
+    apiKey?: string;
+    headers?: Record<string, string>;
+    fetch?: typeof fetch;
+  };
+}): Parameters<typeof createOpenAICompatible>[0] {
+  return {
+    baseURL:
+      readString(input.transport.baseURL)?.trim() ||
+      readString(input.providerOptions.baseURL)?.trim() ||
+      input.modelURL,
+    apiKey: readString(input.transport.apiKey)?.trim(),
+    headers: {
+      ...(input.modelHeaders ?? {}),
+      ...(input.transport.headers ?? {}),
+    },
+    fetch: input.transport.fetch,
+    name:
+      readString(input.providerOptions.name)?.trim() ||
+      input.providerID,
+  };
 }
 
 export function inspectPrompt(prompt: Array<{ role: string; content: unknown }>) {
@@ -549,12 +579,16 @@ export const githubCopilotAdapter: AIAdapter<CopilotAuthMetadata, void> = {
     };
   },
   async createModel({ context, transport }) {
-    const baseModel = await createFactoryLanguageModel({
-      provider: context.provider,
-      model: context.model,
-      transport,
-      preferredInvocation: "responses",
-    });
+    const provider = createOpenAICompatible(
+      buildCopilotSettings({
+        providerID: context.providerID,
+        providerOptions: context.provider.options,
+        modelURL: context.model.api.url,
+        modelHeaders: context.model.headers,
+        transport,
+      }),
+    );
+    const baseModel = provider.languageModel(context.model.api.id);
 
     return wrapLanguageModel(baseModel, async (options) => {
       const { isAgent, isVision } = inspectCopilotRequest(

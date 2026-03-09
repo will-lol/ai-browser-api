@@ -1,15 +1,8 @@
-import type { LanguageModelV3 } from "@ai-sdk/provider";
-import type {
-  AuthRecord,
-  AuthResult,
-} from "@/lib/runtime/auth-store";
+import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import type { ModelsDevProvider } from "@/lib/runtime/models-dev";
 import type { ProviderModelInfo } from "@/lib/runtime/provider-registry";
 import { genericFactoryAdapters } from "./generic-factory";
-import {
-  mergeTransport,
-  normalizeFactoryNpm,
-} from "./factory-language-model";
+import { mergeTransport, normalizeFactoryNpm } from "./factory-language-model";
 import { githubCopilotAdapter } from "./github-copilot";
 import { gitlabAdapter } from "./gitlab";
 import { googleAdapter } from "./google";

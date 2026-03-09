@@ -84,7 +84,6 @@ export interface ProviderInfo extends ProviderRuntimeInfo {
 type RuntimeModelOverrides = NonNullable<RuntimeProviderConfig["models"]>;
 type RuntimeModelOverride = RuntimeModelOverrides[string];
 
-const CATALOG_UPDATED_AT_KEY = "catalogUpdatedAt";
 const CATALOG_INITIALIZED_KEY = "catalogInitialized";
 
 function toCapabilities(model: ModelsDevModel) {
@@ -407,11 +406,6 @@ export async function refreshProviderCatalog() {
         await runtimeDb.models.bulkPut(modelRows);
       }
 
-      await runtimeDb.meta.put({
-        key: CATALOG_UPDATED_AT_KEY,
-        value: updatedAt,
-        updatedAt,
-      });
       await setCatalogInitialized(updatedAt);
 
       afterCommit(async () => {
@@ -479,11 +473,6 @@ export async function refreshProviderCatalogForProvider(providerID: string) {
         }
       }
 
-      await runtimeDb.meta.put({
-        key: CATALOG_UPDATED_AT_KEY,
-        value: updatedAt,
-        updatedAt,
-      });
       await setCatalogInitialized(updatedAt);
 
       afterCommit(async () => {

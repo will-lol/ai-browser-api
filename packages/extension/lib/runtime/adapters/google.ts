@@ -1,6 +1,6 @@
 import { browser } from "@wxt-dev/browser";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
-import { createFactoryLanguageModel } from "./factory-language-model";
 import {
   optionalMetadataString,
   parseOptionalMetadataObject,
@@ -24,7 +24,7 @@ import {
 } from "@/lib/runtime/auth-store";
 import { waitForOAuthCallback } from "@/lib/runtime/oauth-browser-callback-util";
 import { generatePKCE, generateState } from "@/lib/runtime/oauth-util";
-import type { ProviderInfo } from "@/lib/runtime/provider-registry";
+import type { ProviderInfo, ProviderRuntimeInfo } from "@/lib/runtime/provider-registry";
 
 const GEMINI_CLIENT_ID =
   "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
@@ -176,6 +176,34 @@ function readMetadataValue(value: unknown) {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function buildGoogleSettings(input: {
+  providerID: string;
+  provider: ProviderRuntimeInfo;
+  headers?: Record<string, string>;
+  transport: {
+    baseURL?: string;
+    apiKey?: string;
+    headers?: Record<string, string>;
+    fetch?: typeof fetch;
+  };
+  state: GoogleRuntimeState;
+}): Parameters<typeof createGoogleGenerativeAI>[0] {
+  return {
+    baseURL:
+      readMetadataValue(input.transport.baseURL) ??
+      readMetadataValue(input.provider.options.baseURL),
+    apiKey:
+      readMetadataValue(input.transport.apiKey) ??
+      (input.state.kind === "oauth" ? "gemini-oauth-placeholder" : undefined),
+    headers: {
+      ...(input.headers ?? {}),
+      ...(input.transport.headers ?? {}),
+    },
+    fetch: input.transport.fetch,
+    name: readMetadataValue(input.provider.options.name) ?? input.providerID,
+  };
 }
 
 const projectIdInputSchema = z
@@ -902,14 +930,16 @@ export const googleAdapter: AIAdapter<GoogleAuthMetadata, GoogleRuntimeState> = 
       throw new Error(state.projectResolutionError);
     }
 
-    const baseModel = await createFactoryLanguageModel({
-      provider: context.provider,
-      model: context.model,
-      transport,
-      staticOptions: state.kind === "oauth"
-        ? { apiKey: "gemini-oauth-placeholder" }
-        : undefined,
-    });
+    const provider = createGoogleGenerativeAI(
+      buildGoogleSettings({
+        providerID: context.providerID,
+        provider: context.provider,
+        headers: context.model.headers,
+        transport,
+        state,
+      }),
+    );
+    const baseModel = provider.languageModel(context.model.api.id);
 
     if (state.kind !== "oauth") {
       return baseModel;
