@@ -9,58 +9,48 @@ const modelsDevInterleavedSchema = z.union([
   }),
 ]);
 
-const modelsDevCostSchema = z
-  .object({
-    input: z.number(),
-    output: z.number(),
-    cache_read: z.number().optional(),
-    cache_write: z.number().optional(),
-  })
-  .passthrough();
+const modelsDevCostSchema = z.looseObject({
+  input: z.number(),
+  output: z.number(),
+  cache_read: z.number().optional(),
+  cache_write: z.number().optional(),
+});
 
-const modelsDevLimitSchema = z
-  .object({
-    context: z.number(),
-    input: z.number().optional(),
-    output: z.number(),
-  })
-  .passthrough();
+const modelsDevLimitSchema = z.looseObject({
+  context: z.number(),
+  input: z.number().optional(),
+  output: z.number(),
+});
 
-const modelsDevModalitiesSchema = z
-  .object({
-    input: z.array(modelsDevModalitySchema),
-    output: z.array(modelsDevModalitySchema),
-  })
-  .passthrough();
+const modelsDevModalitiesSchema = z.looseObject({
+  input: z.array(modelsDevModalitySchema),
+  output: z.array(modelsDevModalitySchema),
+});
 
-const modelsDevProviderMetadataSchema = z
-  .object({
-    npm: z.string().optional(),
-    api: z.string().optional(),
-  })
-  .passthrough();
+const modelsDevProviderMetadataSchema = z.looseObject({
+  npm: z.string().optional(),
+  api: z.string().optional(),
+});
 
-const modelsDevModelSchema = z
-  .object({
-    id: z.string().optional(),
-    name: z.string().optional(),
-    family: z.string().optional(),
-    release_date: z.string(),
-    attachment: z.boolean(),
-    reasoning: z.boolean(),
-    temperature: z.boolean().default(false),
-    tool_call: z.boolean(),
-    interleaved: modelsDevInterleavedSchema.optional(),
-    cost: modelsDevCostSchema.optional(),
-    limit: modelsDevLimitSchema,
-    modalities: modelsDevModalitiesSchema.optional(),
-    options: z.record(z.string(), z.unknown()).optional(),
-    headers: z.record(z.string(), z.string()).optional(),
-    provider: modelsDevProviderMetadataSchema.optional(),
-    status: z.enum(["alpha", "beta", "deprecated"]).optional(),
-    variants: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
-  })
-  .passthrough();
+const modelsDevModelSchema = z.looseObject({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  family: z.string().optional(),
+  release_date: z.string(),
+  attachment: z.boolean(),
+  reasoning: z.boolean(),
+  temperature: z.boolean().default(false),
+  tool_call: z.boolean(),
+  interleaved: modelsDevInterleavedSchema.optional(),
+  cost: modelsDevCostSchema.optional(),
+  limit: modelsDevLimitSchema,
+  modalities: modelsDevModalitiesSchema.optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  provider: modelsDevProviderMetadataSchema.optional(),
+  status: z.enum(["alpha", "beta", "deprecated"]).optional(),
+  variants: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
+});
 
 function prependIssues(
   ctx: z.RefinementCtx,
@@ -109,16 +99,14 @@ const modelsDevModelRecordSchema = rawModelsDevModelRecordSchema.transform(
   },
 );
 
-const modelsDevProviderSchema = z
-  .object({
-    id: z.string().optional(),
-    name: z.string().optional(),
-    env: z.array(z.string()),
-    api: z.string().optional(),
-    npm: z.string().optional(),
-    models: modelsDevModelRecordSchema,
-  })
-  .passthrough();
+const modelsDevProviderSchema = z.looseObject({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  env: z.array(z.string()),
+  api: z.string().optional(),
+  npm: z.string().optional(),
+  models: modelsDevModelRecordSchema,
+});
 
 function createModelsDevProviderSchema(providerID: string) {
   return modelsDevProviderSchema.transform(
