@@ -17,7 +17,7 @@ export const runtimeReactivityKeys = {
   pending: (origin: string) => `pending:${origin}`,
 } as const;
 
-export function reactivityKeysForRuntimeEvent(
+function reactivityKeysForRuntimeEvent(
   event: RuntimeEvent,
 ): ReadonlyArray<string> {
   switch (event.type) {

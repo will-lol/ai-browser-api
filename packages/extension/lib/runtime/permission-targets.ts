@@ -1,13 +1,13 @@
 import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 
-export interface TrustedPermissionTarget {
+interface TrustedPermissionTarget {
   modelId: string;
   modelName: string;
   provider: string;
   capabilities: string[];
 }
 
-export type TrustedPermissionTargetResolution =
+type TrustedPermissionTargetResolution =
   | {
       status: "resolved";
       target: TrustedPermissionTarget;

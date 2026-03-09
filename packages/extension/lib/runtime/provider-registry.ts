@@ -352,7 +352,7 @@ async function setCatalogInitialized(updatedAt: number) {
   });
 }
 
-export async function isCatalogInitialized() {
+async function isCatalogInitialized() {
   const value = await runtimeDb.meta.get(CATALOG_INITIALIZED_KEY);
   return value?.value === true;
 }
@@ -553,8 +553,4 @@ export async function getModel(providerID: string, modelID: string) {
   await ensureProviderCatalog();
   const row = await runtimeDb.models.get(runtimeModelKey(providerID, modelID));
   return row?.info;
-}
-
-export async function getProviderAuth(providerID: string) {
-  return getAuth(providerID);
 }

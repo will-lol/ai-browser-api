@@ -2,7 +2,6 @@ import { Atom, Result } from "@effect-atom/atom-react";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import {
-  currentOrigin,
   fetchModels,
   fetchOriginState,
   fetchPendingRequests,
@@ -33,7 +32,7 @@ export const providersResultAtom = extensionAtomRuntime
   .atom(fetchProviders())
   .pipe(Atom.withReactivity([runtimeReactivityKeys.providers]));
 
-export const providerAuthFlowResultAtom = Atom.family((providerID: string) =>
+const providerAuthFlowResultAtom = Atom.family((providerID: string) =>
   extensionAtomRuntime
     .atom(
       fetchProviderAuthFlow({
@@ -43,25 +42,25 @@ export const providerAuthFlowResultAtom = Atom.family((providerID: string) =>
     .pipe(Atom.withReactivity([runtimeReactivityKeys.authFlow(providerID)])),
 );
 
-export const originStateResultAtom = Atom.family((origin: string) =>
+const originStateResultAtom = Atom.family((origin: string) =>
   extensionAtomRuntime
     .atom(fetchOriginState(origin))
     .pipe(Atom.withReactivity([runtimeReactivityKeys.origin(origin)])),
 );
 
-export const permissionsResultAtom = Atom.family((origin: string) =>
+const permissionsResultAtom = Atom.family((origin: string) =>
   extensionAtomRuntime
     .atom(fetchPermissions(origin))
     .pipe(Atom.withReactivity([runtimeReactivityKeys.permissions(origin)])),
 );
 
-export const pendingRequestsResultAtom = Atom.family((origin: string) =>
+const pendingRequestsResultAtom = Atom.family((origin: string) =>
   extensionAtomRuntime
     .atom(fetchPendingRequests(origin))
     .pipe(Atom.withReactivity([runtimeReactivityKeys.pending(origin)])),
 );
 
-export function modelsResultAtom(input?: {
+function modelsResultAtom(input?: {
   connectedOnly?: boolean;
   providerID?: string;
 }) {
@@ -72,8 +71,6 @@ export function modelsResultAtom(input?: {
     }),
   );
 }
-
-export const currentOriginAtom = Atom.make(currentOrigin).pipe(Atom.keepAlive);
 
 export const providerConnectDataResultAtom = Atom.family((providerID: string) =>
   Atom.make((get) =>

@@ -2,7 +2,7 @@ import type { RuntimeEventPayload } from "@/lib/runtime/events/runtime-events";
 
 export type PermissionDecisionWaitResult = "resolved" | "timeout" | "aborted";
 
-export interface PermissionDecisionWaitInput {
+interface PermissionDecisionWaitInput {
   requestId: string;
   timeoutMs: number;
   signal?: AbortSignal;

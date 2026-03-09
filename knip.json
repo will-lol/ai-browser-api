@@ -1,0 +1,76 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "exclude": [
+    "duplicates"
+  ],
+  "tags": [
+    "-lintignore"
+  ],
+  "workspaces": {
+    ".": {},
+    "packages/bridge-codecs": {
+      "entry": [
+        "src/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/client": {
+      "entry": [
+        "src/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/contracts": {
+      "entry": [
+        "src/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/extension": {
+      "entry": [
+        "entrypoints/background.ts",
+        "entrypoints/content.tsx",
+        "entrypoints/connect/main.tsx",
+        "entrypoints/popup/main.tsx",
+        "lib/**/*.test.ts",
+        "scripts/**/*.ts",
+        "web-ext.config.ts",
+        "wxt.config.ts"
+      ],
+      "ignore": [
+        "entrypoints/popup/routeTree.gen.ts"
+      ],
+      "project": [
+        "components/**/*.{ts,tsx}",
+        "entrypoints/**/*.{ts,tsx}",
+        "hooks/**/*.{ts,tsx}",
+        "lib/**/*.{ts,tsx}",
+        "scripts/**/*.ts",
+        "styles/**/*.css",
+        "*.config.{js,mjs,ts}"
+      ]
+    },
+    "packages/runtime-core": {
+      "entry": [
+        "src/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/runtime-events": {
+      "entry": [
+        "src/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    }
+  }
+}

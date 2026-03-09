@@ -73,12 +73,8 @@ export function createRuntimeAdminRpcClient(input: {
   };
 }
 
-export type RuntimeAdminRpcClient = ReturnType<typeof createRuntimeAdminRpcClient>;
-
 export function getRuntimeAdminRPC() {
   return createRuntimeAdminRpcClient({
     ensureClient: core.ensureClient,
   });
 }
-
-export const getRuntimeRPC = getRuntimeAdminRPC;

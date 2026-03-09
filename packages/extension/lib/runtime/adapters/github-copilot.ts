@@ -126,27 +126,6 @@ function buildCopilotSettings(input: {
   };
 }
 
-export function inspectPrompt(prompt: Array<{ role: string; content: unknown }>) {
-  const last = prompt[prompt.length - 1];
-  const isAgent = last?.role === "assistant" || last?.role === "tool";
-
-  const isVision = prompt.some((message) => {
-    if (!Array.isArray((message as { content?: unknown }).content)) return false;
-    return (message as { content: Array<Record<string, unknown>> }).content.some(
-      (part) =>
-        (part.type === "file" &&
-          typeof part.mediaType === "string" &&
-          part.mediaType.startsWith("image/")) ||
-        part.type === "image",
-    );
-  });
-
-  return {
-    isAgent,
-    isVision,
-  };
-}
-
 function inspectCopilotRequest(options: Record<string, unknown>) {
   let isAgent = false;
   let isVision = false;

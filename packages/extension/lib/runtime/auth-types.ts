@@ -2,15 +2,15 @@ import { z } from "zod";
 
 export type AuthMethodType = "oauth" | "pat" | "apikey";
 
-export type JsonPrimitive = string | number | boolean | null;
+type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 export type JsonObject = {
   [key: string]: JsonValue;
 };
 
-export const authMethodTypeSchema = z.enum(["oauth", "pat", "apikey"]);
+const authMethodTypeSchema = z.enum(["oauth", "pat", "apikey"]);
 
-export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
     z.string(),
     z.number(),
@@ -21,7 +21,7 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   ]),
 );
 
-export const jsonObjectSchema: z.ZodType<JsonObject> = z.record(
+const jsonObjectSchema: z.ZodType<JsonObject> = z.record(
   z.string(),
   jsonValueSchema,
 );
@@ -91,23 +91,3 @@ export type AuthResult<TMetadata extends JsonObject | undefined = JsonObject | u
       methodType: AuthMethodType;
       metadata?: TMetadata;
     };
-
-const authResultBaseSchema = z.object({
-  methodID: z.string(),
-  methodType: authMethodTypeSchema,
-  metadata: jsonObjectSchema.optional(),
-});
-
-export const authResultSchema: z.ZodType<AuthResult> = z.union([
-  authResultBaseSchema.extend({
-    type: z.literal("api"),
-    key: z.string(),
-  }),
-  authResultBaseSchema.extend({
-    type: z.literal("oauth"),
-    access: z.string(),
-    refresh: z.string().optional(),
-    expiresAt: z.number().optional(),
-    accountId: z.string().optional(),
-  }),
-]);

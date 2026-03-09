@@ -90,10 +90,6 @@ function createWindowLike() {
   };
 }
 
-function toError(error: unknown) {
-  return error instanceof Error ? error : new Error(String(error));
-}
-
 describe("makeRuntimeRpcClientCore", () => {
   it("coalesces concurrent cold-start callers to one connect call", async () => {
     const started = createDeferred<void>();

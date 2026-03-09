@@ -26,9 +26,9 @@ import {
 
 type RuntimePort = ReturnType<typeof browser.runtime.connect>;
 type RuntimeSender = RuntimePort["sender"];
-export type RuntimeRole = "public" | "admin";
+type RuntimeRole = "public" | "admin";
 
-export type RuntimeAuthorizedContext = {
+type RuntimeAuthorizedContext = {
   readonly role: RuntimeRole;
   readonly sender: RuntimeSender;
   readonly senderOrigin?: string;

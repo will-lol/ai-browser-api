@@ -2,15 +2,10 @@ import { authRecordSchema, type AuthRecord } from "@/lib/runtime/auth-types";
 import type { RuntimeDbAuth } from "@/lib/runtime/db/runtime-db-types";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import {
-  VaultKeyProvider,
-  type VaultKeyProviderApi,
-} from "./vault-key-provider";
+import type { VaultKeyProviderApi } from "./vault-key-provider";
 import {
   VaultDecryptError,
   VaultEncryptError,
-  VaultKeyUnavailableError,
 } from "./vault-errors";
 
 const encoder = new TextEncoder();
@@ -141,8 +136,3 @@ export type SecretVaultApi = ReturnType<typeof makeSecretVault>;
 export class SecretVault extends Context.Tag(
   "@llm-bridge/extension/SecretVault",
 )<SecretVault, SecretVaultApi>() {}
-
-export const SecretVaultLive = Layer.effect(
-  SecretVault,
-  Effect.map(VaultKeyProvider, makeSecretVault),
-);

@@ -2,14 +2,10 @@ import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-types";
 import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 import { afterCommit, runTx } from "@/lib/runtime/db/runtime-db-tx";
 import { publishRuntimeEvent } from "@/lib/runtime/events/runtime-events";
-import {
-  SecretVault,
-  type SecretVaultApi,
-} from "@/lib/runtime/security/secret-vault";
+import type { SecretVaultApi } from "@/lib/runtime/security/secret-vault";
 import { now } from "@/lib/runtime/util";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import { VaultDecryptError, VaultKeyUnavailableError } from "./vault-errors";
 
 const warnedCorruptAuthProviders = new Set<string>();
@@ -208,13 +204,8 @@ export function makeAuthVaultStore(vault: SecretVaultApi) {
   };
 }
 
-export type AuthVaultStoreApi = ReturnType<typeof makeAuthVaultStore>;
+type AuthVaultStoreApi = ReturnType<typeof makeAuthVaultStore>;
 
 export class AuthVaultStore extends Context.Tag(
   "@llm-bridge/extension/AuthVaultStore",
 )<AuthVaultStore, AuthVaultStoreApi>() {}
-
-export const AuthVaultStoreLive = Layer.effect(
-  AuthVaultStore,
-  Effect.map(SecretVault, makeAuthVaultStore),
-);

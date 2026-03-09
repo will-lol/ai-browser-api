@@ -55,8 +55,6 @@ export function createRuntimePublicRpcClient(input: {
   };
 }
 
-export type RuntimePublicRpcClient = ReturnType<typeof createRuntimePublicRpcClient>;
-
 export function getRuntimePublicRPC() {
   return createRuntimePublicRpcClient({
     ensureClient: core.ensureClient,

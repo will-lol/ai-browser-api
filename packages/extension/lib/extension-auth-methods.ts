@@ -1,6 +1,6 @@
-import snapshotData from "@/lib/runtime/models-snapshot.json";
 import { resolveAdapterForProvider } from "@/lib/runtime/adapters";
 import { getAuthSchemaFields } from "@/lib/runtime/adapters/schema";
+import { modelsDevData } from "@/lib/runtime/models-dev";
 import type {
   AnyAuthMethodDefinition,
   AuthField,
@@ -17,40 +17,9 @@ export type ExtensionResolvedAuthMethod = Pick<
   fields: ReadonlyArray<AuthField>;
 };
 
-function normalizeModelsDevProvider(
-  providerID: string,
-): ModelsDevProvider | undefined {
-  const rawProvider = snapshotData[providerID as keyof typeof snapshotData];
-  if (!rawProvider || typeof rawProvider !== "object") {
-    return undefined;
-  }
-
-  const env = Array.isArray(rawProvider.env)
-    ? rawProvider.env.filter(
-        (item): item is string => typeof item === "string",
-      )
-    : [];
-
-  return {
-    id:
-      typeof rawProvider.id === "string" && rawProvider.id.length > 0
-        ? rawProvider.id
-        : providerID,
-    name:
-      typeof rawProvider.name === "string" && rawProvider.name.length > 0
-        ? rawProvider.name
-        : providerID,
-    env,
-    api:
-      "api" in rawProvider && typeof rawProvider.api === "string"
-        ? rawProvider.api
-        : undefined,
-    npm: typeof rawProvider.npm === "string" ? rawProvider.npm : undefined,
-    models:
-      rawProvider.models && typeof rawProvider.models === "object"
-        ? (rawProvider.models as ModelsDevProvider["models"])
-        : {},
-  };
+function getModelsDevProvider(providerID: string): ModelsDevProvider | undefined {
+  if (!(providerID in modelsDevData)) return undefined;
+  return modelsDevData[providerID];
 }
 
 function toProviderRuntimeInfo(
@@ -85,7 +54,7 @@ export async function resolveExtensionAuthMethods(input: {
   provider?: ExtensionProvider;
   methodIDs?: ReadonlyArray<ExtensionAuthMethod["id"]>;
 }) {
-  const source = normalizeModelsDevProvider(input.providerID);
+  const source = getModelsDevProvider(input.providerID);
   const adapter = resolveAdapterForProvider({
     providerID: input.providerID,
     source,

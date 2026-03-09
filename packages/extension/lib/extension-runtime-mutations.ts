@@ -1,9 +1,7 @@
-import { Atom } from "@effect-atom/atom-react";
 import * as Reactivity from "@effect/experimental/Reactivity";
 import * as Effect from "effect/Effect";
 import {
   cancelRuntimeProviderAuthFlow,
-  dismissRuntimePermissionRequest,
   disconnectRuntimeProvider,
   openRuntimeProviderAuthWindow,
   resolveRuntimePermissionRequest,
@@ -152,27 +150,6 @@ export const resolvePermissionDecisionAtom = extensionAtomRuntime.fn(
     const result = yield* resolveRuntimePermissionRequest({
       requestId,
       decision,
-    });
-
-    yield* invalidateKeys([
-      runtimeReactivityKeys.permissions(origin),
-      runtimeReactivityKeys.pending(origin),
-    ]);
-
-    return result;
-  }),
-);
-
-export const dismissPermissionRequestAtom = extensionAtomRuntime.fn(
-  Effect.fn(function* ({
-    origin,
-    requestId,
-  }: {
-    requestId: string;
-    origin: string;
-  }) {
-    const result = yield* dismissRuntimePermissionRequest({
-      requestId,
     });
 
     yield* invalidateKeys([

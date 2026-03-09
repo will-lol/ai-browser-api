@@ -13,7 +13,7 @@ import type {
   ProviderRuntimeInfo,
 } from "@/lib/runtime/provider-registry";
 
-export type AuthFieldCondition = {
+type AuthFieldCondition = {
   key: string;
   equals: string;
 };

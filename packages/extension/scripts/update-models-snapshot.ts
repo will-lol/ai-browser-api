@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import { parseModelsDevSnapshotText } from "../lib/runtime/models-dev-schema";
+
 const MODELS_URL = process.env.MODELS_DEV_URL ?? "https://models.dev/api.json";
 const OUTFILE = path.join(process.cwd(), "lib/runtime/models-snapshot.json");
 
@@ -15,6 +18,6 @@ if (!response.ok) {
 }
 
 const text = await response.text();
-JSON.parse(text);
-await Bun.write(OUTFILE, `${text}\n`);
+const snapshot = parseModelsDevSnapshotText(text);
+await writeFile(OUTFILE, `${JSON.stringify(snapshot, null, 2)}\n`);
 console.log(`Updated ${OUTFILE}`);

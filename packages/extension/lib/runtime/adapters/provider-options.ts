@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const nonEmptyTrimmedStringSchema = z.preprocess(
+const nonEmptyTrimmedStringSchema = z.preprocess(
   (value) => (typeof value === "string" ? value.trim() : value),
   z.string().min(1),
 );

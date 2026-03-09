@@ -16,7 +16,7 @@ function toHeaderRecord(value: unknown) {
   return headers;
 }
 
-export type SupportedFactoryNpm =
+type SupportedFactoryNpm =
   | "@ai-sdk/amazon-bedrock"
   | "@ai-sdk/anthropic"
   | "@ai-sdk/azure"

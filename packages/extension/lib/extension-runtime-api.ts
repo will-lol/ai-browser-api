@@ -1,21 +1,13 @@
 import { getRuntimeAdminRPC } from "@/lib/runtime/rpc/runtime-admin-rpc-client";
 import type {
-  RuntimeAuthFlowSnapshot,
   RuntimePermissionDecision,
-  RuntimeModelSummary,
-  RuntimeOriginState,
-  RuntimePermissionEntry,
   RuntimeProviderSummary,
   RuntimeAuthMethod,
 } from "@llm-bridge/contracts";
 
 export type ExtensionProvider = RuntimeProviderSummary;
-export type ModelPermission = RuntimePermissionEntry;
-export type AvailableModel = RuntimeModelSummary;
-export type OriginState = RuntimeOriginState;
 export type PermissionDecision = RuntimePermissionDecision;
 export type ExtensionAuthMethod = RuntimeAuthMethod;
-export type ExtensionAuthFlowSnapshot = RuntimeAuthFlowSnapshot;
 
 export function currentOrigin() {
   if (typeof window === "undefined") return "https://chat.example.com";

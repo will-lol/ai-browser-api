@@ -12,12 +12,11 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
-import * as Stream from "effect/Stream";
 import { RUNTIME_EVENT_STORAGE_KEY } from "@/lib/runtime/constants";
 
 export type RuntimeEventPayload = RuntimeEvent;
 
-export const RUNTIME_EVENT_CHANNEL_NAME = "llm-bridge-runtime-events-v1";
+const RUNTIME_EVENT_CHANNEL_NAME = "llm-bridge-runtime-events-v1";
 
 let runtimeChannel: BroadcastChannel | null = null;
 
@@ -166,13 +165,4 @@ export function subscribeRuntimeEvents(
   return () => {
     listeners.delete(handler);
   };
-}
-
-export function streamRuntimeEvents() {
-  return Stream.unwrap(
-    Effect.promise(async () => {
-      const runtime = await ensureRuntimeEventRuntime();
-      return runtime.bus.stream;
-    }),
-  );
 }

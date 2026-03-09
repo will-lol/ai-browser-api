@@ -13,7 +13,7 @@ function base64UrlEncodeBytes(bytes: Uint8Array) {
     .replace(/=+$/, "");
 }
 
-export function generateRandomString(length: number) {
+function generateRandomString(length: number) {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
   const bytes = crypto.getRandomValues(new Uint8Array(length));
@@ -88,44 +88,6 @@ export function parseOAuthCallbackUrl(url: string) {
 
   return {
     code: undefined,
-    state: undefined,
-    error: undefined,
-    errorDescription: undefined,
-  };
-}
-
-export function parseOAuthCallbackInput(input: {
-  code?: string;
-  callbackUrl?: string;
-}) {
-  const raw = input.callbackUrl?.trim() || input.code?.trim() || "";
-  if (!raw) {
-    return {
-      code: undefined,
-      state: undefined,
-      error: undefined,
-      errorDescription: undefined,
-    };
-  }
-
-  if (/^https?:\/\//i.test(raw)) {
-    return parseOAuthCallbackUrl(raw);
-  }
-
-  const queryCandidate = raw.startsWith("?") ? raw.slice(1) : raw;
-  if (queryCandidate.includes("=")) {
-    const params = new URLSearchParams(queryCandidate);
-    const code = params.get("code") ?? undefined;
-    const state = params.get("state") ?? undefined;
-    const error = params.get("error") ?? undefined;
-    const errorDescription = params.get("error_description") ?? undefined;
-    if (code || state || error || errorDescription) {
-      return { code, state, error, errorDescription };
-    }
-  }
-
-  return {
-    code: raw,
     state: undefined,
     error: undefined,
     errorDescription: undefined,

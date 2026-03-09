@@ -17,14 +17,14 @@ const AUTH_FLOW_WINDOW_HEIGHT = 640;
 const AUTH_FLOW_TTL_MS = 30 * 60_000;
 const AUTH_FLOW_SWEEP_INTERVAL_MS = 60_000;
 
-export type RuntimeAuthFlowStatus =
+type RuntimeAuthFlowStatus =
   | "idle"
   | "authorizing"
   | "success"
   | "error"
   | "canceled";
 
-export interface RuntimeAuthFlowSnapshot {
+interface RuntimeAuthFlowSnapshot {
   providerID: string;
   status: RuntimeAuthFlowStatus;
   methods: RuntimeAuthMethod[];
@@ -35,7 +35,7 @@ export interface RuntimeAuthFlowSnapshot {
   canCancel: boolean;
 }
 
-export interface OpenProviderAuthWindowResult {
+interface OpenProviderAuthWindowResult {
   providerID: string;
   reused: boolean;
   windowId: number;
@@ -97,7 +97,7 @@ function toAuthFlowErrorSummary(error: unknown) {
   }
 }
 
-export class AuthFlowManager {
+class AuthFlowManager {
   private readonly flows = new Map<string, AuthFlowState>();
   private readonly providerWindows = new Map<string, number>();
   private readonly windowProviders = new Map<number, string>();

@@ -32,7 +32,7 @@ export interface PermissionRequest {
   status: "pending" | "resolved";
 }
 
-export type CreatePermissionRequestResult =
+type CreatePermissionRequestResult =
   | {
       status: "alreadyAllowed";
     }

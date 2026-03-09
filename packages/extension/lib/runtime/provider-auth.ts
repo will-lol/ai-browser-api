@@ -31,7 +31,7 @@ type AuthContextResolved = {
   auth?: AuthRecord;
 };
 
-export type StartProviderAuthResult = {
+type StartProviderAuthResult = {
   methodID: string;
   connected: true;
 };

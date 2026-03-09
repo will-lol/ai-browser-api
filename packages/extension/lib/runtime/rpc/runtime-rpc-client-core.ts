@@ -58,7 +58,7 @@ type RuntimeClient<Rpcs extends Rpc.Any> = RpcClient.RpcClient<
 >;
 export type RuntimeRpcClientConnection<Rpcs extends Rpc.Any> = RuntimeClient<Rpcs>;
 
-export type RuntimeConnection<Rpcs extends Rpc.Any> = {
+type RuntimeConnection<Rpcs extends Rpc.Any> = {
   connectionId: number;
   scope: Scope.CloseableScope;
   port: RuntimePort;
@@ -66,7 +66,7 @@ export type RuntimeConnection<Rpcs extends Rpc.Any> = {
   onDisconnect: RuntimeDisconnectListener;
 };
 
-export type RuntimeRpcClientCore<Rpcs extends Rpc.Any, E> = {
+type RuntimeRpcClientCore<Rpcs extends Rpc.Any, E> = {
   ensureConnection: Effect.Effect<RuntimeConnection<Rpcs>, E>;
   ensureClient: Effect.Effect<RuntimeClient<Rpcs>, E>;
   destroyConnection: (

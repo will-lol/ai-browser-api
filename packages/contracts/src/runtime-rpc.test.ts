@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { RpcClientError } from "@effect/rpc/RpcClientError";
 import * as Schema from "effect/Schema";
 import {
   RuntimeUpstreamServiceError,

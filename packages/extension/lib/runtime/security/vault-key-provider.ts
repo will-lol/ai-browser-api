@@ -2,7 +2,6 @@ import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 import type { RuntimeDbVaultKey } from "@/lib/runtime/db/runtime-db-types";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import { VaultKeyUnavailableError } from "./vault-errors";
 
 export const AUTH_MASTER_KEY_ID = "auth-master-key" as const;
@@ -99,8 +98,3 @@ function createVaultKeyRow(key: CryptoKey): RuntimeDbVaultKey {
     updatedAt: timestamp,
   };
 }
-
-export const VaultKeyProviderLive = Layer.sync(
-  VaultKeyProvider,
-  makeVaultKeyProvider,
-);

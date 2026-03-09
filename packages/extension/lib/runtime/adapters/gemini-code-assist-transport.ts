@@ -15,17 +15,17 @@ export const GEMINI_CODE_ASSIST_HEADERS = {
     "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
 } as const;
 
-export interface GeminiCodeAssistFetchOptions {
+interface GeminiCodeAssistFetchOptions {
   projectId: string;
   fetchFn?: RuntimeFetch;
 }
 
-export interface GeminiRewriteMetadata {
+interface GeminiRewriteMetadata {
   streaming: boolean;
   requestedModel: string;
 }
 
-export interface RewrittenTransportRequest<TMetadata = void> {
+interface RewrittenTransportRequest<TMetadata = void> {
   request: RequestInfo | URL;
   init: RequestInit;
   metadata: TMetadata;
@@ -111,7 +111,7 @@ function transformRequestPayload(
   };
 }
 
-export function isGenerativeLanguageRequest(url: string) {
+function isGenerativeLanguageRequest(url: string) {
   return url.includes(GENERATIVE_LANGUAGE_HOST);
 }
 
@@ -201,7 +201,7 @@ export async function rewriteGeminiCodeAssistRequest(
   };
 }
 
-export function transformGeminiCodeAssistSSELine(line: string): string {
+function transformGeminiCodeAssistSSELine(line: string): string {
   if (!line.startsWith("data:")) {
     return line;
   }

@@ -10,7 +10,7 @@ export type OAuthCallbackRequestListener = Parameters<
 export type OAuthCallbackRequestDetails =
   Parameters<OAuthCallbackRequestListener>[0];
 
-export type WaitForOAuthCallbackOptions = {
+type WaitForOAuthCallbackOptions = {
   urlPattern: string;
   matchesUrl: (url: string) => boolean;
   timeoutMs: number;

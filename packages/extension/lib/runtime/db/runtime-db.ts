@@ -11,9 +11,9 @@ import type {
   RuntimeDbVaultKey,
 } from "@/lib/runtime/db/runtime-db-types";
 
-export const RUNTIME_DB_NAME = "llm-bridge-runtime-db-v3";
+const RUNTIME_DB_NAME = "llm-bridge-runtime-db-v3";
 
-export class RuntimeDb extends Dexie {
+class RuntimeDb extends Dexie {
   providers!: EntityTable<RuntimeDbProvider, "id">;
   models!: EntityTable<RuntimeDbModel, "id">;
   auth!: EntityTable<RuntimeDbAuth, "providerID">;

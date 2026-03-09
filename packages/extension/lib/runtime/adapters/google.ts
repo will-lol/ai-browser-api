@@ -66,7 +66,7 @@ type LoadCodeAssistPayload = {
   }>;
 };
 
-export type GeminiProjectContextResult = {
+type GeminiProjectContextResult = {
   projectId: string;
   managedProjectId?: string;
 };
@@ -666,7 +666,7 @@ export async function resolveGeminiProjectContext(
   throw new Error(buildProjectResolutionError(loaded.ineligibleTiers));
 }
 
-export function isGeminiOAuth(
+function isGeminiOAuth(
   auth?: ParsedAuthRecord<GoogleAuthMetadata>,
 ): auth is Extract<ParsedAuthRecord<GoogleAuthMetadata>, { type: "oauth" }> {
   return auth?.type === "oauth" && auth.methodType === "oauth";

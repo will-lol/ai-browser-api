@@ -45,7 +45,6 @@ import {
 import type {
   ProviderInfo,
   ProviderModelInfo,
-  ProviderRuntimeInfo,
 } from "@/lib/runtime/provider-registry";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -100,7 +99,7 @@ const codexDevicePollSchema = z.object({
   code_verifier: z.string(),
 });
 
-export function isCodexOAuth(
+function isCodexOAuth(
   auth?: ParsedAuthRecord<OpenAIAuthMetadata>,
 ): auth is Extract<ParsedAuthRecord<OpenAIAuthMetadata>, { type: "oauth" }> {
   return auth?.type === "oauth" && auth.methodType === "oauth";
@@ -644,7 +643,7 @@ async function authorizeDevice(input: AdapterAuthorizeContext) {
   });
 }
 
-export function buildCodexChatHeaders(
+function buildCodexChatHeaders(
   headers: Record<string, string>,
   sessionID: string,
 ) {

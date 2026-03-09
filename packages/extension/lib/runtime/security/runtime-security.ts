@@ -1,6 +1,5 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import { pipe } from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
@@ -8,7 +7,7 @@ import { AuthVaultStore, makeAuthVaultStore } from "./auth-vault-store";
 import { makeSecretVault, SecretVault } from "./secret-vault";
 import { makeVaultKeyProvider, VaultKeyProvider } from "./vault-key-provider";
 
-export const RuntimeSecurityLayer = Layer.effectContext(
+const RuntimeSecurityLayer = Layer.effectContext(
   Effect.sync(() => {
     const keyProvider = makeVaultKeyProvider();
     const secretVault = makeSecretVault(keyProvider);
@@ -65,15 +64,4 @@ export async function runSecurityEffect<A, E>(
 ): Promise<A> {
   const runtime = await getRuntimeSecurityRuntime();
   return Effect.runPromise(effect.pipe(Effect.provide(runtime.context)));
-}
-
-export async function disposeRuntimeSecurityLayerForTests() {
-  if (!runtimeSecurityPromise) return;
-
-  const runtime = await runtimeSecurityPromise;
-  runtimeSecurityPromise = null;
-
-  await Effect.runPromise(
-    Scope.close(runtime.scope, Exit.succeed(undefined)),
-  ).catch(() => undefined);
 }

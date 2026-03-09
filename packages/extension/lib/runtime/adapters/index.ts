@@ -18,15 +18,7 @@ import type {
   RuntimeTransportConfig,
 } from "./types";
 
-export const adapters = {
-  ...genericFactoryAdapters,
-  "provider:openai": openaiAdapter,
-  "provider:google": googleAdapter,
-  "provider:github-copilot": githubCopilotAdapter,
-  "provider:gitlab": gitlabAdapter,
-} as const;
-
-export type { RegisteredAdapter, ResolvedAdapterSession } from "./types";
+export type { ResolvedAdapterSession } from "./types";
 
 function registerAdapter<
   TPersistedAuthMeta extends ParsedAuthRecord["metadata"],

@@ -9,7 +9,7 @@ export type {
   AuthRecord,
   AuthResult,
   JsonObject,
-  JsonValue,
+  
 } from "@/lib/runtime/auth-types";
 
 function authStoreInternalError(message: string) {

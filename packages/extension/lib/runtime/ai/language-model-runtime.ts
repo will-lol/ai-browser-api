@@ -54,7 +54,7 @@ type PreparedCallOptions = {
   session: ResolvedAdapterSession;
 };
 
-export type PreparedRuntimeLanguageModelCall = {
+type PreparedRuntimeLanguageModelCall = {
   providerID: string;
   providerModelID: string;
   languageModel: LanguageModelV3;
@@ -302,7 +302,7 @@ async function prepareCallOptions(input: {
   };
 }
 
-export async function prepareRuntimeLanguageModelCall(input: {
+async function prepareRuntimeLanguageModelCall(input: {
   modelID: string;
   origin: string;
   sessionID: string;
