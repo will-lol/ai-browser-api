@@ -91,11 +91,6 @@ const doStreamMock = mock(async () => {
 });
 
 const adapter = {
-  auth: {
-    load: mock(async () => ({
-      transport: {},
-    })),
-  },
   createModel: mock(async () => ({
     provider: "openai",
     modelId: "gpt-4o-mini",
@@ -123,11 +118,11 @@ mock.module("@/lib/runtime/provider-registry", () => ({
 
 mock.module("@/lib/runtime/adapters", () => ({
   resolveAdapterForModel: () => adapter,
-  createResolvedAdapterSession: async ({ auth, baseTransport }: { auth?: unknown; baseTransport: unknown }) => ({
-    adapter,
-    auth,
-    transport: baseTransport,
-    createModel: adapter.createModel,
+  parseAdapterStoredAuth: () => ({
+    type: "api" as const,
+    key: "token-1",
+    methodID: "apikey",
+    methodType: "apikey",
   }),
 }));
 
@@ -143,7 +138,6 @@ beforeEach(() => {
   getModelMock.mockClear();
   doGenerateMock.mockClear();
   doStreamMock.mockClear();
-  adapter.auth.load.mockClear();
   adapter.createModel.mockClear();
 });
 

@@ -19,6 +19,8 @@
 - `@llm-bridge/client`
   - Effect service (`BridgeClient`) backed by Effect RPC.
   - Exposes AI SDK-compatible `LanguageModelV3` from `getModel`.
+  - Exposes a stable AI SDK UI `ChatTransport` from `getChatTransport`, with
+    `modelId` supplied per chat request rather than bound to the transport.
   - Consumes `@llm-bridge/contracts` and `@effect/rpc`.
 - `@llm-bridge/example-app`
   - Consumer application using `@llm-bridge/client`.
@@ -48,3 +50,6 @@
 - Runtime does not inject provider-specific `thinking`, `reasoning`, or `store` defaults.
 - Caller-supplied request options are authoritative.
 - If reasoning/thinking behavior is desired for a model, it must be set explicitly by the caller.
+- `getModel()` is the stateless AI SDK Core path; `getChatTransport()` is the
+  AI SDK UI path.
+- Model identity remains runtime request data, not transport identity.

@@ -18,7 +18,6 @@
 
 Optional:
 
-- `auth.load()` to refresh persisted auth into transport plus typed adapter state
 - `patchCatalog()` to alter provider/model metadata before it is stored
 
 ## Zod Rules
@@ -35,16 +34,16 @@ Optional:
 - Adapters must parse stored auth through `auth.parseStoredAuth()` instead of reading raw metadata directly anywhere else.
 - Adapters must return persisted auth through `auth.serializeAuth()` so `methodID`, `methodType`, and typed metadata stay normalized.
 - `auth.parseStoredAuth()` is the only place that should read legacy metadata markers or tolerate older record shapes.
-- Adapters may refresh tokens and persist updated auth during `auth.load()`.
+- Adapters may refresh tokens and persist updated auth during `createModel()`.
 - OAuth/device/browser flows should return a normalized `AuthResult`.
 
-## Adapter State
+## Execution Boundary
 
-- Keep `RuntimeTransportConfig` transport-only: `baseURL`, auth, headers, and `fetch`.
-- Do not use transport as a hidden adapter-state channel.
-- If execution needs adapter-private state, return it from `auth.load()` and consume it from `createModel({ state })`.
+- `createModel()` owns the final execution configuration: base URL, auth headers, API keys, custom `fetch`, and request wrappers.
+- The shared runtime passes resolved provider/model records, request metadata, a parsed auth snapshot, auth-store helpers, and a runtime clock helper into `createModel()`.
+- Re-read auth from the injected `authStore` helpers only when refresh or coordination requires it.
 - Persisted auth metadata should be JSON-compatible and typed per adapter.
-- The shared runtime resolves adapters into an opaque session wrapper. Runtime code should call the session's `createModel()` closure and never inspect adapter-private state directly.
+- Do not reintroduce a shared transport/session abstraction for provider-specific request behavior.
 
 ## Browser Constraints
 
@@ -54,5 +53,5 @@ Optional:
 
 ## Examples
 
-- Generic adapter: npm package plus API key auth, then call `createFactoryLanguageModel()`.
+- Generic adapter: npm package plus API key auth, then parse provider options inside `createModel()` and build the SDK client directly.
 - Provider override adapter: provider-specific auth plus optional `patchCatalog()` and a wrapped `LanguageModelV3` from `createModel()`.

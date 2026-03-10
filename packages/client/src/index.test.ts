@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { UIMessage } from "ai";
 import {
+  type BridgeAbortChatStreamRequest,
+  type BridgeChatSendMessagesRequest,
   PageBridgeRpcGroup,
   RuntimeDefectError,
   RuntimeChatStreamNotFoundError,
@@ -119,6 +121,8 @@ async function createMockPageBridgeSession(input: {
   streamScenarios: Array<MockStreamScenario>;
   chatSendScenarios?: Array<MockChatStreamScenario>;
   chatReconnectScenarios?: Array<MockChatStreamScenario>;
+  chatSendRequests?: Array<BridgeChatSendMessagesRequest>;
+  abortChatRequests?: Array<BridgeAbortChatStreamRequest>;
 }) {
   const scope = await Effect.runPromise(Scope.make());
   let onMessage:
@@ -166,7 +170,8 @@ async function createMockPageBridgeSession(input: {
                   }),
           );
         },
-        chatSendMessages: () => {
+        chatSendMessages: (payload) => {
+          input.chatSendRequests?.push(payload);
           const scenario = input.chatSendScenarios?.shift();
           if (!scenario) {
             return Stream.fail(
@@ -222,7 +227,13 @@ async function createMockPageBridgeSession(input: {
                   }),
           );
         },
-        abortChatStream: () => Effect.succeed({ ok: true }),
+        abortChatStream: (payload) =>
+          Effect.sync(() => {
+            input.abortChatRequests?.push(payload);
+            return {
+              ok: true,
+            };
+          }),
       }),
     ),
   );
@@ -311,6 +322,8 @@ async function withMockBridge<A>(
     streamScenarios: Array<MockStreamScenario>;
     chatSendScenarios?: Array<MockChatStreamScenario>;
     chatReconnectScenarios?: Array<MockChatStreamScenario>;
+    chatSendRequests?: Array<BridgeChatSendMessagesRequest>;
+    abortChatRequests?: Array<BridgeAbortChatStreamRequest>;
   },
   run: () => Promise<A>,
 ) {
@@ -345,6 +358,8 @@ async function withMockBridge<A>(
         streamScenarios: input.streamScenarios,
         chatSendScenarios: input.chatSendScenarios,
         chatReconnectScenarios: input.chatReconnectScenarios,
+        chatSendRequests: input.chatSendRequests,
+        abortChatRequests: input.abortChatRequests,
       }).then((cleanup) => {
         sessionCleanups.push(cleanup);
       });
@@ -396,7 +411,7 @@ async function loadTestChatTransport() {
     withBridgeClient(
       Effect.gen(function* () {
         const client = yield* BridgeClient;
-        return client.getChatTransport("google/gemini-test");
+        return client.getChatTransport();
       }),
       {
         timeoutMs: 50,
@@ -585,6 +600,8 @@ describe("BridgeClientLive stream bootstrap", () => {
 
 describe("BridgeClientLive chat transport", () => {
   it("returns a chat transport that streams UI message chunks", async () => {
+    const chatSendRequests: Array<BridgeChatSendMessagesRequest> = [];
+
     await withMockBridge(
       {
         streamScenarios: [],
@@ -601,6 +618,7 @@ describe("BridgeClientLive chat transport", () => {
             ],
           },
         ],
+        chatSendRequests,
       },
       async () => {
         const transport = await loadTestChatTransport();
@@ -610,6 +628,9 @@ describe("BridgeClientLive chat transport", () => {
           messageId: undefined,
           messages: TEST_CHAT_MESSAGES,
           abortSignal: undefined,
+          body: {
+            modelId: "google/gemini-test",
+          },
         });
 
         const reader = stream.getReader();
@@ -627,6 +648,150 @@ describe("BridgeClientLive chat transport", () => {
         assert.equal(fourth.done, false);
         assert.equal(fourth.value?.type, "text-delta");
         assert.equal(fourth.value?.delta, "hello");
+        assert.deepEqual(chatSendRequests, [
+          {
+            chatId: "chat_1",
+            modelId: "google/gemini-test",
+            trigger: "submit-message",
+            messageId: undefined,
+            messages: TEST_CHAT_MESSAGES,
+            options: undefined,
+          },
+        ]);
+      },
+    );
+  });
+
+  it("supports switching models with the same transport instance", async () => {
+    const chatSendRequests: Array<BridgeChatSendMessagesRequest> = [];
+
+    await withMockBridge(
+      {
+        streamScenarios: [],
+        chatSendScenarios: [
+          {
+            chunks: [{ type: "finish" }],
+          },
+          {
+            chunks: [{ type: "finish" }],
+          },
+        ],
+        chatSendRequests,
+      },
+      async () => {
+        const transport = await loadTestChatTransport();
+
+        const firstStream = await transport.sendMessages({
+          trigger: "submit-message",
+          chatId: "chat_switch",
+          messageId: undefined,
+          messages: TEST_CHAT_MESSAGES,
+          abortSignal: undefined,
+          body: {
+            modelId: "google/gemini-test",
+          },
+        });
+        await firstStream.getReader().read();
+
+        const secondStream = await transport.sendMessages({
+          trigger: "submit-message",
+          chatId: "chat_switch",
+          messageId: undefined,
+          messages: TEST_CHAT_MESSAGES,
+          abortSignal: undefined,
+          body: {
+            modelId: "openai/gpt-4o-mini",
+          },
+        });
+        await secondStream.getReader().read();
+
+        assert.deepEqual(
+          chatSendRequests.map((request) => request.modelId),
+          ["google/gemini-test", "openai/gpt-4o-mini"],
+        );
+      },
+    );
+  });
+
+  it("fails when modelId is missing from the request body", async () => {
+    const transport = await loadTestChatTransport();
+
+    await assert.rejects(
+      () =>
+        transport.sendMessages({
+          trigger: "submit-message",
+          chatId: "chat_missing_model",
+          messageId: undefined,
+          messages: TEST_CHAT_MESSAGES,
+          abortSignal: undefined,
+          body: {},
+        }),
+      (error: Error) => {
+        assert.equal(error instanceof RuntimeValidationError, true);
+        assert.match(error.message, /body\.modelId/i);
+        return true;
+      },
+    );
+  });
+
+  it("passes sanitized request body to prepareSendMessages", async () => {
+    const prepared: Array<{
+      modelId: string;
+      body: object | undefined;
+    }> = [];
+
+    await withMockBridge(
+      {
+        streamScenarios: [],
+        chatSendScenarios: [
+          {
+            chunks: [{ type: "finish" }],
+          },
+        ],
+      },
+      async () => {
+        const transport = await Effect.runPromise(
+          withBridgeClient(
+            Effect.gen(function* () {
+              const client = yield* BridgeClient;
+              return client.getChatTransport({
+                prepareSendMessages: ({ body, modelId }) => {
+                  prepared.push({
+                    modelId,
+                    body,
+                  });
+                  return undefined;
+                },
+              });
+            }),
+            {
+              timeoutMs: 50,
+            },
+          ),
+        );
+
+        const stream = await transport.sendMessages({
+          trigger: "submit-message",
+          chatId: "chat_prepare",
+          messageId: undefined,
+          messages: TEST_CHAT_MESSAGES,
+          abortSignal: undefined,
+          body: {
+            modelId: "google/gemini-test",
+            custom: "value",
+          },
+        });
+
+        await stream.getReader().read();
+
+        assert.deepEqual(prepared, [
+          {
+            modelId: "google/gemini-test",
+            body: {
+              custom: "value",
+            },
+          },
+        ]);
       },
     );
   });
@@ -669,6 +834,9 @@ describe("BridgeClientLive chat transport", () => {
           messageId: undefined,
           messages: TEST_CHAT_MESSAGES,
           abortSignal: undefined,
+          body: {
+            modelId: "google/gemini-test",
+          },
           headers: {
             "x-test": "1",
           },
@@ -677,6 +845,46 @@ describe("BridgeClientLive chat transport", () => {
         assert.equal(error instanceof RuntimeValidationError, true);
         assert.match(error.message, /does not support per-request headers/i);
         return true;
+      },
+    );
+  });
+
+  it("aborts by chatId when the request signal is aborted", async () => {
+    const abortChatRequests: Array<BridgeAbortChatStreamRequest> = [];
+
+    await withMockBridge(
+      {
+        streamScenarios: [],
+        chatSendScenarios: [
+          {
+            chunks: [{ type: "start", messageId: "msg_assistant" }],
+          },
+        ],
+        abortChatRequests,
+      },
+      async () => {
+        const transport = await loadTestChatTransport();
+        const abortController = new AbortController();
+
+        await transport.sendMessages({
+          trigger: "submit-message",
+          chatId: "chat_abort",
+          messageId: undefined,
+          messages: TEST_CHAT_MESSAGES,
+          abortSignal: abortController.signal,
+          body: {
+            modelId: "google/gemini-test",
+          },
+        });
+
+        abortController.abort();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        assert.deepEqual(abortChatRequests, [
+          {
+            chatId: "chat_abort",
+          },
+        ]);
       },
     );
   });

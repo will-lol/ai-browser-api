@@ -23,16 +23,11 @@ import {
 } from "./factory-language-model";
 import type {
   AIAdapter,
-  AdapterAuthContext,
   AdapterAuthorizeContext,
-  LoadedAdapterState,
   ParsedAuthRecord,
+  RuntimeAdapterContext,
 } from "./types";
-import {
-  setAuth,
-  type AuthRecord,
-  type AuthResult,
-} from "@/lib/runtime/auth-store";
+import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import {
   waitForOAuthCallback,
   type OAuthWebRequestOnBeforeRequest,
@@ -283,23 +278,19 @@ function buildOpenAISettings(input: {
   providerID: string;
   providerOptions: OpenAIProviderOptions;
   headers?: Record<string, string>;
-  transport: {
-    baseURL?: string;
-    apiKey?: string;
-    headers?: Record<string, string>;
-    fetch?: typeof fetch;
-  };
+  baseURL?: string;
+  apiKey?: string;
+  extraHeaders?: Record<string, string>;
+  fetch?: typeof fetch;
 }): Parameters<typeof createOpenAI>[0] {
   return {
-    baseURL:
-      input.transport.baseURL ??
-      input.providerOptions.baseURL,
-    apiKey: input.transport.apiKey,
+    baseURL: input.baseURL ?? input.providerOptions.baseURL,
+    apiKey: input.apiKey,
     headers: {
       ...(input.headers ?? {}),
-      ...(input.transport.headers ?? {}),
+      ...(input.extraHeaders ?? {}),
     },
-    fetch: input.transport.fetch,
+    fetch: input.fetch,
     name: input.providerOptions.name ?? input.providerID,
     organization: input.providerOptions.organization,
     project: input.providerOptions.project,
@@ -745,36 +736,49 @@ function buildCodexOAuthProvider(provider: ProviderInfo) {
   };
 }
 
-export async function loadCodexOAuthState(
-  ctx: AdapterAuthContext<OpenAIAuthMetadata>,
-): Promise<LoadedAdapterState<void>> {
-  if (!isCodexOAuth(ctx.auth)) {
+export async function resolveOpenAIExecutionState(
+  context: RuntimeAdapterContext<OpenAIAuthMetadata>,
+) {
+  if (!context.auth) {
     return {
-      transport: {},
-      state: undefined,
+      apiKey: undefined,
+      baseURL: undefined,
+      headers: {},
     };
   }
 
-  let access = ctx.auth.access;
-  let refresh = ctx.auth.refresh;
-  let expiresAt = ctx.auth.expiresAt;
-  let effectiveAccountId = ctx.auth.accountId ?? ctx.auth.metadata?.accountId;
+  if (!isCodexOAuth(context.auth)) {
+    return {
+      apiKey: context.auth.type === "api" ? context.auth.key : undefined,
+      baseURL: undefined,
+      headers: {},
+    };
+  }
 
-  if (refresh && (!expiresAt || expiresAt <= Date.now() + 60_000)) {
+  let access = context.auth.access;
+  let refresh = context.auth.refresh;
+  let expiresAt = context.auth.expiresAt;
+  let effectiveAccountId =
+    context.auth.accountId ?? context.auth.metadata?.accountId;
+
+  if (
+    refresh &&
+    (!expiresAt || expiresAt <= context.runtime.now() + 60_000)
+  ) {
     const refreshed = await refreshAccessToken(refresh);
     effectiveAccountId = extractAccountId(refreshed) ?? effectiveAccountId;
     access = refreshed.access_token;
     refresh = refreshed.refresh_token;
-    expiresAt = Date.now() + (refreshed.expires_in ?? 3600) * 1000;
+    expiresAt = context.runtime.now() + (refreshed.expires_in ?? 3600) * 1000;
 
-    await setAuth(ctx.providerID, {
+    await context.authStore.set({
       type: "oauth",
       access,
       refresh,
       expiresAt,
       accountId: effectiveAccountId,
-      methodID: ctx.auth.methodID,
-      methodType: ctx.auth.methodType,
+      methodID: context.auth.methodID,
+      methodType: context.auth.methodType,
       metadata: effectiveAccountId ? { accountId: effectiveAccountId } : undefined,
     });
   }
@@ -786,17 +790,13 @@ export async function loadCodexOAuthState(
   }
 
   return {
-    transport: {
-      baseURL: CODEX_API_BASE,
-      apiKey: access,
-      authType: "bearer",
-      headers: {
-        ...(effectiveAccountId
-          ? { "chatgpt-account-id": effectiveAccountId }
-          : {}),
-      },
+    baseURL: CODEX_API_BASE,
+    apiKey: access,
+    headers: {
+      ...(effectiveAccountId
+        ? { "chatgpt-account-id": effectiveAccountId }
+        : {}),
     },
-    state: undefined,
   };
 }
 
@@ -818,18 +818,12 @@ function wrapCodexCallOptions(
   );
 }
 
-export const openaiAdapter: AIAdapter<
-  OpenAIAuthMetadata,
-  void,
-  OpenAIProviderOptions
-> = {
+export const openaiAdapter: AIAdapter<OpenAIAuthMetadata> = {
   key: "provider:openai",
   displayName: "OpenAI",
   match: {
     providerIDs: ["openai"],
   },
-  parseProviderOptions: (provider) =>
-    parseProviderOptions(openAIProviderOptionsSchema, provider.options),
   auth: {
     parseStoredAuth: parseOpenAIStoredAuth,
     serializeAuth: serializeOpenAIAuth,
@@ -850,36 +844,25 @@ export const openaiAdapter: AIAdapter<
         },
       ];
     },
-    async load(ctx) {
-      if (!ctx.auth) {
-        return {
-          transport: {},
-          state: undefined,
-        };
-      }
-
-      if (ctx.auth.type === "api") {
-        return {
-          transport: {
-            apiKey: ctx.auth.key,
-          },
-          state: undefined,
-        };
-      }
-      return loadCodexOAuthState(ctx);
-    },
   },
   async patchCatalog(ctx, provider) {
     if (!isCodexOAuth(ctx.auth)) return provider;
     return buildCodexOAuthProvider(provider);
   },
-  async createModel({ context, providerOptions, transport }) {
+  async createModel(context) {
+    const providerOptions = parseProviderOptions(
+      openAIProviderOptionsSchema,
+      context.provider.options,
+    );
+    const execution = await resolveOpenAIExecutionState(context);
     const provider = createOpenAI(
       buildOpenAISettings({
         providerID: context.providerID,
         providerOptions,
         headers: context.model.headers,
-        transport,
+        baseURL: execution.baseURL,
+        apiKey: execution.apiKey,
+        extraHeaders: execution.headers,
       }),
     );
     const baseModel = provider.responses(context.model.api.id);

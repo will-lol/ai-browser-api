@@ -7,9 +7,7 @@ import { parseProviderOptions } from "./provider-options";
 import { defineAuthSchema } from "./schema";
 import type {
   AIAdapter,
-  AdapterAuthContext,
   AdapterAuthorizeContext,
-  LoadedAdapterState,
   ParsedAuthRecord,
 } from "./types";
 import {
@@ -305,90 +303,12 @@ function serializeGitLabAuth(input: {
   };
 }
 
-export async function loadGitLabAuthState(
-  ctx: AdapterAuthContext<GitLabAuthMetadata>,
-): Promise<LoadedAdapterState<void>> {
-  if (!ctx.auth) {
-    return {
-      transport: {},
-      state: undefined,
-    };
-  }
-
-  const instanceUrl = ctx.auth.metadata?.instanceUrl || GITLAB_COM_URL;
-  if (ctx.auth.type === "api") {
-    return {
-      transport: {
-        baseURL: instanceUrl,
-        apiKey: ctx.auth.key,
-        authType: "bearer",
-      },
-      state: undefined,
-    };
-  }
-
-  const oauthAuth = ctx.auth;
-  let access = ctx.auth.access;
-  let refresh = ctx.auth.refresh;
-  let expiresAt = ctx.auth.expiresAt;
-
-  if (refresh && (!expiresAt || expiresAt <= Date.now() + 5 * 60_000)) {
-    const lockKey = `${ctx.providerID}:${instanceUrl}`;
-    const existingLock = refreshLocks.get(lockKey);
-    if (existingLock) {
-      await existingLock;
-      const latest = await getAuth(ctx.providerID);
-      if (latest?.type === "oauth") {
-        access = latest.access;
-        refresh = latest.refresh;
-        expiresAt = latest.expiresAt;
-      }
-    } else {
-      const task = (async () => {
-        const next = await exchangeRefreshToken(instanceUrl, refresh);
-        access = next.access_token;
-        refresh = next.refresh_token;
-        expiresAt = Date.now() + next.expires_in * 1000;
-        await setAuth(ctx.providerID, {
-          type: "oauth",
-          access,
-          refresh,
-          expiresAt,
-          accountId: oauthAuth.accountId,
-          methodID: oauthAuth.methodID,
-          methodType: oauthAuth.methodType,
-          metadata: {
-            instanceUrl,
-          },
-        });
-      })();
-      refreshLocks.set(lockKey, task);
-      try {
-        await task;
-      } finally {
-        refreshLocks.delete(lockKey);
-      }
-    }
-  }
-
-  return {
-    transport: {
-      baseURL: instanceUrl,
-      apiKey: access,
-      authType: "bearer",
-    },
-    state: undefined,
-  };
-}
-
-export const gitlabAdapter: AIAdapter<GitLabAuthMetadata, void> = {
+export const gitlabAdapter: AIAdapter<GitLabAuthMetadata> = {
   key: "provider:gitlab",
   displayName: "GitLab",
   match: {
     providerIDs: ["gitlab"],
   },
-  parseProviderOptions: (provider) =>
-    parseProviderOptions(gitLabProviderOptionsSchema, provider.options),
   auth: {
     parseStoredAuth: parseGitLabStoredAuth,
     serializeAuth: serializeGitLabAuth,
@@ -438,15 +358,6 @@ export const gitlabAdapter: AIAdapter<GitLabAuthMetadata, void> = {
           authorize: authorizeGitLabPat,
         },
       ];
-    },
-    async load(ctx) {
-      if (!ctx.auth) {
-        return {
-          transport: {},
-          state: undefined,
-        };
-      }
-      return loadGitLabAuthState(ctx);
     },
   },
   async createModel() {

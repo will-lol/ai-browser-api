@@ -18,14 +18,10 @@ import type {
   AIAdapter,
   AdapterAuthContext,
   AdapterAuthorizeContext,
-  LoadedAdapterState,
   ParsedAuthRecord,
+  RuntimeAdapterContext,
 } from "./types";
-import {
-  setAuth,
-  type AuthRecord,
-  type AuthResult,
-} from "@/lib/runtime/auth-store";
+import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import { waitForOAuthCallback } from "@/lib/runtime/oauth-browser-callback-util";
 import { generatePKCE, generateState } from "@/lib/runtime/oauth-util";
 import type { ProviderInfo } from "@/lib/runtime/provider-registry";
@@ -149,15 +145,15 @@ const onboardUserPayloadSchema = z.object({
     .optional(),
 });
 
-type GoogleRuntimeState =
-  | {
-      kind: "api";
-    }
-  | {
-      kind: "oauth";
-      projectId?: string;
-      projectResolutionError?: string;
-    };
+type GoogleExecutionState = {
+  kind: "api" | "oauth";
+  apiKey?: string;
+  baseURL?: string;
+  headers: Record<string, string>;
+  fetch?: typeof fetch;
+  projectId?: string;
+  projectResolutionError?: string;
+};
 
 type GeminiProjectContextDeps = {
   loadCodeAssist: (
@@ -193,26 +189,22 @@ function buildGoogleSettings(input: {
   providerID: string;
   providerOptions: GoogleProviderOptions;
   headers?: Record<string, string>;
-  transport: {
-    baseURL?: string;
-    apiKey?: string;
-    headers?: Record<string, string>;
-    fetch?: typeof fetch;
-  };
-  state: GoogleRuntimeState;
+  execution: GoogleExecutionState;
 }): Parameters<typeof createGoogleGenerativeAI>[0] {
   return {
     baseURL:
-      readMetadataValue(input.transport.baseURL) ??
+      readMetadataValue(input.execution.baseURL) ??
       input.providerOptions.baseURL,
     apiKey:
-      readMetadataValue(input.transport.apiKey) ??
-      (input.state.kind === "oauth" ? "gemini-oauth-placeholder" : undefined),
+      readMetadataValue(input.execution.apiKey) ??
+      (input.execution.kind === "oauth"
+        ? "gemini-oauth-placeholder"
+        : undefined),
     headers: {
       ...(input.headers ?? {}),
-      ...(input.transport.headers ?? {}),
+      ...input.execution.headers,
     },
-    fetch: input.transport.fetch,
+    fetch: input.execution.fetch,
     name: input.providerOptions.name ?? input.providerID,
   };
 }
@@ -749,47 +741,56 @@ async function authorizeGeminiOAuth(input: AdapterAuthorizeContext<{ projectId?:
   };
 }
 
-export async function loadGeminiOAuthState(
-  ctx: AdapterAuthContext<GoogleAuthMetadata>,
-): Promise<LoadedAdapterState<GoogleRuntimeState>> {
-  if (!ctx.auth || ctx.auth.type !== "oauth" || !isGeminiOAuth(ctx.auth)) {
+export async function resolveGoogleExecutionState(
+  context: RuntimeAdapterContext<GoogleAuthMetadata>,
+): Promise<GoogleExecutionState> {
+  if (!context.auth) {
     return {
-      transport: {},
-      state: {
-        kind: "api",
-      },
+      kind: "api",
+      apiKey: undefined,
+      baseURL: context.model.api.url,
+      headers: {},
     };
   }
 
-  let access = ctx.auth.access;
-  let refresh = ctx.auth.refresh;
-  let expiresAt = ctx.auth.expiresAt;
+  if (context.auth.type === "api" || !isGeminiOAuth(context.auth)) {
+    return {
+      kind: "api",
+      apiKey: context.auth.type === "api" ? context.auth.key : undefined,
+      baseURL: context.model.api.url,
+      headers: {},
+    };
+  }
 
-  if (refresh && (!expiresAt || expiresAt <= Date.now() + 60_000)) {
+  let access = context.auth.access;
+  let refresh = context.auth.refresh;
+  let expiresAt = context.auth.expiresAt;
+
+  if (
+    refresh &&
+    (!expiresAt || expiresAt <= context.runtime.now() + 60_000)
+  ) {
     const refreshed = await refreshAccessToken(refresh, getGeminiClientSecret());
     access = refreshed.access_token;
     refresh = refreshed.refresh_token ?? refresh;
-    expiresAt = Date.now() + refreshed.expires_in * 1000;
+    expiresAt = context.runtime.now() + refreshed.expires_in * 1000;
   }
 
   if (!access) {
     const errorMessage =
       "Gemini OAuth access token is unavailable. Reconnect Google OAuth and retry.";
     return {
-      transport: {
-        authType: "bearer",
-        headers: {
-          ...GEMINI_CODE_ASSIST_HEADERS,
-        },
+      kind: "oauth",
+      apiKey: undefined,
+      baseURL: context.model.api.url,
+      headers: {
+        ...GEMINI_CODE_ASSIST_HEADERS,
       },
-      state: {
-        kind: "oauth",
-        projectResolutionError: errorMessage,
-      },
+      projectResolutionError: errorMessage,
     };
   }
 
-  const metadata = ctx.auth.metadata ?? {};
+  const metadata = context.auth.metadata ?? {};
   const projectId = readMetadataValue(metadata.projectId);
   const email = readMetadataValue(metadata.email);
   let managedProjectId = readMetadataValue(metadata.managedProjectId);
@@ -811,65 +812,54 @@ export async function loadGeminiOAuthState(
   }
 
   const nextMetadata = buildPersistedMetadata({
-    previous: ctx.auth.metadata,
+    previous: context.auth.metadata,
     email,
     projectId,
     managedProjectId,
   });
 
   const shouldPersistAuth =
-    access !== ctx.auth.access ||
-    refresh !== ctx.auth.refresh ||
-    expiresAt !== ctx.auth.expiresAt ||
-    !isRecordEqual(ctx.auth.metadata, nextMetadata);
+    access !== context.auth.access ||
+    refresh !== context.auth.refresh ||
+    expiresAt !== context.auth.expiresAt ||
+    !isRecordEqual(context.auth.metadata, nextMetadata);
 
   if (shouldPersistAuth) {
-    await setAuth(ctx.providerID, {
+    await context.authStore.set({
       type: "oauth",
       access,
       refresh,
       expiresAt,
-      methodID: ctx.auth.methodID,
-      methodType: ctx.auth.methodType,
+      methodID: context.auth.methodID,
+      methodType: context.auth.methodType,
       metadata: nextMetadata,
     });
   }
 
   return {
-    transport: {
-      apiKey: access,
-      authType: "bearer",
-      headers: {
-        ...GEMINI_CODE_ASSIST_HEADERS,
-      },
-      ...(effectiveProjectId
-        ? {
-            fetch: createGeminiCodeAssistFetch({
-              projectId: effectiveProjectId,
-            }),
-          }
-        : {}),
+    kind: "oauth",
+    apiKey: access,
+    baseURL: context.model.api.url,
+    headers: {
+      Authorization: `Bearer ${access}`,
+      ...GEMINI_CODE_ASSIST_HEADERS,
     },
-    state: {
-      kind: "oauth",
-      projectId: effectiveProjectId,
-      projectResolutionError,
-    },
+    fetch: effectiveProjectId
+      ? createGeminiCodeAssistFetch({
+          projectId: effectiveProjectId,
+        })
+      : undefined,
+    projectId: effectiveProjectId,
+    projectResolutionError,
   };
 }
 
-export const googleAdapter: AIAdapter<
-  GoogleAuthMetadata,
-  GoogleRuntimeState,
-  GoogleProviderOptions
-> = {
+export const googleAdapter: AIAdapter<GoogleAuthMetadata> = {
   key: "provider:google",
   displayName: "Google",
   match: {
     providerIDs: ["google"],
   },
-  parseProviderOptions: (provider) =>
-    parseProviderOptions(googleProviderOptionsSchema, provider.options),
   auth: {
     parseStoredAuth: parseGoogleStoredAuth,
     serializeAuth: serializeGoogleAuth,
@@ -894,28 +884,6 @@ export const googleAdapter: AIAdapter<
           authorize: authorizeGeminiOAuth,
         },
       ];
-    },
-    async load(ctx) {
-      if (!ctx.auth) {
-        return {
-          transport: {},
-          state: {
-            kind: "api",
-          },
-        };
-      }
-
-      if (ctx.auth.type === "api") {
-        return {
-          transport: {
-            apiKey: ctx.auth.key,
-          },
-          state: {
-            kind: "api",
-          },
-        };
-      }
-      return loadGeminiOAuthState(ctx);
     },
   },
   async patchCatalog(ctx, provider) {
@@ -942,9 +910,15 @@ export const googleAdapter: AIAdapter<
       models,
     } satisfies ProviderInfo;
   },
-  async createModel({ context, providerOptions, transport, state }) {
-    if (state.kind === "oauth" && state.projectResolutionError) {
-      throw new Error(state.projectResolutionError);
+  async createModel(context) {
+    const providerOptions = parseProviderOptions(
+      googleProviderOptionsSchema,
+      context.provider.options,
+    );
+    const execution = await resolveGoogleExecutionState(context);
+
+    if (execution.kind === "oauth" && execution.projectResolutionError) {
+      throw new Error(execution.projectResolutionError);
     }
 
     const provider = createGoogleGenerativeAI(
@@ -952,13 +926,12 @@ export const googleAdapter: AIAdapter<
         providerID: context.providerID,
         providerOptions,
         headers: context.model.headers,
-        transport,
-        state,
+        execution,
       }),
     );
     const baseModel = provider.languageModel(context.model.api.id);
 
-    if (state.kind !== "oauth") {
+    if (execution.kind !== "oauth") {
       return baseModel;
     }
 

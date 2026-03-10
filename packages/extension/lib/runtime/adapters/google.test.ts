@@ -2,9 +2,77 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   googleAdapter,
-  loadGeminiOAuthState,
   resolveGeminiProjectContext,
+  resolveGoogleExecutionState,
 } from "@/lib/runtime/adapters/google";
+import { rewriteGeminiCodeAssistRequest } from "@/lib/runtime/adapters/gemini-code-assist-transport";
+import type { RuntimeAdapterContext } from "@/lib/runtime/adapters/types";
+
+function createContext(): Omit<RuntimeAdapterContext, "auth" | "authStore"> {
+  return {
+    providerID: "google",
+    modelID: "gemini-2.5-pro",
+    origin: "https://example.test",
+    sessionID: "session-1",
+    requestID: "request-1",
+    provider: {
+      id: "google",
+      name: "Google",
+      source: "models.dev",
+      env: ["GOOGLE_API_KEY"],
+      connected: true,
+      options: {},
+    },
+    model: {
+      id: "gemini-2.5-pro",
+      providerID: "google",
+      name: "Gemini 2.5 Pro",
+      status: "active",
+      api: {
+        id: "gemini-2.5-pro",
+        url: "https://generativelanguage.googleapis.com",
+        npm: "@ai-sdk/google",
+      },
+      cost: {
+        input: 0,
+        output: 0,
+        cache: {
+          read: 0,
+          write: 0,
+        },
+      },
+      limit: {
+        context: 1,
+        output: 1,
+      },
+      options: {},
+      headers: {},
+      capabilities: {
+        temperature: true,
+        reasoning: true,
+        attachment: true,
+        toolcall: true,
+        input: {
+          text: true,
+          audio: false,
+          image: true,
+          video: false,
+          pdf: false,
+        },
+        output: {
+          text: true,
+          audio: false,
+          image: false,
+          video: false,
+          pdf: false,
+        },
+      },
+    },
+    runtime: {
+      now: () => Date.now(),
+    },
+  };
+}
 
 describe("resolveGeminiProjectContext", () => {
   it("uses configured project without loading managed project", async () => {
@@ -112,18 +180,11 @@ describe("resolveGeminiProjectContext", () => {
   });
 });
 
-describe("loadGeminiOAuthState", () => {
-  it("returns structured transport state for oauth auth", async () => {
-    const output = await loadGeminiOAuthState({
-      providerID: "google",
-      provider: {
-        id: "google",
-        name: "Google",
-        source: "models.dev",
-        env: ["GOOGLE_API_KEY"],
-        connected: true,
-        options: {},
-      },
+describe("resolveGoogleExecutionState", () => {
+  it("returns oauth execution headers including Authorization", async () => {
+    const setAuthCalls: unknown[] = [];
+    const output = await resolveGoogleExecutionState({
+      ...createContext(),
       auth: {
         type: "oauth",
         methodID: "oauth",
@@ -137,12 +198,67 @@ describe("loadGeminiOAuthState", () => {
           projectId: "configured-project",
         },
       },
+      authStore: {
+        get: async () => undefined,
+        set: async (auth) => {
+          setAuthCalls.push(auth);
+        },
+        remove: async () => undefined,
+      },
     });
 
-    assert.equal(output.transport.authType, "bearer");
-    assert.equal(output.transport.apiKey, "oauth-access");
-    assert.equal(output.state.kind, "oauth");
-    assert.equal(output.state.projectId, "configured-project");
+    assert.equal(output.kind, "oauth");
+    assert.equal(output.apiKey, "oauth-access");
+    assert.equal(output.headers.Authorization, "Bearer oauth-access");
+    assert.equal(output.projectId, "configured-project");
+    assert.equal(setAuthCalls.length, 0);
+  });
+
+  it("provides headers that let code-assist request rewriting proceed", async () => {
+    const execution = await resolveGoogleExecutionState({
+      ...createContext(),
+      auth: {
+        type: "oauth",
+        methodID: "oauth",
+        methodType: "oauth",
+        access: "oauth-access",
+        refresh: "oauth-refresh",
+        expiresAt: Date.now() + 5 * 60_000,
+        createdAt: Date.now() - 1_000,
+        updatedAt: Date.now() - 1_000,
+        metadata: {
+          projectId: "configured-project",
+        },
+      },
+      authStore: {
+        get: async () => undefined,
+        set: async () => undefined,
+        remove: async () => undefined,
+      },
+    });
+
+    const rewritten = await rewriteGeminiCodeAssistRequest(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
+      {
+        method: "POST",
+        headers: execution.headers,
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: "hello" }],
+            },
+          ],
+        }),
+      },
+      {
+        projectId: execution.projectId ?? "configured-project",
+      },
+    );
+
+    assert.ok(rewritten);
+    const headers = new Headers(rewritten.init.headers);
+    assert.equal(headers.get("authorization"), "Bearer oauth-access");
   });
 });
 
@@ -171,96 +287,5 @@ describe("googleAdapter.auth.parseStoredAuth", () => {
       projectId: "configured-project",
       managedProjectId: "managed-project",
     });
-  });
-});
-
-describe("googleAdapter.createModel", () => {
-  it("fails early when project resolution produced an error", async () => {
-    const context = {
-      providerID: "google",
-      modelID: "gemini-2.5-pro",
-      origin: "https://example.test",
-      sessionID: "session-1",
-      requestID: "request-1",
-      auth: {
-        type: "oauth" as const,
-        methodID: "oauth" as const,
-        methodType: "oauth" as const,
-        access: "oauth-access",
-        createdAt: Date.now() - 1_000,
-        updatedAt: Date.now() - 1_000,
-      },
-      provider: {
-        id: "google",
-        name: "Google",
-        source: "models.dev" as const,
-        env: ["GOOGLE_API_KEY"],
-        connected: true,
-        options: {},
-      },
-      model: {
-        id: "gemini-2.5-pro",
-        providerID: "google",
-        name: "Gemini 2.5 Pro",
-        status: "active" as const,
-        api: {
-          id: "gemini-2.5-pro",
-          url: "https://generativelanguage.googleapis.com",
-          npm: "@ai-sdk/google",
-        },
-        cost: {
-          input: 0,
-          output: 0,
-          cache: {
-            read: 0,
-            write: 0,
-          },
-        },
-        limit: {
-          context: 1,
-          output: 1,
-        },
-        options: {},
-        headers: {},
-        capabilities: {
-          temperature: true,
-          reasoning: true,
-          attachment: true,
-          toolcall: true,
-          input: {
-            text: true,
-            audio: false,
-            image: true,
-            video: false,
-            pdf: false,
-          },
-          output: {
-            text: true,
-            audio: false,
-            image: false,
-            video: false,
-            pdf: false,
-          },
-        },
-      },
-    };
-
-    await assert.rejects(
-      () =>
-        googleAdapter.createModel({
-          context,
-          providerOptions: {},
-          transport: {
-            authType: "bearer",
-            apiKey: "oauth-access",
-            headers: {},
-          },
-          state: {
-            kind: "oauth",
-            projectResolutionError: "project resolution failed",
-          },
-        }),
-      /project resolution failed/,
-    );
   });
 });

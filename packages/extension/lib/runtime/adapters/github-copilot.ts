@@ -13,13 +13,12 @@ import {
 import { defineAuthSchema } from "./schema";
 import type {
   AIAdapter,
-  AdapterAuthContext,
   AdapterAuthorizeContext,
-  LoadedAdapterState,
   ParsedAuthRecord,
+  RuntimeAdapterContext,
 } from "./types";
 import { browser } from "@wxt-dev/browser";
-import { setAuth, type AuthRecord, type AuthResult } from "@/lib/runtime/auth-store";
+import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import { normalizeDomain, sleep } from "@/lib/runtime/oauth-util";
 import { isObject } from "@/lib/runtime/util";
 
@@ -104,24 +103,19 @@ function buildCopilotSettings(input: {
   providerOptions: CopilotProviderOptions;
   modelURL: string;
   modelHeaders?: Record<string, string>;
-  transport: {
-    baseURL?: string;
-    apiKey?: string;
-    headers?: Record<string, string>;
-    fetch?: typeof fetch;
-  };
+  baseURL?: string;
+  apiKey?: string;
+  extraHeaders?: Record<string, string>;
+  fetch?: typeof fetch;
 }): Parameters<typeof createOpenAICompatible>[0] {
   return {
-    baseURL:
-      input.transport.baseURL ||
-      input.providerOptions.baseURL ||
-      input.modelURL,
-    apiKey: input.transport.apiKey,
+    baseURL: input.baseURL || input.providerOptions.baseURL || input.modelURL,
+    apiKey: input.apiKey,
     headers: {
       ...(input.modelHeaders ?? {}),
-      ...(input.transport.headers ?? {}),
+      ...(input.extraHeaders ?? {}),
     },
-    fetch: input.transport.fetch,
+    fetch: input.fetch,
     name: input.providerOptions.name || input.providerID,
   };
 }
@@ -388,32 +382,39 @@ async function authorizeCopilotDevice(
   );
 }
 
-export async function loadCopilotOAuthState(
-  ctx: AdapterAuthContext<CopilotAuthMetadata>,
-): Promise<LoadedAdapterState<void>> {
-  if (!ctx.auth || ctx.auth.type !== "oauth") {
+export async function resolveCopilotExecutionState(
+  context: RuntimeAdapterContext<CopilotAuthMetadata>,
+) {
+  if (!context.auth) {
     return {
-      transport: {},
-      state: undefined,
+      apiKey: undefined,
+      baseURL: context.model.api.url,
     };
   }
 
-  const enterpriseUrl = ctx.auth.metadata?.enterpriseUrl;
+  if (context.auth.type !== "oauth") {
+    return {
+      apiKey: context.auth.type === "api" ? context.auth.key : undefined,
+      baseURL: context.model.api.url,
+    };
+  }
+
+  const enterpriseUrl = context.auth.metadata?.enterpriseUrl;
   const domain = enterpriseUrl ? normalizeDomain(enterpriseUrl) : "github.com";
   const baseURL = enterpriseUrl
     ? `https://copilot-api.${normalizeDomain(enterpriseUrl)}`
     : "https://api.githubcopilot.com";
   const urls = getUrls(domain);
 
-  let access = ctx.auth.access;
-  const refresh = ctx.auth.refresh;
-  const expiresAt = ctx.auth.expiresAt;
+  let access = context.auth.access;
+  const refresh = context.auth.refresh;
+  const expiresAt = context.auth.expiresAt;
 
   if (
     shouldRefreshCopilotAccessToken({
       access,
       expiresAt,
-      now: Date.now(),
+      now: context.runtime.now(),
     }) &&
     refresh
   ) {
@@ -439,17 +440,17 @@ export async function loadCopilotOAuthState(
     });
 
     access = tokenData.token;
-    await setAuth(ctx.providerID, {
+    await context.authStore.set({
       type: "oauth",
       access,
       refresh,
       expiresAt:
         typeof tokenData.expires_at === "number"
           ? tokenData.expires_at * 1000 - 5 * 60 * 1000
-                : Date.now() + 25 * 60_000,
-      accountId: ctx.auth.accountId,
-      methodID: ctx.auth.methodID,
-      methodType: ctx.auth.methodType,
+                : context.runtime.now() + 25 * 60_000,
+      accountId: context.auth.accountId,
+      methodID: context.auth.methodID,
+      methodType: context.auth.methodType,
       metadata: enterpriseUrl
         ? { enterpriseUrl: normalizeDomain(enterpriseUrl) }
         : undefined,
@@ -463,27 +464,17 @@ export async function loadCopilotOAuthState(
   }
 
   return {
-    transport: {
-      baseURL,
-      apiKey: access,
-      authType: "bearer",
-    },
-    state: undefined,
+    baseURL,
+    apiKey: access,
   };
 }
 
-export const githubCopilotAdapter: AIAdapter<
-  CopilotAuthMetadata,
-  void,
-  CopilotProviderOptions
-> = {
+export const githubCopilotAdapter: AIAdapter<CopilotAuthMetadata> = {
   key: "provider:github-copilot",
   displayName: "GitHub Copilot",
   match: {
     providerIDs: ["github-copilot"],
   },
-  parseProviderOptions: (provider) =>
-    parseProviderOptions(copilotProviderOptionsSchema, provider.options),
   auth: {
     parseStoredAuth: parseCopilotStoredAuth,
     serializeAuth: serializeCopilotAuth,
@@ -531,15 +522,6 @@ export const githubCopilotAdapter: AIAdapter<
         },
       ];
     },
-    async load(ctx) {
-      if (!ctx.auth) {
-        return {
-          transport: {},
-          state: undefined,
-        };
-      }
-      return loadCopilotOAuthState(ctx);
-    },
   },
   async patchCatalog(ctx, provider) {
     const models = await Promise.all(
@@ -568,14 +550,20 @@ export const githubCopilotAdapter: AIAdapter<
       models: Object.fromEntries(models),
     };
   },
-  async createModel({ context, providerOptions, transport }) {
+  async createModel(context) {
+    const providerOptions = parseProviderOptions(
+      copilotProviderOptionsSchema,
+      context.provider.options,
+    );
+    const execution = await resolveCopilotExecutionState(context);
     const provider = createOpenAICompatible(
       buildCopilotSettings({
         providerID: context.providerID,
         providerOptions,
         modelURL: context.model.api.url,
         modelHeaders: context.model.headers,
-        transport,
+        baseURL: execution.baseURL,
+        apiKey: execution.apiKey,
       }),
     );
     const baseModel = provider.languageModel(context.model.api.id);

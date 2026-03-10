@@ -105,6 +105,13 @@ function createUnsupportedChatTransportHeadersError() {
   });
 }
 
+function createMissingChatModelIdError() {
+  return new RuntimeValidationError({
+    message:
+      "Bridge chat transport requires request body.modelId to be a non-empty string.",
+  });
+}
+
 function createBridgeModelCallUrl(
   operation: "generate" | "stream",
   modelId: string,
@@ -197,6 +204,36 @@ function toBridgeDefect(error: RuntimeRpcError | Error): RuntimeRpcError | Error
     : new RuntimeDefectError({
         defect: String(error),
       });
+}
+
+function isObjectRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveChatRequestModelId(input: {
+  body: object | undefined;
+}): {
+  modelId: string;
+  bodyWithoutModelId: object | undefined;
+} {
+  if (!isObjectRecord(input.body)) {
+    throw createMissingChatModelIdError();
+  }
+
+  const modelId = input.body.modelId;
+  if (typeof modelId !== "string" || modelId.trim().length === 0) {
+    throw createMissingChatModelIdError();
+  }
+
+  const { modelId: _modelId, ...bodyWithoutModelId } = input.body;
+
+  return {
+    modelId,
+    bodyWithoutModelId:
+      Object.keys(bodyWithoutModelId).length > 0 ? bodyWithoutModelId : undefined,
+  };
 }
 
 function createChatReadableStream(input: {
@@ -500,7 +537,6 @@ function makeBridgeClientApi(input: {
     });
 
   const getChatTransport = (
-    modelId: string,
     options: BridgeChatTransportOptions = {},
   ): ChatTransport<UIMessage> => ({
     async sendMessages({
@@ -521,6 +557,13 @@ function makeBridgeClientApi(input: {
         messages,
       });
 
+      const {
+        modelId,
+        bodyWithoutModelId,
+      } = resolveChatRequestModelId({
+        body,
+      });
+
       const runtimeOptions = options.prepareSendMessages
         ? await options.prepareSendMessages({
             chatId,
@@ -528,7 +571,7 @@ function makeBridgeClientApi(input: {
             messages: validatedMessages,
             trigger,
             messageId,
-            body,
+            body: bodyWithoutModelId,
             metadata,
           })
         : undefined;

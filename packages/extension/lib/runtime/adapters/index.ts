@@ -2,7 +2,7 @@ import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import type { ModelsDevProvider } from "@/lib/runtime/models-dev";
 import type { ProviderModelInfo } from "@/lib/runtime/provider-registry";
 import { genericFactoryAdapters } from "./generic-factory";
-import { mergeTransport, normalizeFactoryNpm } from "./factory-language-model";
+import { normalizeFactoryNpm } from "./factory-language-model";
 import { githubCopilotAdapter } from "./github-copilot";
 import { gitlabAdapter } from "./gitlab";
 import { googleAdapter } from "./google";
@@ -13,25 +13,18 @@ import type {
   AnyAuthMethodDefinition,
   ParsedAuthRecord,
   RegisteredAdapter,
-  ResolvedAdapterSession,
   RuntimeAdapterContext,
-  RuntimeTransportConfig,
 } from "./types";
-
-export type { ResolvedAdapterSession } from "./types";
 
 function registerAdapter<
   TPersistedAuthMeta extends ParsedAuthRecord["metadata"],
-  TRuntimeState,
-  TProviderOptions extends Record<string, unknown>,
 >(
-  adapter: AIAdapter<TPersistedAuthMeta, TRuntimeState, TProviderOptions>,
+  adapter: AIAdapter<TPersistedAuthMeta>,
 ): RegisteredAdapter {
   return {
     key: adapter.key,
     displayName: adapter.displayName,
     match: adapter.match,
-    parseProviderOptions: (provider) => adapter.parseProviderOptions(provider),
     auth: {
       methods: (ctx) =>
         adapter.auth.methods(ctx as AdapterAuthContext<TPersistedAuthMeta>),
@@ -41,18 +34,11 @@ function registerAdapter<
           result: input.result as AuthResult<TPersistedAuthMeta>,
           method: input.method,
         }),
-      load: adapter.auth.load
-        ? (ctx) =>
-            adapter.auth.load?.(ctx as AdapterAuthContext<TPersistedAuthMeta>)
-        : undefined,
     },
-    createModel: ({ context, providerOptions, transport, state }) =>
-      adapter.createModel({
-        context: context as RuntimeAdapterContext<TPersistedAuthMeta>,
-        providerOptions: providerOptions as TProviderOptions,
-        transport,
-        state: state as TRuntimeState,
-      }),
+    createModel: (context) =>
+      adapter.createModel(
+        context as RuntimeAdapterContext<TPersistedAuthMeta>,
+      ),
     patchCatalog: adapter.patchCatalog
       ? (ctx, provider) =>
           adapter.patchCatalog?.(
@@ -149,55 +135,4 @@ export function serializeAdapterAuthResult(input: {
     method: input.method,
     result: input.result,
   });
-}
-
-function createOpaqueModelFactory(input: {
-  adapter: RegisteredAdapter;
-  parsedAuth?: ParsedAuthRecord;
-  providerOptions: Record<string, unknown>;
-  transport: RuntimeTransportConfig;
-  state: unknown;
-}) {
-  return (context: RuntimeAdapterContext) =>
-    input.adapter.createModel({
-      context: {
-        ...context,
-        auth: input.parsedAuth,
-      },
-      providerOptions: input.providerOptions,
-      transport: input.transport,
-      state: input.state,
-    });
-}
-
-export async function createResolvedAdapterSession(input: {
-  adapter: RegisteredAdapter;
-  providerID: string;
-  provider: RuntimeAdapterContext["provider"];
-  auth?: AuthRecord;
-  baseTransport: RuntimeTransportConfig;
-}): Promise<ResolvedAdapterSession> {
-  const parsedAuth = parseAdapterStoredAuth(input.adapter, input.auth);
-  const providerOptions = input.adapter.parseProviderOptions(input.provider);
-  const loaded = await input.adapter.auth.load?.({
-    providerID: input.providerID,
-    provider: input.provider,
-    auth: parsedAuth,
-  });
-  const state = loaded?.state;
-  const transport = mergeTransport(input.baseTransport, loaded?.transport);
-
-  return {
-    key: input.adapter.key,
-    displayName: input.adapter.displayName,
-    auth: parsedAuth,
-    transport,
-    createModel: createOpaqueModelFactory({
-      adapter: input.adapter,
-      parsedAuth,
-      providerOptions,
-      transport,
-      state,
-    }),
-  };
 }

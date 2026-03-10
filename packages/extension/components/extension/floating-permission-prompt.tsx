@@ -26,22 +26,11 @@ export function FloatingPermissionPrompt({
     () => Result.getOrElse(dataResult, () => null),
     [dataResult],
   );
-  const pendingRequests = useMemo(
-    () => data?.pendingRequests ?? [],
-    [data],
-  );
+  const pendingRequests = useMemo(() => data?.pendingRequests ?? [], [data]);
   const originEnabled = data?.originState.enabled ?? true;
 
   useEffect(() => {
-    if (dataResult._tag !== "Failure") return;
-    if (isInterruptedOnlyCause(dataResult.cause)) return;
-    console.error(
-      "[floating-permission-prompt] failed to load permission prompt data",
-      dataResult.cause,
-    );
-  }, [dataResult]);
-
-  useEffect(() => {
+    console.log("hi");
     const pendingIds = new Set(pendingRequests.map((request) => request.id));
     setSoftDismissedIds((prev) => {
       const next = new Set(Array.from(prev).filter((id) => pendingIds.has(id)));

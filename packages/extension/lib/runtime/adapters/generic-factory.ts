@@ -29,7 +29,7 @@ import type {
   AdapterAuthContext,
   AuthMethodDefinition,
   ParsedAuthRecord,
-  RuntimeTransportConfig,
+  RuntimeAdapterContext,
 } from "./types";
 import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import type {
@@ -83,7 +83,10 @@ type AdapterModelContext<TProviderOptions extends Record<string, unknown>> = {
   provider: ProviderRuntimeInfo;
   providerOptions: TProviderOptions;
   model: ProviderModelInfo;
-  transport: RuntimeTransportConfig;
+  apiKey?: string;
+  baseURL?: string;
+  headers?: Record<string, string>;
+  fetch?: typeof fetch;
 };
 
 function apiKeyLabel(ctx: AdapterAuthContext) {
@@ -97,7 +100,7 @@ function resolveBaseURL(
   },
 ) {
   return (
-    input.transport.baseURL ??
+    input.baseURL ??
     input.providerOptions.baseURL ??
     (options?.fallbackToModelURL ? input.model.api.url : undefined)
   );
@@ -106,7 +109,7 @@ function resolveBaseURL(
 function mergeHeaders(input: AdapterModelContext<Record<string, unknown>>) {
   return {
     ...input.model.headers,
-    ...input.transport.headers,
+    ...(input.headers ?? {}),
   };
 }
 
@@ -118,10 +121,10 @@ function buildOpenAICompatibleSettings(
       resolveBaseURL(input, { fallbackToModelURL: true }) ??
       input.model.api.url,
     name: input.providerOptions.name ?? input.provider.id,
-    apiKey: input.transport.apiKey,
+    apiKey: input.apiKey,
     headers: mergeHeaders(input),
     queryParams: input.providerOptions.queryParams,
-    fetch: input.transport.fetch,
+    fetch: input.fetch,
     includeUsage: input.providerOptions.includeUsage,
     supportsStructuredOutputs: input.providerOptions.supportsStructuredOutputs,
   };
@@ -132,12 +135,12 @@ function buildOpenAISettings(
 ): Parameters<typeof createOpenAI>[0] {
   return {
     baseURL: resolveBaseURL(input),
-    apiKey: input.transport.apiKey,
+    apiKey: input.apiKey,
     headers: mergeHeaders(input),
     name: input.providerOptions.name ?? input.provider.id,
     organization: input.providerOptions.organization,
     project: input.providerOptions.project,
-    fetch: input.transport.fetch,
+    fetch: input.fetch,
   };
 }
 
@@ -146,10 +149,10 @@ function buildAnthropicSettings(
 ): Parameters<typeof createAnthropic>[0] {
   return {
     baseURL: resolveBaseURL(input),
-    apiKey: input.transport.apiKey,
+    apiKey: input.apiKey,
     headers: mergeHeaders(input),
     name: input.providerOptions.name ?? input.provider.id,
-    fetch: input.transport.fetch,
+    fetch: input.fetch,
   };
 }
 
@@ -158,10 +161,10 @@ function buildGoogleSettings(
 ): Parameters<typeof createGoogleGenerativeAI>[0] {
   return {
     baseURL: resolveBaseURL(input),
-    apiKey: input.transport.apiKey,
+    apiKey: input.apiKey,
     headers: mergeHeaders(input),
     name: input.providerOptions.name ?? input.provider.id,
-    fetch: input.transport.fetch,
+    fetch: input.fetch,
   };
 }
 
@@ -170,9 +173,9 @@ function buildAzureSettings(
 ): Parameters<typeof createAzure>[0] {
   return {
     baseURL: resolveBaseURL(input),
-    apiKey: input.transport.apiKey,
+    apiKey: input.apiKey,
     headers: mergeHeaders(input),
-    fetch: input.transport.fetch,
+    fetch: input.fetch,
     apiVersion: input.providerOptions.apiVersion,
     resourceName: input.providerOptions.resourceName,
     useDeploymentBasedUrls: input.providerOptions.useDeploymentBasedUrls,
@@ -184,9 +187,9 @@ function buildApiKeySettings(
 ) {
   return {
     baseURL: resolveBaseURL(input),
-    apiKey: input.transport.apiKey,
+    apiKey: input.apiKey,
     headers: mergeHeaders(input),
-    fetch: input.transport.fetch,
+    fetch: input.fetch,
   };
 }
 
@@ -277,48 +280,36 @@ function createUnsupportedModelError(npm: string) {
   );
 }
 
+function resolveApiKey(context: RuntimeAdapterContext) {
+  return context.auth?.type === "api" ? context.auth.key : undefined;
+}
+
 function createDirectFactoryAdapter<TProviderOptions extends Record<string, unknown>>(
   input: DirectFactoryAdapterInput<TProviderOptions>,
 ) {
-  const adapter: AIAdapter<undefined, void, TProviderOptions> = {
+  const adapter: AIAdapter<undefined> = {
     key: input.key,
     displayName: input.displayName,
     match: {
       npm: input.npm,
     },
-    parseProviderOptions: input.parseProviderOptions,
     auth: {
       methods(ctx) {
         return [createApiKeyMethod(ctx)];
       },
       parseStoredAuth: parseGenericStoredAuth,
       serializeAuth: serializeGenericAuth,
-      load(ctx) {
-        if (ctx.auth?.type !== "api") {
-          return {
-            transport: {},
-            state: undefined,
-          };
-        }
-
-        return {
-          transport: {
-            apiKey: ctx.auth.key,
-          },
-          state: undefined,
-        };
-      },
     },
-    async createModel({ context, providerOptions, transport }) {
+    async createModel(context) {
       if (input.browserSupported === false || !input.createLanguageModel) {
         throw createUnsupportedModelError(context.model.api.npm);
       }
 
       return input.createLanguageModel({
         provider: context.provider,
-        providerOptions,
+        providerOptions: input.parseProviderOptions(context.provider),
         model: context.model,
-        transport,
+        apiKey: resolveApiKey(context),
       });
     },
   };

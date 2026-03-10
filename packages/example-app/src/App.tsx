@@ -1,5 +1,5 @@
 import type { ChatTransport, UIMessage } from "ai";
-import { useChat } from "@ai-sdk/react";
+import { Chat, useChat } from "@ai-sdk/react";
 import {
   BridgeClient,
   type BridgeModelSummary,
@@ -10,6 +10,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, User, Bot, Loader2, RefreshCw } from "lucide-react";
 
 const DEFAULT_MODEL_ID = "google/gemini-3.1-pro-preview";
+const TRANSPORT_UNAVAILABLE_ERROR = "Bridge chat transport is not ready yet.";
+
+const unavailableChatTransport: ChatTransport<UIMessage> = {
+  sendMessages: async () => {
+    throw new Error(TRANSPORT_UNAVAILABLE_ERROR);
+  },
+  reconnectToStream: async () => null,
+};
 
 function getMessageText(message: UIMessage) {
   return message.parts
@@ -23,13 +31,18 @@ export function App() {
   const [selectedModelId, setSelectedModelId] = useState("");
   const [status, setStatus] = useState("Idle");
   const [input, setInput] = useState("");
-  const [transport, setTransport] = useState<ChatTransport<UIMessage> | null>(
-    null,
-  );
+  const [chat, setChat] = useState<Chat<UIMessage> | null>(null);
 
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const startupRefreshTriggeredRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const selectedModelIdRef = useRef(selectedModelId);
+  const unavailableChatRef = useRef(
+    new Chat<UIMessage>({
+      transport: unavailableChatTransport,
+    }),
+  );
+  selectedModelIdRef.current = selectedModelId;
 
   const pushDebug = useCallback((event: string, details?: unknown) => {
     console.log(`[example-app] ${new Date().toISOString()} ${event}`, details);
@@ -47,6 +60,21 @@ export function App() {
     <A,>(program: Effect.Effect<A, unknown, BridgeClient>) =>
       Effect.runPromise(withBridgeClient(program)),
     [],
+  );
+
+  const createChatCallbacks = useCallback(
+    () => ({
+      onError: (error: Error) => {
+        pushError("stream.failed", error);
+      },
+      onFinish: ({ message }: { message: UIMessage }) => {
+        pushDebug("stream.completed", {
+          selectedModelId: selectedModelIdRef.current,
+          assistantMessageId: message.id,
+        });
+      },
+    }),
+    [pushDebug, pushError],
   );
 
   const refreshModels = useCallback(async () => {
@@ -111,29 +139,28 @@ export function App() {
     error,
     status: chatStatus,
   } = useChat({
-    transport: transport ?? undefined,
-    onError: (error) => {
-      pushError("stream.failed", error);
-    },
-    onFinish: ({ message }) => {
-      pushDebug("stream.completed", {
-        selectedModelId,
-        assistantMessageId: message.id,
-      });
-    },
+    chat: chat ?? unavailableChatRef.current,
   });
 
   const isLoading =
     chatStatus === "submitted" || chatStatus === "streaming";
+  const isChatReady = chat !== null;
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!input.trim() || isLoading || !selectedModelId || !transport) return;
+    if (!input.trim() || isLoading || !selectedModelId || !isChatReady) return;
 
     const prompt = input.trim();
     clearError();
     setInput("");
-    await sendMessage({ text: prompt });
+    await sendMessage(
+      { text: prompt },
+      {
+        body: {
+          modelId: selectedModelId,
+        },
+      },
+    );
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -158,17 +185,12 @@ export function App() {
   }, [refreshModels]);
 
   useEffect(() => {
-    if (!selectedModelId) {
-      setTransport(null);
-      return;
-    }
-
     let disposed = false;
 
     void runBridge(
       Effect.gen(function* () {
         const client = yield* BridgeClient;
-        return client.getChatTransport(selectedModelId);
+        return client.getChatTransport();
       }),
     )
       .then((nextTransport) => {
@@ -176,24 +198,29 @@ export function App() {
           return;
         }
 
-        setTransport(nextTransport);
-        pushDebug("chatTransport.loaded", {
-          selectedModelId,
-        });
+        // `useChat` does not hot-swap `transport`, so bootstrap the bridge
+        // transport once and vary the selected model per request instead.
+        setChat(
+          new Chat<UIMessage>({
+            transport: nextTransport,
+            ...createChatCallbacks(),
+          }),
+        );
+        pushDebug("chatTransport.loaded");
       })
       .catch((error) => {
         if (disposed) {
           return;
         }
 
-        setTransport(null);
+        setChat(null);
         pushError("chatTransport.failed", error);
       });
 
     return () => {
       disposed = true;
     };
-  }, [pushDebug, pushError, runBridge, selectedModelId]);
+  }, [createChatCallbacks, pushDebug, pushError, runBridge]);
 
   return (
     <div className="flex flex-col h-screen bg-[#0b1220] text-[#e5edf8] font-sans">
@@ -345,16 +372,18 @@ export function App() {
             placeholder={
               models.length === 0
                 ? "Connecting to models..."
+                : !isChatReady
+                  ? "Preparing selected model..."
                 : "Message the AI..."
             }
             value={input}
             onChange={handleInputChange}
-            disabled={models.length === 0 || isLoading}
+            disabled={models.length === 0 || isLoading || !isChatReady}
             rows={1}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                if (input.trim() && !isLoading) {
+                if (input.trim() && !isLoading && isChatReady) {
                   void handleSubmit();
                 }
               }
@@ -362,7 +391,9 @@ export function App() {
           />
           <button
             type="submit"
-            disabled={!input.trim() || isLoading || models.length === 0}
+            disabled={
+              !input.trim() || isLoading || models.length === 0 || !isChatReady
+            }
             className="absolute right-2 bottom-2 p-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:bg-transparent disabled:text-[#94a7c4] flex items-center justify-center"
           >
             {isLoading ? (

@@ -36,6 +36,38 @@ const text = await Effect.runPromise(withBridgeClient(program));
 console.log(text);
 ```
 
+## Chat Usage
+
+`getModel()` is the stateless AI SDK Core path. `getChatTransport()` is the
+stable AI SDK UI path.
+
+```ts
+import { Chat } from "@ai-sdk/react";
+import { BridgeClient, withBridgeClient } from "@llm-bridge/client";
+import * as Effect from "effect/Effect";
+
+const chat = await Effect.runPromise(
+  withBridgeClient(
+    Effect.gen(function* () {
+      const client = yield* BridgeClient;
+
+      return new Chat({
+        transport: client.getChatTransport(),
+      });
+    }),
+  ),
+);
+
+await chat.sendMessage(
+  { text: "Hello from the bridge" },
+  {
+    body: {
+      modelId: "google/gemini-3.1-pro-preview",
+    },
+  },
+);
+```
+
 ## Request Options
 
 `@llm-bridge/client` forwards model request options as provided. The runtime does not inject provider-specific defaults for

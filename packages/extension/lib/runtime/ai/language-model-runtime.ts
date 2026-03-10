@@ -16,19 +16,14 @@ import {
   type RuntimeModelCallOptions,
 } from "@llm-bridge/contracts";
 import { RetryError } from "ai";
-import { getAuth } from "@/lib/runtime/auth-store";
-import {
-  createResolvedAdapterSession,
-  resolveAdapterForModel,
-  type ResolvedAdapterSession,
-} from "@/lib/runtime/adapters";
 import type { AuthRecord } from "@/lib/runtime/auth-store";
-import { normalizeTransport } from "@/lib/runtime/adapters/factory-language-model";
+import { getAuth, removeAuth, setAuth } from "@/lib/runtime/auth-store";
+import {
+  parseAdapterStoredAuth,
+  resolveAdapterForModel,
+} from "@/lib/runtime/adapters";
 import { wrapExtensionError, wrapProviderError } from "@/lib/runtime/errors";
-import type {
-  RuntimeAdapterContext,
-  RuntimeTransportConfig,
-} from "@/lib/runtime/adapters/types";
+import type { RuntimeAdapterContext } from "@/lib/runtime/adapters/types";
 import { getModel, getProvider } from "@/lib/runtime/provider-registry";
 import type {
   ProviderModelInfo,
@@ -51,7 +46,8 @@ interface ModelRuntimeContext {
 
 type PreparedCallOptions = {
   callOptions: RuntimeLanguageModelCallOptions;
-  session: ResolvedAdapterSession;
+  context: RuntimeAdapterContext;
+  languageModel: LanguageModelV3;
 };
 
 type PreparedRuntimeLanguageModelCall = {
@@ -83,11 +79,6 @@ function logRuntimeModelError(
     message: error instanceof Error ? error.message : String(error),
     stack: error instanceof Error ? error.stack : undefined,
   });
-}
-
-function resolveDefaultToken(auth?: AuthRecord) {
-  if (!auth) return undefined;
-  return auth.type === "api" ? auth.key : auth.access;
 }
 
 function toHeaderRecord(value: unknown) {
@@ -232,22 +223,12 @@ async function resolveModelRuntimeContext(
   };
 }
 
-function buildBaseTransport(
-  runtime: ModelRuntimeContext,
-): RuntimeTransportConfig {
-  const normalized = normalizeTransport({});
-
-  return {
-    ...normalized,
-    baseURL: normalized.baseURL ?? (runtime.model.api.url.trim() || undefined),
-    apiKey: normalized.apiKey ?? resolveDefaultToken(runtime.auth),
-    headers: {
-      ...normalized.headers,
-    },
-  };
-}
-
-async function resolveAdapterSession(input: { runtime: ModelRuntimeContext }) {
+function buildAdapterContext(input: {
+  runtime: ModelRuntimeContext;
+  origin: string;
+  sessionID: string;
+  requestID: string;
+}): RuntimeAdapterContext {
   const adapter = resolveAdapterForModel({
     providerID: input.runtime.providerID,
     model: input.runtime.model,
@@ -259,13 +240,26 @@ async function resolveAdapterSession(input: { runtime: ModelRuntimeContext }) {
     );
   }
 
-  return createResolvedAdapterSession({
-    adapter,
+  return {
     providerID: input.runtime.providerID,
+    modelID: input.runtime.modelID,
+    origin: input.origin,
+    sessionID: input.sessionID,
+    requestID: input.requestID,
+    auth: parseAdapterStoredAuth(adapter, input.runtime.auth),
     provider: input.runtime.provider,
-    auth: input.runtime.auth,
-    baseTransport: buildBaseTransport(input.runtime),
-  });
+    model: input.runtime.model,
+    authStore: {
+      get: () => getAuth(input.runtime.providerID),
+      set: async (auth) => {
+        await setAuth(input.runtime.providerID, auth);
+      },
+      remove: () => removeAuth(input.runtime.providerID),
+    },
+    runtime: {
+      now: () => Date.now(),
+    },
+  };
 }
 
 async function prepareCallOptions(input: {
@@ -275,29 +269,33 @@ async function prepareCallOptions(input: {
   requestID: string;
   options: RuntimeLanguageModelCallOptions;
 }) {
-  const session = await resolveAdapterSession({
-    runtime: input.runtime,
-  });
-  const context: RuntimeAdapterContext = {
+  const adapter = resolveAdapterForModel({
     providerID: input.runtime.providerID,
-    modelID: input.runtime.modelID,
+    model: input.runtime.model,
+  });
+  if (!adapter) {
+    throw new Error(
+      `No adapter is registered for provider ${input.runtime.providerID} (${input.runtime.model.api.npm})`,
+    );
+  }
+
+  const context = buildAdapterContext({
+    runtime: input.runtime,
     origin: input.origin,
     sessionID: input.sessionID,
     requestID: input.requestID,
-    auth: session.auth,
-    provider: input.runtime.provider,
-    model: input.runtime.model,
-  };
+  });
+  const languageModel = await adapter.createModel(context);
   const callOptions = normalizeCallOptions(input.options, {
     ...input.options,
     headers: toHeaderRecord(input.options.headers),
   });
 
   return {
-    context,
     prepared: {
       callOptions,
-      session,
+      context,
+      languageModel,
     } satisfies PreparedCallOptions,
   };
 }
@@ -310,7 +308,7 @@ async function prepareRuntimeLanguageModelCall(input: {
   options: RuntimeLanguageModelCallOptions;
 }): Promise<PreparedRuntimeLanguageModelCall> {
   const runtime = await resolveModelRuntimeContext(input.modelID);
-  const { context, prepared } = await prepareCallOptions({
+  const { prepared } = await prepareCallOptions({
     runtime,
     origin: input.origin,
     sessionID: input.sessionID,
@@ -318,12 +316,10 @@ async function prepareRuntimeLanguageModelCall(input: {
     options: input.options,
   });
 
-  const languageModel = await prepared.session.createModel(context);
-
   return {
     providerID: runtime.providerID,
     providerModelID: runtime.modelID,
-    languageModel,
+    languageModel: prepared.languageModel,
     callOptions: prepared.callOptions,
   };
 }
@@ -337,19 +333,21 @@ export async function prepareRuntimeChatModelCall(input: {
   options?: RuntimeChatCallOptions;
 }): Promise<PreparedRuntimeChatModelCall> {
   const runtime = await resolveModelRuntimeContext(input.modelID);
-  const session = await resolveAdapterSession({
-    runtime,
-  });
-  const context: RuntimeAdapterContext = {
+  const adapter = resolveAdapterForModel({
     providerID: runtime.providerID,
-    modelID: runtime.modelID,
+    model: runtime.model,
+  });
+  if (!adapter) {
+    throw new Error(
+      `No adapter is registered for provider ${runtime.providerID} (${runtime.model.api.npm})`,
+    );
+  }
+  const context = buildAdapterContext({
+    runtime,
     origin: input.origin,
     sessionID: input.sessionID,
     requestID: input.requestID,
-    auth: session.auth,
-    provider: runtime.provider,
-    model: runtime.model,
-  };
+  });
 
   const fallback = fromRuntimeModelCallOptions(
     toRuntimeModelCallOptionsForChat(input.options),
@@ -357,7 +355,7 @@ export async function prepareRuntimeChatModelCall(input: {
 
   const callOptions = normalizeCallOptions(fallback, fallback);
 
-  const languageModel = await session.createModel(context);
+  const languageModel = await adapter.createModel(context);
 
   const { prompt: _prompt, ...callOptionsWithoutPrompt } = callOptions;
 
@@ -381,7 +379,7 @@ export async function getRuntimeModelDescriptor(input: {
     const runtime = await resolveModelRuntimeContext(input.modelID);
     providerID = runtime.providerID;
 
-    const { context, prepared } = await prepareCallOptions({
+    const { prepared } = await prepareCallOptions({
       runtime,
       origin: input.origin,
       sessionID: input.sessionID,
@@ -396,13 +394,12 @@ export async function getRuntimeModelDescriptor(input: {
       },
     });
 
-    const languageModel = await prepared.session.createModel(context);
     const supportedUrls = await Promise.resolve(
-      languageModel.supportedUrls ?? {},
+      prepared.languageModel.supportedUrls ?? {},
     );
 
     return {
-      provider: languageModel.provider,
+      provider: prepared.languageModel.provider,
       modelId: input.modelID,
       supportedUrls,
     };

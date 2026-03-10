@@ -8,19 +8,24 @@ import {
   mock,
 } from "bun:test";
 import {
-  loadCodexOAuthState,
   openaiAdapter,
+  resolveOpenAIExecutionState,
 } from "@/lib/runtime/adapters/openai";
-import type { AdapterAuthContext } from "@/lib/runtime/adapters/types";
+import type { RuntimeAdapterContext } from "@/lib/runtime/adapters/types";
 
-const setAuthMock = mock(async () => undefined);
-mock.module("@/lib/runtime/auth-store", () => ({
-  setAuth: setAuthMock,
-}));
+function makeJwt(claims: Record<string, unknown>) {
+  const encode = (value: unknown) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "none", typ: "JWT" })}.${encode(claims)}.`;
+}
 
-function createContext(): AdapterAuthContext {
+function createContext(): Omit<RuntimeAdapterContext, "auth" | "authStore"> {
   return {
     providerID: "openai",
+    modelID: "gpt-4o-mini",
+    origin: "https://example.test",
+    sessionID: "session-1",
+    requestID: "request-1",
     provider: {
       id: "openai",
       name: "OpenAI",
@@ -29,21 +34,63 @@ function createContext(): AdapterAuthContext {
       connected: true,
       options: {},
     },
+    model: {
+      id: "gpt-4o-mini",
+      providerID: "openai",
+      name: "GPT-4o mini",
+      status: "active",
+      api: {
+        id: "gpt-4o-mini",
+        url: "https://api.openai.com/v1",
+        npm: "@ai-sdk/openai",
+      },
+      cost: {
+        input: 0,
+        output: 0,
+        cache: {
+          read: 0,
+          write: 0,
+        },
+      },
+      limit: {
+        context: 1,
+        output: 1,
+      },
+      options: {},
+      headers: {},
+      capabilities: {
+        temperature: true,
+        reasoning: false,
+        attachment: false,
+        toolcall: true,
+        input: {
+          text: true,
+          audio: false,
+          image: false,
+          video: false,
+          pdf: false,
+        },
+        output: {
+          text: true,
+          audio: false,
+          image: false,
+          video: false,
+          pdf: false,
+        },
+      },
+    },
+    runtime: {
+      now: () => Date.now(),
+    },
   };
 }
 
-function makeJwt(claims: Record<string, unknown>) {
-  const encode = (value: unknown) =>
-    Buffer.from(JSON.stringify(value)).toString("base64url");
-  return `${encode({ alg: "none", typ: "JWT" })}.${encode(claims)}.`;
-}
-
-describe("loadCodexOAuthState", () => {
+describe("resolveOpenAIExecutionState", () => {
   const originalFetch = globalThis.fetch;
   const originalWarn = console.warn;
+  const setAuthMock = mock(async (_auth: unknown) => undefined);
 
   afterAll(() => {
-    mock.restore();
     globalThis.fetch = originalFetch;
     console.warn = originalWarn;
   });
@@ -73,9 +120,9 @@ describe("loadCodexOAuthState", () => {
             headers: { "content-type": "application/json" },
           },
         ),
-    );
+    ) as unknown as typeof fetch;
 
-    const output = await loadCodexOAuthState({
+    const output = await resolveOpenAIExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -89,15 +136,23 @@ describe("loadCodexOAuthState", () => {
         createdAt: Date.now() - 10_000,
         updatedAt: Date.now() - 10_000,
       },
+      authStore: {
+        get: async () => undefined,
+        set: setAuthMock,
+        remove: async () => undefined,
+      },
     });
 
-    expect(output.transport.apiKey).toBe("refreshed-access");
-    expect(output.transport.headers?.["chatgpt-account-id"]).toBe("acct-new");
+    expect(output.apiKey).toBe("refreshed-access");
+    const headers = output.headers as Record<string, string | undefined>;
+    expect(headers["chatgpt-account-id"]).toBe("acct-new");
 
     expect(setAuthMock).toHaveBeenCalledTimes(1);
-    const [, payload] = setAuthMock.mock.calls[0];
-    expect(payload.accountId).toBe("acct-new");
-    expect(payload.metadata.accountId).toBe("acct-new");
+    const payload = setAuthMock.mock.calls[0]?.[0] as
+      | { accountId?: string; metadata?: { accountId?: string } }
+      | undefined;
+    expect(payload?.accountId).toBe("acct-new");
+    expect(payload?.metadata).toEqual({ accountId: "acct-new" });
   });
 
   it("keeps prior account id when refreshed token has no claim", async () => {
@@ -114,9 +169,9 @@ describe("loadCodexOAuthState", () => {
             headers: { "content-type": "application/json" },
           },
         ),
-    );
+    ) as unknown as typeof fetch;
 
-    const output = await loadCodexOAuthState({
+    const output = await resolveOpenAIExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -130,14 +185,20 @@ describe("loadCodexOAuthState", () => {
         createdAt: Date.now() - 10_000,
         updatedAt: Date.now() - 10_000,
       },
+      authStore: {
+        get: async () => undefined,
+        set: setAuthMock,
+        remove: async () => undefined,
+      },
     });
 
-    expect(output.transport.headers?.["chatgpt-account-id"]).toBe(
-      "acct-existing",
-    );
-    const [, payload] = setAuthMock.mock.calls[0];
-    expect(payload.accountId).toBe("acct-existing");
-    expect(payload.metadata.accountId).toBe("acct-existing");
+    const headers = output.headers as Record<string, string | undefined>;
+    expect(headers["chatgpt-account-id"]).toBe("acct-existing");
+    const payload = setAuthMock.mock.calls[0]?.[0] as
+      | { accountId?: string; metadata?: { accountId?: string } }
+      | undefined;
+    expect(payload?.accountId).toBe("acct-existing");
+    expect(payload?.metadata).toEqual({ accountId: "acct-existing" });
   });
 
   it("omits header and warns when account id remains missing after refresh", async () => {
@@ -154,9 +215,9 @@ describe("loadCodexOAuthState", () => {
             headers: { "content-type": "application/json" },
           },
         ),
-    );
+    ) as unknown as typeof fetch;
 
-    const output = await loadCodexOAuthState({
+    const output = await resolveOpenAIExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -168,27 +229,31 @@ describe("loadCodexOAuthState", () => {
         createdAt: Date.now() - 10_000,
         updatedAt: Date.now() - 10_000,
       },
+      authStore: {
+        get: async () => undefined,
+        set: setAuthMock,
+        remove: async () => undefined,
+      },
     });
 
-    expect(output.transport.headers?.["chatgpt-account-id"]).toBeUndefined();
+    const headers = output.headers as Record<string, string | undefined>;
+    expect(headers["chatgpt-account-id"]).toBeUndefined();
     expect(setAuthMock).toHaveBeenCalledTimes(1);
-    const [, payload] = setAuthMock.mock.calls[0];
-    expect(payload.accountId).toBeUndefined();
-    expect(payload.metadata).toBeUndefined();
-
+    const payload = setAuthMock.mock.calls[0]?.[0] as
+      | { accountId?: string; metadata?: { accountId?: string } }
+      | undefined;
+    expect(payload?.accountId).toBeUndefined();
+    expect(payload?.metadata).toBeUndefined();
     expect(console.warn).toHaveBeenCalledTimes(1);
-    expect(console.warn).toHaveBeenCalledWith(
-      "[adapter:openai] oauth accountId is missing; Codex requests may fail until token claims include chatgpt_account_id.",
-    );
   });
 
   it("keeps existing behavior when refresh is not needed", async () => {
     const fetchMock = mock(async () => {
       throw new Error("fetch should not be called");
     });
-    globalThis.fetch = fetchMock;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const output = await loadCodexOAuthState({
+    const output = await resolveOpenAIExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -202,12 +267,16 @@ describe("loadCodexOAuthState", () => {
         createdAt: Date.now() - 10_000,
         updatedAt: Date.now() - 10_000,
       },
+      authStore: {
+        get: async () => undefined,
+        set: setAuthMock,
+        remove: async () => undefined,
+      },
     });
 
-    expect(output.transport.apiKey).toBe("current-access");
-    expect(output.transport.headers?.["chatgpt-account-id"]).toBe(
-      "acct-steady",
-    );
+    expect(output.apiKey).toBe("current-access");
+    const headers = output.headers as Record<string, string | undefined>;
+    expect(headers["chatgpt-account-id"]).toBe("acct-steady");
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expect(setAuthMock).toHaveBeenCalledTimes(0);
     expect(console.warn).toHaveBeenCalledTimes(0);

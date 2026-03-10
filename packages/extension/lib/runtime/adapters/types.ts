@@ -105,23 +105,17 @@ export interface RuntimeAdapterContext<
   origin: string;
   sessionID: string;
   requestID: string;
+  authStore: {
+    get: () => Promise<AuthRecord | undefined>;
+    set: (auth: AuthResult) => Promise<void>;
+    remove: () => Promise<void>;
+  };
+  runtime: {
+    now: () => number;
+  };
 }
 
 export type RuntimeFetch = typeof globalThis.fetch;
-export type RuntimeTransportAuthType = "bearer" | "api-key";
-
-export interface RuntimeTransportConfig {
-  baseURL?: string;
-  apiKey?: string;
-  authType?: RuntimeTransportAuthType;
-  headers: Record<string, string>;
-  fetch?: RuntimeFetch;
-}
-
-export interface LoadedAdapterState<TState = void> {
-  transport: Partial<RuntimeTransportConfig>;
-  state: TState;
-}
 
 export interface AuthMethodDefinition<
   TValues extends Record<string, string> = Record<string, string>,
@@ -155,8 +149,6 @@ export interface ResolvedAuthMethod {
 
 export interface AIAdapter<
   TPersistedAuthMeta extends JsonObject | undefined = JsonObject | undefined,
-  TRuntimeState = void,
-  TProviderOptions extends Record<string, unknown> = Record<string, unknown>,
 > {
   key: string;
   displayName: string;
@@ -164,7 +156,6 @@ export interface AIAdapter<
     npm?: string;
     providerIDs?: readonly string[];
   };
-  parseProviderOptions: (provider: ProviderRuntimeInfo) => TProviderOptions;
   auth: {
     methods: (
       ctx: AdapterAuthContext<TPersistedAuthMeta>,
@@ -178,19 +169,10 @@ export interface AIAdapter<
       result: AuthResult<TPersistedAuthMeta>;
       method: Pick<AnyAuthMethodDefinition, "id" | "type">;
     }) => AuthResult<TPersistedAuthMeta>;
-    load?: (
-      ctx: AdapterAuthContext<TPersistedAuthMeta>,
-    ) =>
-      | Promise<LoadedAdapterState<TRuntimeState> | void>
-      | LoadedAdapterState<TRuntimeState>
-      | void;
   };
-  createModel: (input: {
-    context: RuntimeAdapterContext<TPersistedAuthMeta>;
-    providerOptions: TProviderOptions;
-    transport: RuntimeTransportConfig;
-    state: TRuntimeState;
-  }) => Promise<LanguageModelV3>;
+  createModel: (
+    context: RuntimeAdapterContext<TPersistedAuthMeta>,
+  ) => Promise<LanguageModelV3>;
   patchCatalog?: (
     ctx: AdapterAuthContext<TPersistedAuthMeta>,
     provider: ProviderInfo,
@@ -204,9 +186,6 @@ export type RegisteredAdapter = {
     readonly npm?: string;
     readonly providerIDs?: readonly string[];
   };
-  readonly parseProviderOptions: (
-    provider: ProviderRuntimeInfo,
-  ) => Record<string, unknown>;
   readonly auth: {
     methods: (
       ctx: AdapterAuthContext,
@@ -216,30 +195,12 @@ export type RegisteredAdapter = {
       result: AuthResult;
       method: Pick<AnyAuthMethodDefinition, "id" | "type">;
     }) => AuthResult;
-    load?: (
-      ctx: AdapterAuthContext,
-    ) => Promise<LoadedAdapterState<unknown> | void> | LoadedAdapterState<unknown> | void;
   };
-  readonly createModel: (input: {
-    context: RuntimeAdapterContext;
-    providerOptions: Record<string, unknown>;
-    transport: RuntimeTransportConfig;
-    state: unknown;
-  }) => Promise<LanguageModelV3>;
+  readonly createModel: (
+    context: RuntimeAdapterContext,
+  ) => Promise<LanguageModelV3>;
   readonly patchCatalog?: (
     ctx: AdapterAuthContext,
     provider: ProviderInfo,
   ) => Promise<ProviderInfo | void> | ProviderInfo | void;
-};
-
-export type AdapterCreateModel = (
-  context: RuntimeAdapterContext,
-) => Promise<LanguageModelV3>;
-
-export type ResolvedAdapterSession = {
-  readonly key: string;
-  readonly displayName: string;
-  readonly auth?: ParsedAuthRecord;
-  readonly transport: RuntimeTransportConfig;
-  readonly createModel: AdapterCreateModel;
 };

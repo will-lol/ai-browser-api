@@ -1,12 +1,11 @@
 import type { LanguageModelV3CallOptions } from "@ai-sdk/provider";
 import { isObject } from "@/lib/runtime/util";
-import type { RuntimeTransportConfig } from "./types";
 
 function isObjectRecord(value: unknown) {
   return isObject(value);
 }
 
-function toHeaderRecord(value: unknown) {
+export function toHeaderRecord(value: unknown) {
   if (!isObjectRecord(value)) return {};
   const headers: Record<string, string> = {};
   for (const [key, item] of Object.entries(value)) {
@@ -79,41 +78,6 @@ export function normalizeFactoryNpm(npm: string): SupportedFactoryNpm {
   }
 
   throw new Error(`Unsupported provider SDK package: ${npm}`);
-}
-
-export function normalizeTransport(
-  input: Partial<RuntimeTransportConfig>,
-): RuntimeTransportConfig {
-  return {
-    baseURL: input.baseURL,
-    apiKey: input.apiKey,
-    authType: input.authType,
-    headers: toHeaderRecord(input.headers),
-    fetch: typeof input.fetch === "function" ? input.fetch : undefined,
-  };
-}
-
-export function mergeTransport(
-  ...patches: Array<Partial<RuntimeTransportConfig> | undefined>
-): RuntimeTransportConfig {
-  let next: RuntimeTransportConfig = {
-    headers: {},
-  };
-
-  for (const patch of patches) {
-    if (!patch) continue;
-    const normalized = normalizeTransport(patch);
-    next = {
-      ...next,
-      ...normalized,
-      headers: {
-        ...next.headers,
-        ...normalized.headers,
-      },
-    };
-  }
-
-  return next;
 }
 
 export function mergeModelHeaders(

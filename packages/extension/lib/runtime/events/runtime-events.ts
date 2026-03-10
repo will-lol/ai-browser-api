@@ -10,6 +10,7 @@ import {
 import { browser } from "@wxt-dev/browser";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import { RUNTIME_EVENT_STORAGE_KEY } from "@/lib/runtime/constants";
