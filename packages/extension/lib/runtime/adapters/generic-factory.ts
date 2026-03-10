@@ -81,10 +81,18 @@ type BaseProviderOptions = Schema.Schema.Type<typeof baseProviderOptionsSchema>;
 type OpenAICompatibleProviderOptions = Schema.Schema.Type<
   typeof openAICompatibleProviderOptionsSchema
 >;
-type OpenAIProviderOptions = Schema.Schema.Type<typeof openAIProviderOptionsSchema>;
-type AzureProviderOptions = Schema.Schema.Type<typeof azureProviderOptionsSchema>;
-type BedrockProviderOptions = Schema.Schema.Type<typeof bedrockProviderOptionsSchema>;
-type GatewayProviderOptions = Schema.Schema.Type<typeof gatewayProviderOptionsSchema>;
+type OpenAIProviderOptions = Schema.Schema.Type<
+  typeof openAIProviderOptionsSchema
+>;
+type AzureProviderOptions = Schema.Schema.Type<
+  typeof azureProviderOptionsSchema
+>;
+type BedrockProviderOptions = Schema.Schema.Type<
+  typeof bedrockProviderOptionsSchema
+>;
+type GatewayProviderOptions = Schema.Schema.Type<
+  typeof gatewayProviderOptionsSchema
+>;
 
 type AdapterModelContext<TProviderOptions extends Record<string, unknown>> = {
   provider: ProviderRuntimeInfo;
@@ -103,7 +111,11 @@ type ApiKeyProviderDescriptor<
   displayName: string;
   npm: string;
   browserSupported?: boolean;
-  providerOptionsSchema: Schema.Schema<TProviderOptions, TProviderOptions, never>;
+  providerOptionsSchema: Schema.Schema<
+    TProviderOptions,
+    TProviderOptions,
+    never
+  >;
   createLanguageModel?: (
     input: AdapterModelContext<TProviderOptions>,
   ) => LanguageModelV3 | Promise<LanguageModelV3>;
@@ -204,9 +216,7 @@ function buildAzureSettings(
   };
 }
 
-function buildApiKeySettings(
-  input: AdapterModelContext<BaseProviderOptions>,
-) {
+function buildApiKeySettings(input: AdapterModelContext<BaseProviderOptions>) {
   return {
     baseURL: resolveBaseURL(input),
     apiKey: input.apiKey,
@@ -232,7 +242,8 @@ function buildGatewaySettings(
 ): Parameters<typeof createGateway>[0] {
   return {
     ...buildApiKeySettings(input),
-    metadataCacheRefreshMillis: input.providerOptions.metadataCacheRefreshMillis,
+    metadataCacheRefreshMillis:
+      input.providerOptions.metadataCacheRefreshMillis,
   };
 }
 
@@ -279,9 +290,7 @@ function resolveApiKey(context: RuntimeAdapterContext) {
 
 function createDirectFactoryAdapter<
   TProviderOptions extends Record<string, unknown>,
->(
-  descriptor: ApiKeyProviderDescriptor<TProviderOptions>,
-): AIAdapter {
+>(descriptor: ApiKeyProviderDescriptor<TProviderOptions>): AIAdapter {
   return {
     key: descriptor.key,
     displayName: descriptor.displayName,

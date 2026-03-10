@@ -89,4 +89,4 @@ const Button = React.forwardRef<HTMLElement, ButtonProps>(function Button(
   );
 });
 
-export { Button,  };
+export { Button };

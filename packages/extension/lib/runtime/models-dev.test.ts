@@ -32,13 +32,12 @@ describe("models.dev snapshot parsing", () => {
     expect(parsed.providerKey.models.modelKey.id).toBe("modelKey");
     expect(parsed.providerKey.models.modelKey.name).toBe("modelKey");
     expect(parsed.providerKey.models.modelKey.temperature).toBe(false);
+    expect((parsed.providerKey as unknown as Record<string, unknown>).doc).toBe(
+      "https://docs.example.test/provider",
+    );
     expect(
-      (parsed.providerKey as unknown as Record<string, unknown>).doc,
-    ).toBe("https://docs.example.test/provider");
-    expect(
-      (
-        parsed.providerKey.models.modelKey as unknown as Record<string, unknown>
-      ).extra_model_field,
+      (parsed.providerKey.models.modelKey as unknown as Record<string, unknown>)
+        .extra_model_field,
     ).toBe("preserved");
   });
 

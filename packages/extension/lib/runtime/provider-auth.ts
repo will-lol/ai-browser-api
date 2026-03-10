@@ -7,15 +7,15 @@ import {
 import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import type { RuntimeAuthFlowInstruction } from "@llm-bridge/contracts";
 import { resolveAdapterForProvider } from "@/lib/runtime/adapters";
-import { parseAuthMethodValues, toRuntimeAuthMethod } from "@/lib/runtime/adapters/schema";
+import {
+  parseAuthMethodValues,
+  toRuntimeAuthMethod,
+} from "@/lib/runtime/adapters/schema";
 import type {
   ResolvedAuthMethod,
   RuntimeAuthMethod,
 } from "@/lib/runtime/adapters/types";
-import {
-  wrapAuthPluginError,
-  wrapExtensionError,
-} from "@/lib/runtime/errors";
+import { wrapAuthPluginError, wrapExtensionError } from "@/lib/runtime/errors";
 import { getModelsDevData } from "@/lib/runtime/models-dev";
 import { parseOAuthCallbackUrl } from "@/lib/runtime/oauth-util";
 import { getProvider } from "@/lib/runtime/provider-registry";

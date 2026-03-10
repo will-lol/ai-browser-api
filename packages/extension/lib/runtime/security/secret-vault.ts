@@ -4,10 +4,7 @@ import { decodeSchemaOrUndefined } from "@/lib/runtime/effect-schema";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type { VaultKeyProviderApi } from "./vault-key-provider";
-import {
-  VaultDecryptError,
-  VaultEncryptError,
-} from "./vault-errors";
+import { VaultDecryptError, VaultEncryptError } from "./vault-errors";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -23,9 +20,7 @@ function authAdditionalData(
   );
 }
 
-export function makeSecretVault(
-  keyProvider: VaultKeyProviderApi,
-) {
+export function makeSecretVault(keyProvider: VaultKeyProviderApi) {
   return {
     sealAuth: ({
       providerID,

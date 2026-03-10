@@ -16,19 +16,17 @@ import {
   resolveExtensionAuthMethods,
   type ExtensionResolvedAuthMethod,
 } from "@/lib/extension-auth-methods";
-import {
-  providerConnectDataResultAtom,
-} from "@/lib/extension-runtime-atoms";
+import { providerConnectDataResultAtom } from "@/lib/extension-runtime-atoms";
 import {
   cancelProviderAuthFlowAtom,
   startProviderAuthFlowAtom,
 } from "@/lib/extension-runtime-mutations";
 
 export function ConnectProviderWindow({ providerID }: { providerID: string }) {
-  const [busyAction, setBusyAction] = useState<"cancel" | "start" | null>(
-    null,
+  const [busyAction, setBusyAction] = useState<"cancel" | "start" | null>(null);
+  const connectDataResult = useAtomValue(
+    providerConnectDataResultAtom(providerID),
   );
-  const connectDataResult = useAtomValue(providerConnectDataResultAtom(providerID));
   const connectData = useMemo(
     () => Result.getOrElse(connectDataResult, () => null),
     [connectDataResult],
@@ -67,7 +65,9 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
   );
   const selectedResolvedMethod = useMemo(
     () =>
-      selectedMethodID ? resolvedMethodsByID.get(selectedMethodID) ?? null : null,
+      selectedMethodID
+        ? (resolvedMethodsByID.get(selectedMethodID) ?? null)
+        : null,
     [resolvedMethodsByID, selectedMethodID],
   );
 
@@ -138,10 +138,7 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
     toast.success(`${provider?.name ?? providerID} connected`);
   }, [flow, provider?.name, providerID, successToastShown]);
 
-  async function handleStart(
-    methodID: string,
-    values: Record<string, string>,
-  ) {
+  async function handleStart(methodID: string, values: Record<string, string>) {
     setFlowError(null);
     setBusyAction("start");
     await startAuthFlow({
@@ -224,13 +221,11 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
               </p>
             )}
 
-            {!isLoading &&
-              !hasLoadFailure &&
-              methods.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  No auth methods are available for this provider.
-                </p>
-              )}
+            {!isLoading && !hasLoadFailure && methods.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                No auth methods are available for this provider.
+              </p>
+            )}
 
             {status === "authorizing" && (
               <div className="flex flex-col gap-4">

@@ -8,9 +8,7 @@ import {
   RuntimeValidationError,
 } from "@llm-bridge/contracts";
 import { decodeSchemaOrUndefined } from "@/lib/runtime/effect-schema";
-import {
-  parseOptionalMetadataObject,
-} from "./auth-metadata";
+import { parseOptionalMetadataObject } from "./auth-metadata";
 import { parseProviderOptions } from "./provider-options";
 import { createApiKeyMethod } from "./generic-factory";
 import { wrapLanguageModel } from "./helpers";
@@ -28,11 +26,7 @@ import {
   waitForOAuthCallback,
   type OAuthWebRequestOnBeforeRequest,
 } from "@/lib/runtime/oauth-browser-callback-util";
-import {
-  generatePKCE,
-  generateState,
-  sleep,
-} from "@/lib/runtime/oauth-util";
+import { generatePKCE, generateState, sleep } from "@/lib/runtime/oauth-util";
 import type {
   ProviderInfo,
   ProviderModelInfo,
@@ -66,7 +60,9 @@ const openAIProviderOptionsSchema = Schema.Struct({
   project: Schema.optional(Schema.String),
 });
 
-type OpenAIProviderOptions = Schema.Schema.Type<typeof openAIProviderOptionsSchema>;
+type OpenAIProviderOptions = Schema.Schema.Type<
+  typeof openAIProviderOptionsSchema
+>;
 
 const openAIAuthMetadataSchema = Schema.Struct({
   accountId: Schema.optional(Schema.String),
@@ -119,7 +115,9 @@ function normalizeOpenAIAuth(
   };
 }
 
-async function parseOpenAIJson<TSchema extends Schema.Schema.AnyNoContext>(input: {
+async function parseOpenAIJson<
+  TSchema extends Schema.Schema.AnyNoContext,
+>(input: {
   response: Response;
   schema: TSchema;
   operation: string;
@@ -733,10 +731,7 @@ export async function resolveOpenAIExecutionState(
   let expiresAt = auth.expiresAt;
   let effectiveAccountId = auth.accountId ?? auth.metadata?.accountId;
 
-  if (
-    refresh &&
-    (!expiresAt || expiresAt <= context.runtime.now() + 60_000)
-  ) {
+  if (refresh && (!expiresAt || expiresAt <= context.runtime.now() + 60_000)) {
     const refreshed = await refreshAccessToken(refresh);
     effectiveAccountId = extractAccountId(refreshed) ?? effectiveAccountId;
     access = refreshed.access_token;
@@ -751,7 +746,9 @@ export async function resolveOpenAIExecutionState(
       accountId: effectiveAccountId,
       methodID: auth.methodID,
       methodType: auth.methodType,
-      metadata: effectiveAccountId ? { accountId: effectiveAccountId } : undefined,
+      metadata: effectiveAccountId
+        ? { accountId: effectiveAccountId }
+        : undefined,
     });
   }
 

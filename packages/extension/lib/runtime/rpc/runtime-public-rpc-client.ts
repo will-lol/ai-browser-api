@@ -30,28 +30,100 @@ export function createRuntimePublicRpcClient(input: {
   >;
 }) {
   return {
-    listModels: (payload: Parameters<RuntimeRpcClientConnection<RuntimeRpc>["listModels"]>[0]) =>
-      Effect.flatMap(input.ensureClient, (client) => client.listModels(payload)),
-    getOriginState: (payload: Parameters<RuntimeRpcClientConnection<RuntimeRpc>["getOriginState"]>[0]) =>
-      Effect.flatMap(input.ensureClient, (client) => client.getOriginState(payload)),
-    listPending: (payload: Parameters<RuntimeRpcClientConnection<RuntimeRpc>["listPending"]>[0]) =>
-      Effect.flatMap(input.ensureClient, (client) => client.listPending(payload)),
-    acquireModel: (payload: Parameters<RuntimeRpcClientConnection<RuntimeRpc>["acquireModel"]>[0]) =>
-      Effect.flatMap(input.ensureClient, (client) => client.acquireModel(payload)),
-    modelDoGenerate: (payload: Parameters<RuntimeRpcClientConnection<RuntimeRpc>["modelDoGenerate"]>[0]) =>
-      Effect.flatMap(input.ensureClient, (client) => client.modelDoGenerate(payload)),
-    modelDoStream: (payload: Parameters<RuntimeRpcClientConnection<RuntimeRpc>["modelDoStream"]>[0]) =>
-      Stream.unwrap(Effect.map(input.ensureClient, (client) => client.modelDoStream(payload))),
-    abortModelCall: (payload: Parameters<RuntimeRpcClientConnection<RuntimeRpc>["abortModelCall"]>[0]) =>
-      Effect.flatMap(input.ensureClient, (client) => client.abortModelCall(payload)),
-    chatSendMessages: (payload: Parameters<RuntimeRpcClientConnection<RuntimeRpc>["chatSendMessages"]>[0]) =>
-      Stream.unwrap(Effect.map(input.ensureClient, (client) => client.chatSendMessages(payload))),
-    chatReconnectStream: (payload: Parameters<RuntimeRpcClientConnection<RuntimeRpc>["chatReconnectStream"]>[0]) =>
-      Stream.unwrap(Effect.map(input.ensureClient, (client) => client.chatReconnectStream(payload))),
-    abortChatStream: (payload: Parameters<RuntimeRpcClientConnection<RuntimeRpc>["abortChatStream"]>[0]) =>
-      Effect.flatMap(input.ensureClient, (client) => client.abortChatStream(payload)),
-    createPermissionRequest: (payload: Parameters<RuntimeRpcClientConnection<RuntimeRpc>["createPermissionRequest"]>[0]) =>
-      Effect.flatMap(input.ensureClient, (client) => client.createPermissionRequest(payload)),
+    listModels: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeRpc>["listModels"]
+      >[0],
+    ) =>
+      Effect.flatMap(input.ensureClient, (client) =>
+        client.listModels(payload),
+      ),
+    getOriginState: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeRpc>["getOriginState"]
+      >[0],
+    ) =>
+      Effect.flatMap(input.ensureClient, (client) =>
+        client.getOriginState(payload),
+      ),
+    listPending: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeRpc>["listPending"]
+      >[0],
+    ) =>
+      Effect.flatMap(input.ensureClient, (client) =>
+        client.listPending(payload),
+      ),
+    acquireModel: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeRpc>["acquireModel"]
+      >[0],
+    ) =>
+      Effect.flatMap(input.ensureClient, (client) =>
+        client.acquireModel(payload),
+      ),
+    modelDoGenerate: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeRpc>["modelDoGenerate"]
+      >[0],
+    ) =>
+      Effect.flatMap(input.ensureClient, (client) =>
+        client.modelDoGenerate(payload),
+      ),
+    modelDoStream: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeRpc>["modelDoStream"]
+      >[0],
+    ) =>
+      Stream.unwrap(
+        Effect.map(input.ensureClient, (client) =>
+          client.modelDoStream(payload),
+        ),
+      ),
+    abortModelCall: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeRpc>["abortModelCall"]
+      >[0],
+    ) =>
+      Effect.flatMap(input.ensureClient, (client) =>
+        client.abortModelCall(payload),
+      ),
+    chatSendMessages: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeRpc>["chatSendMessages"]
+      >[0],
+    ) =>
+      Stream.unwrap(
+        Effect.map(input.ensureClient, (client) =>
+          client.chatSendMessages(payload),
+        ),
+      ),
+    chatReconnectStream: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeRpc>["chatReconnectStream"]
+      >[0],
+    ) =>
+      Stream.unwrap(
+        Effect.map(input.ensureClient, (client) =>
+          client.chatReconnectStream(payload),
+        ),
+      ),
+    abortChatStream: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeRpc>["abortChatStream"]
+      >[0],
+    ) =>
+      Effect.flatMap(input.ensureClient, (client) =>
+        client.abortChatStream(payload),
+      ),
+    createPermissionRequest: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeRpc>["createPermissionRequest"]
+      >[0],
+    ) =>
+      Effect.flatMap(input.ensureClient, (client) =>
+        client.createPermissionRequest(payload),
+      ),
   };
 }
 

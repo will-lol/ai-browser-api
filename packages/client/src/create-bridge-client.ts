@@ -1,8 +1,15 @@
-import { RuntimeValidationError, type RuntimeRpcError } from "@llm-bridge/contracts";
+import {
+  RuntimeValidationError,
+  type RuntimeRpcError,
+} from "@llm-bridge/contracts";
 import { makeResettableConnectionLifecycle } from "@llm-bridge/runtime-core";
 import * as Effect from "effect/Effect";
 import { makeBridgeClientApi, type BridgeClientApi } from "./client-api";
-import { closeConnection, createConnection, type BridgeConnection } from "./connection";
+import {
+  closeConnection,
+  createConnection,
+  type BridgeConnection,
+} from "./connection";
 import { createLanguageModelAdapter } from "./model-adapter";
 import {
   CONNECTION_INVALIDATED_MESSAGE,

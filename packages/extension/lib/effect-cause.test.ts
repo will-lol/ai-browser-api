@@ -6,10 +6,7 @@ import { isInterruptedOnlyCause } from "./effect-cause";
 
 describe("isInterruptedOnlyCause", () => {
   it("returns true for interrupt-only causes", () => {
-    assert.equal(
-      isInterruptedOnlyCause(Cause.interrupt(FiberId.none)),
-      true,
-    );
+    assert.equal(isInterruptedOnlyCause(Cause.interrupt(FiberId.none)), true);
   });
 
   it("returns false for domain failures", () => {

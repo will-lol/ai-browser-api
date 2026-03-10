@@ -30,10 +30,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { ChatExecutionService } from "@/lib/runtime/ai/chat-execution-service";
-import {
-  wrapExtensionError,
-  wrapTransportError,
-} from "@/lib/runtime/errors";
+import { wrapExtensionError, wrapTransportError } from "@/lib/runtime/errors";
 
 function serializeUnknownRuntimeError(error: unknown): RuntimeRpcError {
   if (isRuntimeRpcError(error)) return error;
@@ -51,8 +48,10 @@ function serializeRpcStream<A, E, R>(
 ): Stream.Stream<A, RuntimeRpcError, R> {
   return Stream.unwrap(
     Effect.map(serializeRpcError(effect), (stream) =>
-      Stream.fromReadableStream(() => stream, (error) =>
-        isRuntimeRpcError(error) ? error : wrapTransportError(error),
+      Stream.fromReadableStream(
+        () => stream,
+        (error) =>
+          isRuntimeRpcError(error) ? error : wrapTransportError(error),
       ),
     ),
   );
@@ -112,17 +111,17 @@ const makeRuntimeRpcHandlers = Effect.gen(function* () {
           requestID: requestId,
         }),
       ),
-    chatSendMessages: (input) =>
-      serializeRpcStream(chat.sendMessages(input)),
+    chatSendMessages: (input) => serializeRpcStream(chat.sendMessages(input)),
     chatReconnectStream: (input) =>
       serializeRpcStream(chat.reconnectStream(input)),
-    abortChatStream: (input) =>
-      serializeRpcError(chat.abortStream(input)),
+    abortChatStream: (input) => serializeRpcError(chat.abortStream(input)),
     listModels: ({ origin, connectedOnly, providerID }) =>
       serializeRpcError(
         origin
           ? Effect.gen(function* () {
-              yield* ensureOriginEnabled(yield* requireOrigin("listModels", origin));
+              yield* ensureOriginEnabled(
+                yield* requireOrigin("listModels", origin),
+              );
               return yield* listModels({ connectedOnly, providerID });
             })
           : listModels({ connectedOnly, providerID }),
@@ -176,9 +175,7 @@ const makeRuntimeRpcHandlers = Effect.gen(function* () {
   });
 });
 
-const RuntimeRpcHandlersLive = RuntimeRpcGroup.toLayer(
-  makeRuntimeRpcHandlers,
-);
+const RuntimeRpcHandlersLive = RuntimeRpcGroup.toLayer(makeRuntimeRpcHandlers);
 
 export const RuntimePublicRpcHandlersLive = RuntimeRpcHandlersLive;
 export const RuntimeAdminRpcHandlersLive = RuntimeRpcHandlersLive;

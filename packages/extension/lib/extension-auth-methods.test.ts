@@ -34,7 +34,9 @@ describe("extension auth method resolver", () => {
       methodIDs: ["oauth-device"],
     });
 
-    const enterpriseUrl = methods[0]?.fields.find((field) => field.key === "enterpriseUrl");
+    const enterpriseUrl = methods[0]?.fields.find(
+      (field) => field.key === "enterpriseUrl",
+    );
 
     assert.ok(enterpriseUrl);
     assert.equal(enterpriseUrl.condition?.key, "deploymentType");

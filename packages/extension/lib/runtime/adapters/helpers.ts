@@ -7,9 +7,7 @@ export function wrapLanguageModel(
   model: LanguageModelV3,
   mutate: (
     options: LanguageModelV3CallOptions,
-  ) =>
-    | Promise<LanguageModelV3CallOptions>
-    | LanguageModelV3CallOptions,
+  ) => Promise<LanguageModelV3CallOptions> | LanguageModelV3CallOptions,
 ): LanguageModelV3 {
   return {
     specificationVersion: model.specificationVersion,

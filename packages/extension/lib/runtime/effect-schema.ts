@@ -46,9 +46,7 @@ export function formatSchemaFieldErrors(error: ParseResult.ParseError) {
   const fieldErrors: Record<string, string> = {};
 
   for (const issue of ParseResult.ArrayFormatter.formatErrorSync(error)) {
-    const path = issue.path
-      .map((segment) => String(segment))
-      .join(".");
+    const path = issue.path.map((segment) => String(segment)).join(".");
 
     if (path.length === 0 || path in fieldErrors) {
       continue;

@@ -112,9 +112,7 @@ const limitSchema = Schema.Struct({
 });
 
 const modalitiesSchema = Schema.Struct({
-  input: Schema.Array(
-    Schema.Literal("text", "audio", "image", "video", "pdf"),
-  ),
+  input: Schema.Array(Schema.Literal("text", "audio", "image", "video", "pdf")),
   output: Schema.Array(
     Schema.Literal("text", "audio", "image", "video", "pdf"),
   ),
@@ -127,10 +125,7 @@ const providerMetadataSchema = Schema.Struct({
 
 const modelStatusSchema = Schema.Literal("alpha", "beta", "deprecated");
 
-function asRecord(
-  value: unknown,
-  message: string,
-): Record<string, unknown> {
+function asRecord(value: unknown, message: string): Record<string, unknown> {
   const decoded = decodeSchemaOrUndefined(unknownRecordSchema, value);
   if (!decoded) {
     throw new Error(message);
@@ -143,12 +138,8 @@ function parseModel(modelID: string, value: unknown): ModelsDevModel {
 
   return {
     ...record,
-    id:
-      decodeSchemaOrUndefined(Schema.String, record.id) ??
-      modelID,
-    name:
-      decodeSchemaOrUndefined(Schema.String, record.name) ??
-      modelID,
+    id: decodeSchemaOrUndefined(Schema.String, record.id) ?? modelID,
+    name: decodeSchemaOrUndefined(Schema.String, record.name) ?? modelID,
     family: decodeSchemaOrUndefined(Schema.String, record.family),
     release_date: decodeSchemaOrThrow(
       Schema.String,
@@ -204,7 +195,10 @@ function parseModel(modelID: string, value: unknown): ModelsDevModel {
         }
       : undefined,
     status: decodeSchemaOrUndefined(modelStatusSchema, record.status),
-    variants: decodeSchemaOrUndefined(unknownRecordMapMapSchema, record.variants),
+    variants: decodeSchemaOrUndefined(
+      unknownRecordMapMapSchema,
+      record.variants,
+    ),
   };
 }
 
@@ -217,17 +211,15 @@ function parseProvider(providerID: string, value: unknown): ModelsDevProvider {
 
   return {
     ...record,
-    id:
-      decodeSchemaOrUndefined(Schema.String, record.id) ??
-      providerID,
-    name:
-      decodeSchemaOrUndefined(Schema.String, record.name) ??
-      providerID,
-    env: [...decodeSchemaOrThrow(
-      stringArraySchema,
-      record.env,
-      `Provider ${providerID} env must be a string array.`,
-    )],
+    id: decodeSchemaOrUndefined(Schema.String, record.id) ?? providerID,
+    name: decodeSchemaOrUndefined(Schema.String, record.name) ?? providerID,
+    env: [
+      ...decodeSchemaOrThrow(
+        stringArraySchema,
+        record.env,
+        `Provider ${providerID} env must be a string array.`,
+      ),
+    ],
     api: decodeSchemaOrUndefined(Schema.String, record.api),
     npm: decodeSchemaOrUndefined(Schema.String, record.npm),
     models: Object.fromEntries(

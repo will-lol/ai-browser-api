@@ -44,16 +44,18 @@ function reactivityKeysForRuntimeEvent(
   }
 }
 
-export const runtimeEventReactivityBridgeAtom = extensionAtomRuntime.atom(
-  Effect.gen(function* () {
-    const runtime = yield* Effect.runtime<Reactivity.Reactivity>();
-    const runFork = Runtime.runFork(runtime);
-    const unsubscribe = subscribeRuntimeEvents((event) => {
-      const keys = reactivityKeysForRuntimeEvent(event);
-      if (keys.length === 0) return;
-      runFork(Reactivity.invalidate(keys));
-    });
+export const runtimeEventReactivityBridgeAtom = extensionAtomRuntime
+  .atom(
+    Effect.gen(function* () {
+      const runtime = yield* Effect.runtime<Reactivity.Reactivity>();
+      const runFork = Runtime.runFork(runtime);
+      const unsubscribe = subscribeRuntimeEvents((event) => {
+        const keys = reactivityKeysForRuntimeEvent(event);
+        if (keys.length === 0) return;
+        runFork(Reactivity.invalidate(keys));
+      });
 
-    yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
-  }),
-).pipe(Atom.keepAlive);
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+    }),
+  )
+  .pipe(Atom.keepAlive);

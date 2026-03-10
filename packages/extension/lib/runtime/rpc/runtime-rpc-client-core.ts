@@ -56,7 +56,8 @@ type RuntimeClient<Rpcs extends Rpc.Any> = RpcClient.RpcClient<
   Rpcs,
   RpcClientError
 >;
-export type RuntimeRpcClientConnection<Rpcs extends Rpc.Any> = RuntimeClient<Rpcs>;
+export type RuntimeRpcClientConnection<Rpcs extends Rpc.Any> =
+  RuntimeClient<Rpcs>;
 
 type RuntimeConnection<Rpcs extends Rpc.Any> = {
   connectionId: number;
@@ -119,10 +120,7 @@ function createClient<Rpcs extends Rpc.Any>(
     Effect.gen(function* () {
       const onMessage: RuntimeMessageListener = (payload) => {
         void Effect.runPromise(writeResponse(payload)).catch((error) => {
-          console.warn(
-            "runtime rpc: failed to process server message",
-            error,
-          );
+          console.warn("runtime rpc: failed to process server message", error);
         });
       };
 
@@ -236,16 +234,14 @@ export function makeRuntimeRpcClientCore<Rpcs extends Rpc.Any, E>(
   };
 
   lifecycle = Effect.runSync(
-    makeResettableConnectionLifecycle<
-      RuntimeConnection<Rpcs>,
-      E,
-      "disconnect"
-    >({
-      create: (token) =>
-        createRuntimeConnection(options, destroyIfCurrent, token),
-      close: (connection) => closeRuntimeConnection(connection),
-      invalidatedError: options.invalidatedError,
-    }),
+    makeResettableConnectionLifecycle<RuntimeConnection<Rpcs>, E, "disconnect">(
+      {
+        create: (token) =>
+          createRuntimeConnection(options, destroyIfCurrent, token),
+        close: (connection) => closeRuntimeConnection(connection),
+        invalidatedError: options.invalidatedError,
+      },
+    ),
   );
 
   const destroyConnection = (_reason: "destroy" | "pagehide") =>
@@ -264,7 +260,9 @@ export function makeRuntimeRpcClientCore<Rpcs extends Rpc.Any, E>(
 
   return {
     ensureConnection: lifecycle.ensure,
-    ensureClient: lifecycle.ensure.pipe(Effect.map((connection) => connection.client)),
+    ensureClient: lifecycle.ensure.pipe(
+      Effect.map((connection) => connection.client),
+    ),
     destroyConnection,
   };
 }

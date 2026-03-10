@@ -45,9 +45,7 @@ export function fetchPendingRequests(origin = currentOrigin()) {
   return runtime.listPending({ origin });
 }
 
-export function openRuntimeProviderAuthWindow(input: {
-  providerID: string;
-}) {
+export function openRuntimeProviderAuthWindow(input: { providerID: string }) {
   const runtime = getRuntimeAdminRPC();
   return runtime.openProviderAuthWindow({
     providerID: input.providerID,

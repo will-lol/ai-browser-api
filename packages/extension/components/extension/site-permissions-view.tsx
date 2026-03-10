@@ -9,9 +9,7 @@ import { Blocks } from "lucide-react";
 import { SearchInput } from "@/components/extension/search-input";
 import { useFrozenOrder } from "@/hooks/use-frozen-order";
 import { useNavigate } from "@tanstack/react-router";
-import {
-  sitePermissionsDataResultAtom,
-} from "@/lib/extension-runtime-atoms";
+import { sitePermissionsDataResultAtom } from "@/lib/extension-runtime-atoms";
 import { isInterruptedOnlyCause } from "@/lib/effect-cause";
 import { setOriginEnabledAtom } from "@/lib/extension-runtime-mutations";
 
@@ -34,9 +32,10 @@ export function SitePermissionsView({
 
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const data = useMemo(() => Result.getOrElse(dataResult, () => null), [
-    dataResult,
-  ]);
+  const data = useMemo(
+    () => Result.getOrElse(dataResult, () => null),
+    [dataResult],
+  );
   const hasInterruptedLoad = useMemo(
     () =>
       dataResult._tag === "Failure" && isInterruptedOnlyCause(dataResult.cause),
@@ -45,10 +44,7 @@ export function SitePermissionsView({
   const hasLoadFailure = dataResult._tag === "Failure" && !hasInterruptedLoad;
 
   const originEnabled = hasActiveOrigin && (data?.originState.enabled ?? true);
-  const pendingRequests = useMemo(
-    () => data?.pendingRequests ?? [],
-    [data],
-  );
+  const pendingRequests = useMemo(() => data?.pendingRequests ?? [], [data]);
   const allModels = useMemo(() => data?.models ?? [], [data]);
 
   const permissionByModelId = useMemo(() => {

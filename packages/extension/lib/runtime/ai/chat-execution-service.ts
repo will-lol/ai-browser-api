@@ -36,10 +36,7 @@ import {
   prepareRuntimeChatModelCall,
   type PreparedRuntimeChatModelCall,
 } from "@/lib/runtime/ai/language-model-runtime";
-import {
-  wrapExtensionError,
-  wrapProviderError,
-} from "@/lib/runtime/errors";
+import { wrapExtensionError, wrapProviderError } from "@/lib/runtime/errors";
 
 const decodeJsonValue = Schema.decodeUnknownSync(JsonValueSchema);
 
@@ -369,9 +366,7 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
       generation.abortController.abort();
     });
 
-  const sendMessages = (
-    request: RuntimeChatSendMessagesInput,
-  ) =>
+  const sendMessages = (request: RuntimeChatSendMessagesInput) =>
     Effect.gen(function* () {
       const generationKey = toGenerationKey(request);
       const existing = generations.get(generationKey);
@@ -442,10 +437,7 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
             }),
           catch: (error) =>
             toRuntimeChatError({
-              error:
-                error instanceof Error
-                  ? error
-                  : new Error(String(error)),
+              error: error instanceof Error ? error : new Error(String(error)),
               operation: "chat.prepareLanguageModelCall",
             }),
         });
@@ -469,10 +461,7 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
           },
           catch: (error) =>
             toRuntimeChatError({
-              error:
-                error instanceof Error
-                  ? error
-                  : new Error(String(error)),
+              error: error instanceof Error ? error : new Error(String(error)),
               providerID: preparedCall.providerID,
               operation: "chat.streamText",
             }),
@@ -487,10 +476,7 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
           }),
           catch: (error) =>
             toRuntimeChatError({
-              error:
-                error instanceof Error
-                  ? error
-                  : new Error(String(error)),
+              error: error instanceof Error ? error : new Error(String(error)),
               providerID: preparedCall.providerID,
               operation: "chat.toUIMessageStream",
             }),
@@ -526,9 +512,7 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
       });
     });
 
-  const reconnectStream = (
-    request: RuntimeChatReconnectStreamInput,
-  ) =>
+  const reconnectStream = (request: RuntimeChatReconnectStreamInput) =>
     Effect.gen(function* () {
       const generation = generations.get(toGenerationKey(request));
       if (!generation) {

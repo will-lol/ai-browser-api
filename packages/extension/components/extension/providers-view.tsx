@@ -4,9 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SearchInput } from "@/components/extension/search-input";
 import { useFrozenOrder } from "@/hooks/use-frozen-order";
-import {
-  providersResultAtom,
-} from "@/lib/extension-runtime-atoms";
+import { providersResultAtom } from "@/lib/extension-runtime-atoms";
 import {
   disconnectProviderAtom,
   openProviderAuthWindowAtom,

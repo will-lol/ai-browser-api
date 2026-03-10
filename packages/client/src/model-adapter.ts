@@ -8,7 +8,10 @@ import {
   type BridgeModelDescriptorResponse,
   type RuntimeRpcError,
 } from "@llm-bridge/contracts";
-import { type LanguageModelV3, type LanguageModelV3StreamPart } from "@ai-sdk/provider";
+import {
+  type LanguageModelV3,
+  type LanguageModelV3StreamPart,
+} from "@ai-sdk/provider";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import type { BridgeConnection } from "./connection";

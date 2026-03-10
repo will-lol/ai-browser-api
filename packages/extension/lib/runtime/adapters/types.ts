@@ -112,9 +112,7 @@ export interface AuthMethodDefinition<
   type: AuthMethodType;
   label: string;
   inputSchema?: Schema.Schema.AnyNoContext;
-  authorize: (
-    ctx: AdapterAuthorizeContext<TValues>,
-  ) => Promise<AuthResult>;
+  authorize: (ctx: AdapterAuthorizeContext<TValues>) => Promise<AuthResult>;
 }
 
 export type AnyAuthMethodDefinition = AuthMethodDefinition<
@@ -142,12 +140,8 @@ export interface AIAdapter {
   };
   listAuthMethods: (
     ctx: AdapterAuthContext,
-  ) =>
-    | Promise<AnyAuthMethodDefinition[]>
-    | AnyAuthMethodDefinition[];
-  createModel: (
-    context: RuntimeAdapterContext,
-  ) => Promise<LanguageModelV3>;
+  ) => Promise<AnyAuthMethodDefinition[]> | AnyAuthMethodDefinition[];
+  createModel: (context: RuntimeAdapterContext) => Promise<LanguageModelV3>;
   patchCatalog?: (
     ctx: AdapterAuthContext,
     provider: ProviderInfo,

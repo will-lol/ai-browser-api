@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  resolveCopilotExecutionState,
-} from "@/lib/runtime/adapters/github-copilot";
+import { resolveCopilotExecutionState } from "@/lib/runtime/adapters/github-copilot";
 import type { RuntimeAdapterContext } from "@/lib/runtime/adapters/types";
 
 function createContext(): Omit<RuntimeAdapterContext, "auth" | "authStore"> {

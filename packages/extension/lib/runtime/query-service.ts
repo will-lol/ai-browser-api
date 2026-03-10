@@ -50,7 +50,9 @@ export function listModels(
       tryStoragePromise("query.listModels", () => listProviderRows()),
     ]);
 
-    const providers = new Map(providerRows.map((row) => [row.id, row] as const));
+    const providers = new Map(
+      providerRows.map((row) => [row.id, row] as const),
+    );
 
     return modelRows
       .map((row) => {

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveAdapterForModel, resolveAdapterForProvider } from "@/lib/runtime/adapters";
+import {
+  resolveAdapterForModel,
+  resolveAdapterForProvider,
+} from "@/lib/runtime/adapters";
 
 describe("adapter resolver", () => {
   it("prefers provider overrides before generic npm adapters", () => {

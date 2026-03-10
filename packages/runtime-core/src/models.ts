@@ -75,14 +75,18 @@ function unregisterController(key: string) {
 }
 
 export function listProviders() {
-  return Effect.flatMap(RuntimeEnvironment, (env) => env.providers.listProviders());
+  return Effect.flatMap(RuntimeEnvironment, (env) =>
+    env.providers.listProviders(),
+  );
 }
 
 export function listModels(input: {
   connectedOnly?: boolean;
   providerID?: string;
 }) {
-  return Effect.flatMap(RuntimeEnvironment, (env) => env.models.listModels(input));
+  return Effect.flatMap(RuntimeEnvironment, (env) =>
+    env.models.listModels(input),
+  );
 }
 
 export function listConnectedModels() {

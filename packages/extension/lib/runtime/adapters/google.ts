@@ -1,10 +1,11 @@
 import { browser } from "@wxt-dev/browser";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import * as Schema from "effect/Schema";
+import { parseOptionalMetadataObject } from "./auth-metadata";
 import {
-  parseOptionalMetadataObject,
-} from "./auth-metadata";
-import { createGeminiCodeAssistFetch, GEMINI_CODE_ASSIST_HEADERS } from "./gemini-code-assist-transport";
+  createGeminiCodeAssistFetch,
+  GEMINI_CODE_ASSIST_HEADERS,
+} from "./gemini-code-assist-transport";
 import { createApiKeyMethod } from "./generic-factory";
 import { wrapLanguageModel } from "./helpers";
 import { parseProviderOptions } from "./provider-options";
@@ -73,7 +74,9 @@ const googleProviderOptionsSchema = Schema.Struct({
   name: Schema.optional(Schema.String),
 });
 
-type GoogleProviderOptions = Schema.Schema.Type<typeof googleProviderOptionsSchema>;
+type GoogleProviderOptions = Schema.Schema.Type<
+  typeof googleProviderOptionsSchema
+>;
 
 const googleAuthMetadataSchema = Schema.Struct({
   email: Schema.optional(Schema.String),
@@ -261,10 +264,7 @@ function buildProjectResolutionError(
     : GEMINI_PROJECT_REQUIRED_MESSAGE;
 }
 
-function isRecordEqual(
-  left?: GoogleAuthMetadata,
-  right?: GoogleAuthMetadata,
-) {
+function isRecordEqual(left?: GoogleAuthMetadata, right?: GoogleAuthMetadata) {
   const leftEntries = Object.entries(left ?? {}).sort(([a], [b]) =>
     a.localeCompare(b),
   );
@@ -445,7 +445,9 @@ async function loadCodeAssist(
     }
 
     const payload = await response.json().catch(() => undefined);
-    return decodeSchemaOrUndefined(loadCodeAssistPayloadSchema, payload) ?? null;
+    return (
+      decodeSchemaOrUndefined(loadCodeAssistPayloadSchema, payload) ?? null
+    );
   } catch {
     return null;
   }
@@ -646,9 +648,12 @@ async function authorizeGeminiOAuth(
     });
     authTabId = tab.id;
   } catch (error) {
-    throw new Error(`Failed to open Google OAuth tab: ${toErrorMessage(error)}`, {
-      cause: error,
-    });
+    throw new Error(
+      `Failed to open Google OAuth tab: ${toErrorMessage(error)}`,
+      {
+        cause: error,
+      },
+    );
   }
 
   let callbackUrl: string;
@@ -664,7 +669,9 @@ async function authorizeGeminiOAuth(
 
   const parsed = input.oauth.parseCallback(callbackUrl);
   if (parsed.error) {
-    throw new Error(`Google OAuth failed: ${parsed.errorDescription ?? parsed.error}`);
+    throw new Error(
+      `Google OAuth failed: ${parsed.errorDescription ?? parsed.error}`,
+    );
   }
   if (!parsed.code) throw new Error("Missing Google authorization code");
   if (parsed.state && parsed.state !== state) {
@@ -724,11 +731,11 @@ export async function resolveGoogleExecutionState(
   let refresh = auth.refresh;
   let expiresAt = auth.expiresAt;
 
-  if (
-    refresh &&
-    (!expiresAt || expiresAt <= context.runtime.now() + 60_000)
-  ) {
-    const refreshed = await refreshAccessToken(refresh, getGeminiClientSecret());
+  if (refresh && (!expiresAt || expiresAt <= context.runtime.now() + 60_000)) {
+    const refreshed = await refreshAccessToken(
+      refresh,
+      getGeminiClientSecret(),
+    );
     access = refreshed.access_token;
     refresh = refreshed.refresh_token ?? refresh;
     expiresAt = context.runtime.now() + refreshed.expires_in * 1000;

@@ -45,11 +45,9 @@ const TEST_STREAM_CHUNKS: ReadonlyArray<RuntimeStreamPart> = [
 describe("runtime rpc client facade", () => {
   it("wraps public unary methods as effects", async () => {
     const client = createRuntimePublicRpcClient({
-      ensureClient: Effect.succeed(
-        ({
-          listModels: () => Effect.succeed(TEST_MODELS),
-        }) as unknown as RuntimeRpcClientConnection<RuntimePublicRpc>,
-      ),
+      ensureClient: Effect.succeed({
+        listModels: () => Effect.succeed(TEST_MODELS),
+      } as unknown as RuntimeRpcClientConnection<RuntimePublicRpc>),
     });
 
     const effect = client.listModels({
@@ -62,16 +60,14 @@ describe("runtime rpc client facade", () => {
 
   it("preserves RuntimeRpcError through Effect.map on public unary methods", () => {
     const client = createRuntimePublicRpcClient({
-      ensureClient: Effect.succeed(
-        ({
-          listModels: () =>
-            Effect.fail(
-              new RuntimeValidationError({
-                message: "failed",
-              }),
-            ),
-        }) as unknown as RuntimeRpcClientConnection<RuntimePublicRpc>,
-      ),
+      ensureClient: Effect.succeed({
+        listModels: () =>
+          Effect.fail(
+            new RuntimeValidationError({
+              message: "failed",
+            }),
+          ),
+      } as unknown as RuntimeRpcClientConnection<RuntimePublicRpc>),
     });
 
     const effect = client
@@ -93,11 +89,9 @@ describe("runtime rpc client facade", () => {
 
   it("wraps public stream methods as streams", async () => {
     const client = createRuntimePublicRpcClient({
-      ensureClient: Effect.succeed(
-        ({
-          modelDoStream: () => Stream.fromIterable(TEST_STREAM_CHUNKS),
-        }) as unknown as RuntimeRpcClientConnection<RuntimePublicRpc>,
-      ),
+      ensureClient: Effect.succeed({
+        modelDoStream: () => Stream.fromIterable(TEST_STREAM_CHUNKS),
+      } as unknown as RuntimeRpcClientConnection<RuntimePublicRpc>),
     });
 
     const stream = client.modelDoStream({
@@ -117,21 +111,19 @@ describe("runtime rpc client facade", () => {
 
   it("wraps admin unary and stream methods using the explicit client", async () => {
     const client = createRuntimeAdminRpcClient({
-      ensureClient: Effect.succeed(
-        ({
-          listProviders: () =>
-            Effect.succeed([
-              {
-                id: "openai",
-                name: "OpenAI",
-                connected: true,
-                env: ["OPENAI_API_KEY"],
-                modelCount: 1,
-              },
-            ]),
-          modelDoStream: () => Stream.fromIterable(TEST_STREAM_CHUNKS),
-        }) as unknown as RuntimeRpcClientConnection<RuntimeAdminRpc>,
-      ),
+      ensureClient: Effect.succeed({
+        listProviders: () =>
+          Effect.succeed([
+            {
+              id: "openai",
+              name: "OpenAI",
+              connected: true,
+              env: ["OPENAI_API_KEY"],
+              modelCount: 1,
+            },
+          ]),
+        modelDoStream: () => Stream.fromIterable(TEST_STREAM_CHUNKS),
+      } as unknown as RuntimeRpcClientConnection<RuntimeAdminRpc>),
     });
 
     const providers = await Effect.runPromise(client.listProviders({}));

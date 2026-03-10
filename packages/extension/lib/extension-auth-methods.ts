@@ -17,7 +17,9 @@ export type ExtensionResolvedAuthMethod = Pick<
   fields: ReadonlyArray<AuthField>;
 };
 
-function getModelsDevProvider(providerID: string): ModelsDevProvider | undefined {
+function getModelsDevProvider(
+  providerID: string,
+): ModelsDevProvider | undefined {
   if (!(providerID in modelsDevData)) return undefined;
   return modelsDevData[providerID];
 }

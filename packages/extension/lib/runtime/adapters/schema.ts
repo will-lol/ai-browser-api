@@ -1,7 +1,11 @@
 import { RuntimeValidationError } from "@llm-bridge/contracts";
 import * as Either from "effect/Either";
 import * as Schema from "effect/Schema";
-import type { AuthField, AuthMethodDefinition, RuntimeAuthMethod } from "./types";
+import type {
+  AuthField,
+  AuthMethodDefinition,
+  RuntimeAuthMethod,
+} from "./types";
 import {
   formatSchemaError,
   formatSchemaFieldErrors,
@@ -40,7 +44,9 @@ type SchemaWithAuthFields = Schema.Schema.AnyNoContext & {
   [AUTH_FIELD_METADATA]?: AuthField[];
 };
 
-export function defineAuthSchema<TShape extends AuthSchemaShape>(shape: TShape) {
+export function defineAuthSchema<TShape extends AuthSchemaShape>(
+  shape: TShape,
+) {
   const schemaShape: Record<string, Schema.Schema.AnyNoContext> = {};
   const fields: AuthField[] = [];
 

@@ -13,7 +13,9 @@ type JsonObject = {
 
 const authMethodTypeSchema = Schema.Literal("oauth", "pat", "apikey");
 
-export type AuthRecord<TMetadata extends JsonObject | undefined = JsonObject | undefined> =
+export type AuthRecord<
+  TMetadata extends JsonObject | undefined = JsonObject | undefined,
+> =
   | {
       type: "api";
       key: string;
@@ -62,7 +64,9 @@ export const authRecordSchema = Schema.Union(
   }),
 );
 
-export type AuthResult<TMetadata extends JsonObject | undefined = JsonObject | undefined> =
+export type AuthResult<
+  TMetadata extends JsonObject | undefined = JsonObject | undefined,
+> =
   | {
       type: "api";
       key: string;

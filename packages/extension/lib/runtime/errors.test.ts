@@ -121,7 +121,11 @@ describe("runtime error wrappers", () => {
 
   it("wraps plain errors for auth, storage, transport, and extension boundaries", () => {
     expect(
-      wrapAuthPluginError(new Error("plugin failed"), "gitlab", "auth.authorize"),
+      wrapAuthPluginError(
+        new Error("plugin failed"),
+        "gitlab",
+        "auth.authorize",
+      ),
     ).toEqual(
       new RuntimeAuthProviderError({
         providerID: "gitlab",
@@ -130,7 +134,9 @@ describe("runtime error wrappers", () => {
         message: "plugin failed",
       }),
     );
-    expect(wrapStorageError(new Error("db failed"), "query.listProviders")).toEqual(
+    expect(
+      wrapStorageError(new Error("db failed"), "query.listProviders"),
+    ).toEqual(
       new RuntimeInternalError({
         operation: "query.listProviders",
         message: "db failed",

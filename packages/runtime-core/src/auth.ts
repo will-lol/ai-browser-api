@@ -8,7 +8,9 @@ import * as Effect from "effect/Effect";
 import { RuntimeEnvironment, type AppEffect } from "./environment";
 
 export function startup(): AppEffect<void> {
-  return Effect.flatMap(RuntimeEnvironment, (env) => env.catalog.ensureCatalog());
+  return Effect.flatMap(RuntimeEnvironment, (env) =>
+    env.catalog.ensureCatalog(),
+  );
 }
 
 export function openProviderAuthWindow(
@@ -31,9 +33,13 @@ export function startProviderAuthFlow(input: {
   values?: Record<string, string>;
 }): AppEffect<RuntimeStartProviderAuthFlowResponse> {
   return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.auth.startProviderAuthFlow(input).pipe(
-      Effect.tap(() => env.catalog.refreshCatalogForProvider(input.providerID)),
-    ),
+    env.auth
+      .startProviderAuthFlow(input)
+      .pipe(
+        Effect.tap(() =>
+          env.catalog.refreshCatalogForProvider(input.providerID),
+        ),
+      ),
   );
 }
 
@@ -50,8 +56,10 @@ export function disconnectProvider(
   providerID: string,
 ): AppEffect<RuntimeDisconnectProviderResponse> {
   return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.auth.disconnectProvider(providerID).pipe(
-      Effect.tap(() => env.catalog.refreshCatalogForProvider(providerID)),
-    ),
+    env.auth
+      .disconnectProvider(providerID)
+      .pipe(
+        Effect.tap(() => env.catalog.refreshCatalogForProvider(providerID)),
+      ),
   );
 }

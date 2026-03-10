@@ -44,10 +44,7 @@ function createBridgeModelCallUrl(
 }
 
 function toResponseHeaders(error: RuntimeUpstreamServiceError) {
-  if (
-    error.responseHeaders &&
-    Object.keys(error.responseHeaders).length > 0
-  ) {
+  if (error.responseHeaders && Object.keys(error.responseHeaders).length > 0) {
     return error.responseHeaders;
   }
   return undefined;
@@ -152,7 +149,11 @@ export function logBridgeDebug(event: string, details?: unknown) {
   console.log(`[bridge-client] ${event}`, details);
 }
 
-export function logBridgeError(event: string, error: unknown, details?: unknown) {
+export function logBridgeError(
+  event: string,
+  error: unknown,
+  details?: unknown,
+) {
   console.error(`[bridge-client] ${event}`, {
     details,
     error,

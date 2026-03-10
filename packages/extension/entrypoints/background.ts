@@ -1,13 +1,9 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import {
-  startup,
-} from "@llm-bridge/runtime-core";
+import { startup } from "@llm-bridge/runtime-core";
 import { browser } from "@wxt-dev/browser";
 import { defineBackground } from "wxt/utils/define-background";
-import {
-  ensureProviderCatalog,
-} from "@/lib/runtime/provider-registry";
+import { ensureProviderCatalog } from "@/lib/runtime/provider-registry";
 import { sanitizePendingPermissionRequests } from "@/lib/runtime/permissions";
 import { runtimeDb } from "@/lib/runtime/db/runtime-db";
 import { subscribeRuntimeEvents } from "@/lib/runtime/events/runtime-events";

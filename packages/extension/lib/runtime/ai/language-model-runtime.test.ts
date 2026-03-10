@@ -126,9 +126,8 @@ mock.module("@/lib/runtime/adapters", () => ({
   }),
 }));
 
-const { runLanguageModelGenerate, runLanguageModelStream } = await import(
-  "@/lib/runtime/ai/language-model-runtime"
-);
+const { runLanguageModelGenerate, runLanguageModelStream } =
+  await import("@/lib/runtime/ai/language-model-runtime");
 
 beforeEach(() => {
   getAuthMock.mockClear();

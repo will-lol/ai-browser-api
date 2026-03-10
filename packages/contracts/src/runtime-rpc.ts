@@ -195,17 +195,23 @@ const RuntimeSetModelPermissionRpc = Rpc.make("setModelPermission", {
   error: RuntimeRpcErrorSchema,
 });
 
-const RuntimeResolvePermissionRequestRpc = Rpc.make("resolvePermissionRequest", {
-  payload: RuntimeResolvePermissionRequestInputSchema,
-  success: RuntimeResolvePermissionRequestResponseSchema,
-  error: RuntimeRpcErrorSchema,
-});
+const RuntimeResolvePermissionRequestRpc = Rpc.make(
+  "resolvePermissionRequest",
+  {
+    payload: RuntimeResolvePermissionRequestInputSchema,
+    success: RuntimeResolvePermissionRequestResponseSchema,
+    error: RuntimeRpcErrorSchema,
+  },
+);
 
-const RuntimeDismissPermissionRequestRpc = Rpc.make("dismissPermissionRequest", {
-  payload: RuntimeDismissPermissionRequestInputSchema,
-  success: RuntimeDismissPermissionRequestResponseSchema,
-  error: RuntimeRpcErrorSchema,
-});
+const RuntimeDismissPermissionRequestRpc = Rpc.make(
+  "dismissPermissionRequest",
+  {
+    payload: RuntimeDismissPermissionRequestInputSchema,
+    success: RuntimeDismissPermissionRequestResponseSchema,
+    error: RuntimeRpcErrorSchema,
+  },
+);
 
 const RuntimeRpcRequests = [
   RuntimeListModelsRpc,
@@ -251,9 +257,7 @@ export const RuntimePublicAllowedTags = new Set([
   "createPermissionRequest",
 ] as const);
 
-export const RuntimeAdminAllowedTags = new Set(
-  RuntimeRpcGroup.requests.keys(),
-);
+export const RuntimeAdminAllowedTags = new Set(RuntimeRpcGroup.requests.keys());
 
 export const RuntimePublicRpcGroup = RuntimeRpcGroup;
 export const RuntimeAdminRpcGroup = RuntimeRpcGroup;

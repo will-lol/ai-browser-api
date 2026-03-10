@@ -20,7 +20,12 @@ const unavailableChatTransport: ChatTransport<UIMessage> = {
 
 function getMessageText(message: UIMessage) {
   return message.parts
-    .filter((part): part is Extract<(typeof message.parts)[number], { type: "text" }> => part.type === "text")
+    .filter(
+      (
+        part,
+      ): part is Extract<(typeof message.parts)[number], { type: "text" }> =>
+        part.type === "text",
+    )
     .map((part) => part.text)
     .join("");
 }
@@ -146,8 +151,7 @@ export function App() {
     chat: chat ?? unavailableChatRef.current,
   });
 
-  const isLoading =
-    chatStatus === "submitted" || chatStatus === "streaming";
+  const isLoading = chatStatus === "submitted" || chatStatus === "streaming";
   const isChatReady = chat !== null;
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -330,26 +334,26 @@ export function App() {
             {/* Loading Indicator */}
             {chatStatus === "submitted" &&
               messages[messages.length - 1]?.role === "user" && (
-              <div className="flex gap-4 md:gap-6 flex-row max-w-4xl mx-auto">
-                <div className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-sm bg-[#223557] text-[#e5edf8]">
-                  <Bot className="w-5 h-5" />
+                <div className="flex gap-4 md:gap-6 flex-row max-w-4xl mx-auto">
+                  <div className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-sm bg-[#223557] text-[#e5edf8]">
+                    <Bot className="w-5 h-5" />
+                  </div>
+                  <div className="px-5 py-4 rounded-2xl bg-[#101a2f] border border-[#223557] rounded-tl-sm flex items-center gap-2">
+                    <span
+                      className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
+                      style={{ animationDelay: "0ms" }}
+                    ></span>
+                    <span
+                      className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
+                      style={{ animationDelay: "150ms" }}
+                    ></span>
+                    <span
+                      className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
+                      style={{ animationDelay: "300ms" }}
+                    ></span>
+                  </div>
                 </div>
-                <div className="px-5 py-4 rounded-2xl bg-[#101a2f] border border-[#223557] rounded-tl-sm flex items-center gap-2">
-                  <span
-                    className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
-                    style={{ animationDelay: "0ms" }}
-                  ></span>
-                  <span
-                    className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
-                    style={{ animationDelay: "150ms" }}
-                  ></span>
-                  <span
-                    className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
-                    style={{ animationDelay: "300ms" }}
-                  ></span>
-                </div>
-              </div>
-            )}
+              )}
 
             {/* Error Message */}
             {error && (
@@ -378,7 +382,7 @@ export function App() {
                 ? "Connecting to models..."
                 : !isChatReady
                   ? "Preparing selected model..."
-                : "Message the AI..."
+                  : "Message the AI..."
             }
             value={input}
             onChange={handleInputChange}

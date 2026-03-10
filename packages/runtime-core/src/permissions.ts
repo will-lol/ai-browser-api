@@ -9,10 +9,7 @@ import {
   type RuntimeUpdatePermissionResponse,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
-import {
-  RuntimeEnvironment,
-  type AppEffect,
-} from "./environment";
+import { RuntimeEnvironment, type AppEffect } from "./environment";
 
 export function getOriginState(origin: string) {
   return Effect.flatMap(RuntimeEnvironment, (env) =>
@@ -27,7 +24,9 @@ export function listPermissions(origin: string) {
 }
 
 export function listPending(origin: string) {
-  return Effect.flatMap(RuntimeEnvironment, (env) => env.pending.listPending(origin));
+  return Effect.flatMap(RuntimeEnvironment, (env) =>
+    env.pending.listPending(origin),
+  );
 }
 
 export function ensureOriginEnabled(origin: string): AppEffect<void> {

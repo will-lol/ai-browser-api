@@ -1,9 +1,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import * as Schema from "effect/Schema";
 import { mergeModelHeaders } from "./factory-language-model";
-import {
-  parseOptionalMetadataObject,
-} from "./auth-metadata";
+import { parseOptionalMetadataObject } from "./auth-metadata";
 import { wrapLanguageModel } from "./helpers";
 import {
   parseOptionalTrimmedString,
@@ -39,7 +37,9 @@ const copilotProviderOptionsSchema = Schema.Struct({
   name: Schema.optional(Schema.String),
 });
 
-type CopilotProviderOptions = Schema.Schema.Type<typeof copilotProviderOptionsSchema>;
+type CopilotProviderOptions = Schema.Schema.Type<
+  typeof copilotProviderOptionsSchema
+>;
 
 const copilotAuthMetadataSchema = Schema.Struct({
   enterpriseUrl: Schema.optional(Schema.String),
@@ -209,15 +209,16 @@ function normalizeCopilotAuth(
 
   return {
     ...auth,
-    metadata: parseOptionalMetadataObject(copilotAuthMetadataSchema, auth.metadata),
+    metadata: parseOptionalMetadataObject(
+      copilotAuthMetadataSchema,
+      auth.metadata,
+    ),
   };
 }
 
-async function parseCopilotJson<TSchema extends Schema.Schema.AnyNoContext>(input: {
-  response: Response;
-  schema: TSchema;
-  message: string;
-}) {
+async function parseCopilotJson<
+  TSchema extends Schema.Schema.AnyNoContext,
+>(input: { response: Response; schema: TSchema; message: string }) {
   const payload = await input.response.json().catch(() => undefined);
   const result = decodeSchemaOrUndefined(input.schema, payload);
   if (result) return result;
@@ -347,7 +348,9 @@ async function authorizeCopilotDevice(
 
     if (data.error === "slow_down") {
       intervalSeconds =
-        data.interval && data.interval > 0 ? data.interval : intervalSeconds + 5;
+        data.interval && data.interval > 0
+          ? data.interval
+          : intervalSeconds + 5;
       await sleep(intervalSeconds * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS);
       throwIfAborted(input.signal);
       continue;
@@ -430,7 +433,7 @@ export async function resolveCopilotExecutionState(
       expiresAt:
         typeof tokenData.expires_at === "number"
           ? tokenData.expires_at * 1000 - 5 * 60 * 1000
-                : context.runtime.now() + 25 * 60_000,
+          : context.runtime.now() + 25 * 60_000,
       accountId: auth.accountId,
       methodID: auth.methodID,
       methodType: auth.methodType,

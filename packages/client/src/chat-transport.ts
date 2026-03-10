@@ -22,9 +22,7 @@ import {
 } from "./shared";
 import type { BridgeChatTransportOptions } from "./types";
 
-function resolveChatRequestModelId(input: {
-  body: object | undefined;
-}): {
+function resolveChatRequestModelId(input: { body: object | undefined }): {
   modelId: string;
   bodyWithoutModelId: object | undefined;
 } {
@@ -42,7 +40,9 @@ function resolveChatRequestModelId(input: {
   return {
     modelId,
     bodyWithoutModelId:
-      Object.keys(bodyWithoutModelId).length > 0 ? bodyWithoutModelId : undefined,
+      Object.keys(bodyWithoutModelId).length > 0
+        ? bodyWithoutModelId
+        : undefined,
   };
 }
 
@@ -139,10 +139,7 @@ export function createChatTransport(input: {
         messages,
       });
 
-      const {
-        modelId,
-        bodyWithoutModelId,
-      } = resolveChatRequestModelId({
+      const { modelId, bodyWithoutModelId } = resolveChatRequestModelId({
         body,
       });
 
@@ -187,10 +184,7 @@ export function createChatTransport(input: {
         abortChatStream: input.abortChatStream,
       });
     },
-    async reconnectToStream({
-      chatId,
-      headers,
-    }) {
+    async reconnectToStream({ chatId, headers }) {
       if (hasRequestHeaders(headers)) {
         throw createUnsupportedChatTransportHeadersError();
       }
