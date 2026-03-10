@@ -2,10 +2,13 @@
 
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { parseModelsDevSnapshotText } from "../lib/runtime/models-dev-schema";
+import { parseModelsDevSnapshotText } from "../src/background/runtime/models-dev-schema";
 
 const MODELS_URL = process.env.MODELS_DEV_URL ?? "https://models.dev/api.json";
-const OUTFILE = path.join(process.cwd(), "lib/runtime/models-snapshot.json");
+const OUTFILE = path.join(
+  process.cwd(),
+  "src/background/runtime/models-snapshot.json",
+);
 
 const response = await fetch(MODELS_URL, {
   headers: {

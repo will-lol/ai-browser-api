@@ -1,0 +1,87 @@
+import { useAtomSet } from "@effect-atom/atom-react";
+import { Badge } from "@/shared/ui/badge";
+import { Switch } from "@/shared/ui/switch";
+import type { RuntimePermissionDecision } from "@llm-bridge/contracts";
+import { getProviderLabel } from "@/shared/provider-labels";
+import { updateModelPermissionAtom } from "@/shared/state/runtime-mutations";
+import { useState } from "react";
+
+interface ModelRowProps {
+  id: string;
+  name: string;
+  provider: string;
+  capabilities: ReadonlyArray<string>;
+  permission: RuntimePermissionDecision;
+  origin: string;
+  disabled?: boolean;
+}
+
+export function ModelRow({
+  id,
+  name,
+  provider,
+  capabilities,
+  permission,
+  origin,
+  disabled = false,
+}: ModelRowProps) {
+  const [pending, setPending] = useState(false);
+  const updatePermission = useAtomSet(updateModelPermissionAtom, {
+    mode: "promise",
+  });
+  const isAllowed = permission === "allowed";
+  const controlsDisabled = disabled || pending;
+
+  return (
+    <label
+      htmlFor={`model-switch-${id}`}
+      className={`grid w-full max-w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 overflow-hidden border-b border-border px-3 py-2 transition-colors ${
+        controlsDisabled
+          ? "cursor-not-allowed opacity-60"
+          : "cursor-pointer hover:bg-secondary/50"
+      }`}
+    >
+      <div className="min-w-0 overflow-hidden">
+        <span className="block w-full overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs font-medium text-foreground">
+          {name}
+        </span>
+        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+          <span className="text-[10px] text-muted-foreground">
+            {getProviderLabel(provider)}
+          </span>
+          {capabilities.map((capability) => (
+            <Badge
+              key={capability}
+              variant="outline"
+              className="h-3.5 rounded border-border px-1 text-[9px] font-normal text-muted-foreground"
+            >
+              {capability}
+            </Badge>
+          ))}
+        </div>
+      </div>
+
+      <Switch
+        id={`model-switch-${id}`}
+        checked={isAllowed}
+        onCheckedChange={(checked) => {
+          setPending(true);
+          void updatePermission({
+            modelId: id,
+            origin,
+            status: checked ? "allowed" : "denied",
+          })
+            .catch((error) => {
+              console.error("[model-row] failed to update permission", error);
+            })
+            .finally(() => {
+              setPending(false);
+            });
+        }}
+        disabled={controlsDisabled}
+        className="shrink-0 justify-self-end"
+        aria-label={`${isAllowed ? "Revoke" : "Grant"} access to ${name}`}
+      />
+    </label>
+  );
+}

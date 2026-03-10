@@ -1,9 +1,9 @@
-import { resolve } from "node:path";
 import { defineConfig } from "wxt";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
+  srcDir: "src",
   imports: {
     presets: ["react"],
     dirsScanOptions: {
@@ -37,15 +37,10 @@ export default defineConfig({
       tanstackRouter({
         target: "react",
         autoCodeSplitting: true,
-        routesDirectory: "./entrypoints/popup/routes",
-        generatedRouteTree: "./entrypoints/popup/routeTree.gen.ts",
+        routesDirectory: "./src/entrypoints/popup/routes",
+        generatedRouteTree: "./src/entrypoints/popup/routeTree.gen.ts",
       }),
       react(),
     ],
-    resolve: {
-      alias: {
-        "@": resolve(__dirname, "."),
-      },
-    },
   }),
 });
