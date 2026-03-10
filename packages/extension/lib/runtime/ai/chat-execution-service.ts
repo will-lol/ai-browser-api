@@ -356,7 +356,7 @@ function startGenerationPump(input: {
   })();
 }
 
-export function makeChatExecutionService(input: ChatExecutionServiceDeps) {
+function makeChatExecutionService(input: ChatExecutionServiceDeps) {
   const generations = new Map<string, ActiveChatGeneration>();
 
   const abortGeneration = (request: RuntimeAbortChatStreamInput) =>
@@ -554,7 +554,7 @@ export function makeChatExecutionService(input: ChatExecutionServiceDeps) {
   };
 }
 
-export type ChatExecutionServiceApi = ReturnType<typeof makeChatExecutionService>;
+type ChatExecutionServiceApi = ReturnType<typeof makeChatExecutionService>;
 
 export class ChatExecutionService extends Context.Tag(
   "@llm-bridge/extension/ChatExecutionService",

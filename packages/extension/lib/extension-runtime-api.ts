@@ -102,16 +102,6 @@ export function setRuntimeOriginEnabled(input: {
   return runtime.setOriginEnabled({ enabled: input.enabled, origin });
 }
 
-export function dismissRuntimePermissionRequest(input: {
-  requestId: string;
-}) {
-  const runtime = getRuntimeAdminRPC();
-
-  return runtime.dismissPermissionRequest({
-    requestId: input.requestId,
-  });
-}
-
 export function resolveRuntimePermissionRequest(input: {
   requestId: string;
   decision: PermissionDecision;

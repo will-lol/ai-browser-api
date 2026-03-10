@@ -25,10 +25,7 @@ import {
   runLanguageModelStream,
 } from "@/lib/runtime/ai/language-model-runtime";
 import { getAuthFlowManager } from "@/lib/runtime/auth-flow-manager";
-import {
-  wrapExtensionError,
-  wrapStorageError,
-} from "@/lib/runtime/errors";
+import { wrapExtensionError, wrapStorageError } from "@/lib/runtime/errors";
 import { resolveTrustedPermissionTarget } from "@/lib/runtime/permission-targets";
 import {
   getOriginState,
@@ -91,8 +88,6 @@ function mapStream(
   });
 }
 
-// This layer bridges runtime-core repositories to extension primitives.
-// Read paths stay on repositories; orchestration stays in runtime-core services.
 export function makeRuntimeCoreInfrastructureLayer() {
   const runtimeEnvironment = {
     providers: {
@@ -127,7 +122,10 @@ export function makeRuntimeCoreInfrastructureLayer() {
             result: await manager.startProviderAuthFlow(input),
           };
         }),
-      cancelProviderAuthFlow: (input: { providerID: string; reason?: string }) =>
+      cancelProviderAuthFlow: (input: {
+        providerID: string;
+        reason?: string;
+      }) =>
         tryExtensionPromise("auth.cancelProviderAuthFlow", async () => {
           const manager = getAuthFlowManager();
           return {

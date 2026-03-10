@@ -36,7 +36,7 @@ export function createMissingChatModelIdError() {
   });
 }
 
-export function createBridgeModelCallUrl(
+function createBridgeModelCallUrl(
   operation: "generate" | "stream",
   modelId: string,
 ) {

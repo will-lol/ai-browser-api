@@ -14,7 +14,6 @@
     "@ai-sdk/react": "^3.0.118",
     "@llm-bridge/client": "workspace:*",
     "ai": "^6.0.112",
-    "effect": "^3.19.19",
     "lucide-react": "^0.577.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

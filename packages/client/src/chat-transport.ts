@@ -46,7 +46,7 @@ function resolveChatRequestModelId(input: {
   };
 }
 
-export function createChatReadableStream(input: {
+function createChatReadableStream(input: {
   chatId: string;
   reader: ReadableStreamDefaultReader<{ readonly [key: string]: JsonValue }>;
   abortSignal?: AbortSignal;

@@ -69,7 +69,7 @@ function requireOrigin(operation: string, origin: string | undefined) {
   );
 }
 
-export const makeRuntimeRpcHandlers = Effect.gen(function* () {
+const makeRuntimeRpcHandlers = Effect.gen(function* () {
   const chat = yield* ChatExecutionService;
 
   return RuntimeRpcGroup.of({
@@ -176,7 +176,7 @@ export const makeRuntimeRpcHandlers = Effect.gen(function* () {
   });
 });
 
-export const RuntimeRpcHandlersLive = RuntimeRpcGroup.toLayer(
+const RuntimeRpcHandlersLive = RuntimeRpcGroup.toLayer(
   makeRuntimeRpcHandlers,
 );
 

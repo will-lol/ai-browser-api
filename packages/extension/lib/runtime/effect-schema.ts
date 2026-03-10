@@ -2,7 +2,7 @@ import * as Either from "effect/Either";
 import * as ParseResult from "effect/ParseResult";
 import * as Schema from "effect/Schema";
 
-export function decodeSchemaEither<S extends Schema.Schema.AnyNoContext>(
+function decodeSchemaEither<S extends Schema.Schema.AnyNoContext>(
   schema: S,
   value: unknown,
 ) {

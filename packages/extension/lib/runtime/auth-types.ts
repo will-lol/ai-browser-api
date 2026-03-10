@@ -6,12 +6,12 @@ import {
 
 export type AuthMethodType = "oauth" | "pat" | "apikey";
 
-export type JsonValue = ContractJsonValue;
-export type JsonObject = {
+type JsonValue = ContractJsonValue;
+type JsonObject = {
   readonly [key: string]: JsonValue;
 };
 
-export const authMethodTypeSchema = Schema.Literal("oauth", "pat", "apikey");
+const authMethodTypeSchema = Schema.Literal("oauth", "pat", "apikey");
 
 export type AuthRecord<TMetadata extends JsonObject | undefined = JsonObject | undefined> =
   | {

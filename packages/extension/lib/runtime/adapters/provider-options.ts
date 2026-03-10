@@ -1,10 +1,8 @@
-import * as Either from "effect/Either";
 import * as Schema from "effect/Schema";
-
-const stringRecordSchema = Schema.Record({
-  key: Schema.String,
-  value: Schema.String,
-});
+import {
+  decodeSchemaOrUndefined,
+  decodeSchemaSync,
+} from "@/lib/runtime/effect-schema";
 
 export function parseOptionalTrimmedString(value: unknown) {
   if (typeof value !== "string") {
@@ -13,19 +11,6 @@ export function parseOptionalTrimmedString(value: unknown) {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
-
-export function parseOptionalBoolean(value: unknown) {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-export function parseOptionalNumber(value: unknown) {
-  return typeof value === "number" ? value : undefined;
-}
-
-export function parseOptionalStringRecord(value: unknown) {
-  const decoded = Schema.decodeUnknownEither(stringRecordSchema)(value);
-  return Either.isRight(decoded) ? decoded.right : undefined;
 }
 
 function normalizeProviderOptionsRecord<T extends Record<string, unknown>>(
@@ -44,14 +29,14 @@ function normalizeProviderOptionsRecord<T extends Record<string, unknown>>(
 export function parseProviderOptions<
   TSchema extends Schema.Schema.AnyNoContext,
 >(schema: TSchema, value: unknown): Schema.Schema.Type<TSchema> {
-  const decoded = Schema.decodeUnknownEither(schema)(value);
-  if (Either.isRight(decoded)) {
+  const decoded = decodeSchemaOrUndefined(schema, value);
+  if (decoded !== undefined) {
     return normalizeProviderOptionsRecord(
-      decoded.right as Record<string, unknown>,
+      decoded as Record<string, unknown>,
     ) as Schema.Schema.Type<TSchema>;
   }
 
   return normalizeProviderOptionsRecord(
-    Schema.decodeUnknownSync(schema)({}),
+    decodeSchemaSync(schema, {}),
   ) as Schema.Schema.Type<TSchema>;
 }

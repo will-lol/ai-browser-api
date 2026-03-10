@@ -5,7 +5,7 @@ function isObjectRecord(value: unknown) {
   return isObject(value);
 }
 
-export function toHeaderRecord(value: unknown) {
+function toHeaderRecord(value: unknown) {
   if (!isObjectRecord(value)) return {};
   const headers: Record<string, string> = {};
   for (const [key, item] of Object.entries(value)) {

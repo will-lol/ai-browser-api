@@ -5,7 +5,6 @@ import type {
   AuthMethodType,
   AuthRecord,
   AuthResult,
-  JsonObject,
 } from "@/lib/runtime/auth-store";
 import type {
   ProviderInfo,
@@ -52,10 +51,6 @@ export type AuthField =
     } & AuthFieldBase);
 
 export type { AuthMethodType } from "@/lib/runtime/auth-store";
-
-export type ParsedAuthRecord<
-  TMetadata extends JsonObject | undefined = JsonObject | undefined,
-> = AuthRecord<TMetadata>;
 
 export interface AdapterAuthContext {
   providerID: string;

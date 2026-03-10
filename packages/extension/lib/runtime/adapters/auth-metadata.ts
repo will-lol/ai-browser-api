@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { decodeSchemaOrUndefined } from "@/lib/runtime/effect-schema";
 
-export function parseOptionalMetadataString(value: unknown) {
+function parseOptionalMetadataString(value: unknown) {
   if (typeof value !== "string") {
     return undefined;
   }

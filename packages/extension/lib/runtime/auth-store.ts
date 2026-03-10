@@ -8,8 +8,6 @@ export type {
   AuthMethodType,
   AuthRecord,
   AuthResult,
-  JsonObject,
-  
 } from "@/lib/runtime/auth-types";
 
 function authStoreInternalError(message: string) {
