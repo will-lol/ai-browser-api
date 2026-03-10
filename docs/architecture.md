@@ -1,4 +1,4 @@
-# LLM Bridge Architecture (Effect-First)
+# LLM Bridge Architecture
 
 ## Package Graph
 
@@ -8,16 +8,16 @@
   - Owns pure AI SDK v3 `<->` runtime wire codecs shared by the browser client and extension runtime adapters.
   - Depends on `@llm-bridge/contracts` and `@ai-sdk/provider`.
 - `@llm-bridge/runtime-core`
-  - Pure application logic using repositories for direct reads and Effect services for orchestration.
+  - Pure application logic organized by behavior (`auth`, `models`, `permissions`) around one `RuntimeEnvironment`.
   - Depends on `@llm-bridge/contracts` only.
 - `@llm-bridge/runtime-events`
   - Shared Effect event bus + transport interfaces for runtime event fanout.
   - Depends on `@llm-bridge/contracts` and `effect`.
 - `@llm-bridge/extension`
   - Browser/extension infrastructure and entrypoints.
-  - Provides runtime-core repositories, runs RPC servers, and provides browser transport adapters for runtime events.
+  - Implements `RuntimeEnvironment`, runs the canonical runtime RPC server, and provides browser transport adapters for runtime events.
 - `@llm-bridge/client`
-  - Effect service (`BridgeClient`) backed by Effect RPC.
+  - Factory API (`createBridgeClient()`) backed by Effect RPC internally.
   - Exposes AI SDK-compatible `LanguageModelV3` from `getModel`.
   - Exposes a stable AI SDK UI `ChatTransport` from `getChatTransport`, with
     `modelId` supplied per chat request rather than bound to the transport.
@@ -39,10 +39,10 @@
 
 ## Runtime Topology
 
-1. Background worker starts `runtime-core` with infrastructure layers from `extension`.
+1. Background worker starts `runtime-core` with a single `RuntimeEnvironment` layer from `extension`.
 2. Background exposes `RuntimeRpcGroup` via Effect RPC over Chrome runtime ports.
-3. Content script exposes `PageBridgeRpcGroup` via Effect RPC over `MessagePort` to the page.
-4. `@llm-bridge/client` connects to content bridge and provides an Effect service + AI SDK model adapter.
+3. Content script exposes the same canonical runtime RPC protocol over `MessagePort` to the page.
+4. `@llm-bridge/client` connects to the content bridge and returns a plain client object with model/chat adapters.
 5. Runtime events flow through `@llm-bridge/runtime-events` and are schema-validated with shared contracts.
 
 ## Request Option Ownership

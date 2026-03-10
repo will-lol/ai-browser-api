@@ -223,6 +223,39 @@ export type RuntimeUpdatePermissionInput = Schema.Schema.Type<
   typeof RuntimeUpdatePermissionInputSchema
 >;
 
+export const RuntimeResolvePermissionRequestInputSchema = Schema.Struct({
+  requestId: Schema.String,
+  decision: RuntimePermissionDecisionSchema,
+});
+export type RuntimeResolvePermissionRequestInput = Schema.Schema.Type<
+  typeof RuntimeResolvePermissionRequestInputSchema
+>;
+
+export const RuntimeDismissPermissionRequestInputSchema = Schema.Struct({
+  requestId: Schema.String,
+});
+export type RuntimeDismissPermissionRequestInput = Schema.Schema.Type<
+  typeof RuntimeDismissPermissionRequestInputSchema
+>;
+
+export const RuntimeSetOriginEnabledInputSchema = Schema.Struct({
+  origin: Schema.String,
+  enabled: Schema.Boolean,
+});
+export type RuntimeSetOriginEnabledInput = Schema.Schema.Type<
+  typeof RuntimeSetOriginEnabledInputSchema
+>;
+
+export const RuntimeSetModelPermissionInputSchema = Schema.Struct({
+  origin: Schema.String,
+  modelId: Schema.String,
+  status: RuntimePermissionDecisionSchema,
+  capabilities: Schema.optional(Schema.Array(Schema.String)),
+});
+export type RuntimeSetModelPermissionInput = Schema.Schema.Type<
+  typeof RuntimeSetModelPermissionInputSchema
+>;
+
 export const RuntimeRequestPermissionInputSchema = Schema.Union(
   Schema.Struct({
     origin: Schema.String,
@@ -245,7 +278,6 @@ export type RuntimeRequestPermissionInput = Schema.Schema.Type<
 
 export const RuntimeCreatePermissionRequestInputSchema = Schema.Struct({
   origin: Schema.String,
-  action: Schema.Literal("create"),
   modelId: Schema.String,
 });
 export type RuntimeCreatePermissionRequestInput = Schema.Schema.Type<

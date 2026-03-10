@@ -1,11 +1,10 @@
 import type { ChatTransport, UIMessage } from "ai";
 import { Chat, useChat } from "@ai-sdk/react";
 import {
-  BridgeClient,
+  createBridgeClient,
+  type BridgeClientApi,
   type BridgeModelSummary,
-  withBridgeClient,
 } from "@llm-bridge/client";
-import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, User, Bot, Loader2, RefreshCw } from "lucide-react";
 
@@ -37,6 +36,8 @@ export function App() {
   const startupRefreshTriggeredRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const selectedModelIdRef = useRef(selectedModelId);
+  const bridgeClientRef = useRef<BridgeClientApi | null>(null);
+  const bridgeClientPromiseRef = useRef<Promise<BridgeClientApi> | null>(null);
   const unavailableChatRef = useRef(
     new Chat<UIMessage>({
       transport: unavailableChatTransport,
@@ -56,11 +57,19 @@ export function App() {
     });
   }, []);
 
-  const runBridge = useCallback(
-    <A,>(program: Effect.Effect<A, unknown, BridgeClient>) =>
-      Effect.runPromise(withBridgeClient(program)),
-    [],
-  );
+  const ensureBridgeClient = useCallback(async () => {
+    if (bridgeClientRef.current) {
+      return bridgeClientRef.current;
+    }
+    if (!bridgeClientPromiseRef.current) {
+      bridgeClientPromiseRef.current = createBridgeClient().then((client) => {
+        bridgeClientRef.current = client;
+        return client;
+      });
+    }
+
+    return bridgeClientPromiseRef.current;
+  }, []);
 
   const createChatCallbacks = useCallback(
     () => ({
@@ -88,13 +97,8 @@ export function App() {
 
     const refreshTask = (async () => {
       try {
-        const googleModels = await runBridge(
-          Effect.gen(function* () {
-            const client = yield* BridgeClient;
-            const allModels = yield* client.listModels;
-            return allModels;
-          }),
-        );
+        const client = await ensureBridgeClient();
+        const googleModels = await client.listModels();
 
         setModels(googleModels);
         pushDebug("refreshModels.loaded", {
@@ -130,7 +134,7 @@ export function App() {
     });
 
     return refreshInFlightRef.current;
-  }, [pushDebug, pushError, runBridge]);
+  }, [ensureBridgeClient, pushDebug, pushError]);
 
   const {
     messages,
@@ -187,12 +191,8 @@ export function App() {
   useEffect(() => {
     let disposed = false;
 
-    void runBridge(
-      Effect.gen(function* () {
-        const client = yield* BridgeClient;
-        return client.getChatTransport();
-      }),
-    )
+    void ensureBridgeClient()
+      .then((client) => client.getChatTransport())
       .then((nextTransport) => {
         if (disposed) {
           return;
@@ -219,8 +219,12 @@ export function App() {
 
     return () => {
       disposed = true;
+      const client = bridgeClientRef.current;
+      bridgeClientRef.current = null;
+      bridgeClientPromiseRef.current = null;
+      void client?.close().catch(() => undefined);
     };
-  }, [createChatCallbacks, pushDebug, pushError, runBridge]);
+  }, [createChatCallbacks, ensureBridgeClient, pushDebug, pushError]);
 
   return (
     <div className="flex flex-col h-screen bg-[#0b1220] text-[#e5edf8] font-sans">

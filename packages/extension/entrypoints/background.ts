@@ -1,9 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import {
-  PermissionServiceLive,
-  RuntimeApplication,
-  RuntimeApplicationLive,
+  startup,
 } from "@llm-bridge/runtime-core";
 import { browser } from "@wxt-dev/browser";
 import { defineBackground } from "wxt/utils/define-background";
@@ -217,18 +215,11 @@ async function updateActionState() {
 }
 
 function createRuntimeLayer() {
-  const infrastructureLayer = makeRuntimeCoreInfrastructureLayer();
-  const permissionLayer = PermissionServiceLive.pipe(
-    Layer.provide(infrastructureLayer),
-  );
-
-  const runtimeApplicationLayer = RuntimeApplicationLive.pipe(
-    Layer.provide(infrastructureLayer),
-  );
+  const runtimeEnvironmentLayer = makeRuntimeCoreInfrastructureLayer();
 
   const runtimeRpcDependencyLayer = Layer.merge(
-    runtimeApplicationLayer,
-    ChatExecutionServiceLive.pipe(Layer.provide(permissionLayer)),
+    runtimeEnvironmentLayer,
+    ChatExecutionServiceLive.pipe(Layer.provide(runtimeEnvironmentLayer)),
   );
 
   const runtimePublicRpcHandlersLayer = RuntimePublicRpcHandlersLive.pipe(
@@ -240,7 +231,7 @@ function createRuntimeLayer() {
   );
 
   return {
-    runtimeApplicationLayer,
+    runtimeEnvironmentLayer,
     runtimePublicRpcHandlersLayer,
     runtimeAdminRpcHandlersLayer,
   };
@@ -255,12 +246,10 @@ async function sanitizePendingRequests() {
 }
 
 function startRuntimeCore(layers: ReturnType<typeof createRuntimeLayer>) {
-  const startup = initializeRuntimeSecurityLayer()
+  const startupTask = initializeRuntimeSecurityLayer()
     .then(() =>
       Effect.runPromise(
-        Effect.flatMap(RuntimeApplication, (app) => app.startup()).pipe(
-          Effect.provide(layers.runtimeApplicationLayer),
-        ),
+        startup().pipe(Effect.provide(layers.runtimeEnvironmentLayer)),
       ),
     )
     .then(() => sanitizePendingRequests())
@@ -275,7 +264,7 @@ function startRuntimeCore(layers: ReturnType<typeof createRuntimeLayer>) {
     console.warn("runtime rpc server failed", error);
   });
 
-  return startup;
+  return startupTask;
 }
 
 export default defineBackground(() => {

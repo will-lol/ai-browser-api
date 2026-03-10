@@ -1,5 +1,6 @@
-import { z } from "zod";
+import * as Schema from "effect/Schema";
 import type { RuntimeFetch } from "./types";
+import { decodeSchemaOrUndefined } from "@/lib/runtime/effect-schema";
 
 const GENERATIVE_LANGUAGE_HOST = "generativelanguage.googleapis.com";
 const CODE_ASSIST_BASE_URL = "https://cloudcode-pa.googleapis.com";
@@ -31,14 +32,14 @@ interface RewrittenTransportRequest<TMetadata = void> {
   metadata: TMetadata;
 }
 
-const jsonRecordSchema: z.ZodType<Record<string, unknown>> = z.record(
-  z.string(),
-  z.unknown(),
-);
+const jsonRecordSchema = Schema.Record({
+  key: Schema.String,
+  value: Schema.Unknown,
+});
 
-const geminiResponseEnvelopeSchema = z.object({
-  traceId: z.string().optional(),
-  response: jsonRecordSchema.optional(),
+const geminiResponseEnvelopeSchema = Schema.Struct({
+  traceId: Schema.optional(Schema.String),
+  response: Schema.optional(jsonRecordSchema),
 });
 
 function randomRequestID() {
@@ -170,12 +171,12 @@ export async function rewriteGeminiCodeAssistRequest(
     }
 
     const parsedJson = JSON.parse(bodyText) as unknown;
-    const parsedBodyResult = jsonRecordSchema.safeParse(parsedJson);
-    if (!parsedBodyResult.success) {
+    const parsedBody = decodeSchemaOrUndefined(jsonRecordSchema, parsedJson);
+    if (!parsedBody) {
       throw new Error("Gemini OAuth request body must be a JSON object.");
     }
     const wrapped = transformRequestPayload(
-      parsedBodyResult.data,
+      parsedBody,
       options.projectId,
       parsed.effectiveModel,
     );
@@ -212,24 +213,26 @@ function transformGeminiCodeAssistSSELine(line: string): string {
   }
 
   try {
-    const parsedResult = geminiResponseEnvelopeSchema.safeParse(
+    const parsedResult = decodeSchemaOrUndefined(
+      geminiResponseEnvelopeSchema,
       JSON.parse(payload) as unknown,
     );
-    if (!parsedResult.success || !parsedResult.data.response) {
+    if (!parsedResult?.response) {
       return line;
     }
 
-    const { traceId, response } = parsedResult.data;
+    const { traceId, response } = parsedResult;
+    const normalizedResponse = { ...response };
     if (typeof traceId === "string") {
       if (
-        typeof response.responseId !== "string" ||
-        !response.responseId
+        typeof normalizedResponse.responseId !== "string" ||
+        !normalizedResponse.responseId
       ) {
-        response.responseId = traceId;
+        normalizedResponse.responseId = traceId;
       }
     }
 
-    return `data: ${JSON.stringify(response)}`;
+    return `data: ${JSON.stringify(normalizedResponse)}`;
   } catch {
     return line;
   }
@@ -289,22 +292,26 @@ function transformGeminiCodeAssistStream(stream: ReadableStream<Uint8Array>) {
 }
 
 function unwrapGeminiCodeAssistPayload(payload: Record<string, unknown>) {
-  const parsedResult = geminiResponseEnvelopeSchema.safeParse(payload);
-  if (!parsedResult.success || !parsedResult.data.response) {
+  const parsedResult = decodeSchemaOrUndefined(
+    geminiResponseEnvelopeSchema,
+    payload,
+  );
+  if (!parsedResult?.response) {
     return payload;
   }
 
-  const { traceId, response } = parsedResult.data;
+  const { traceId, response } = parsedResult;
+  const normalizedResponse = { ...response };
   if (typeof traceId === "string") {
     if (
-      typeof response.responseId !== "string" ||
-      !response.responseId
+      typeof normalizedResponse.responseId !== "string" ||
+      !normalizedResponse.responseId
     ) {
-      response.responseId = traceId;
+      normalizedResponse.responseId = traceId;
     }
   }
 
-  return response;
+  return normalizedResponse;
 }
 
 export async function normalizeGeminiCodeAssistResponse(
@@ -341,8 +348,11 @@ export async function normalizeGeminiCodeAssistResponse(
   }
 
   try {
-    const parsedResult = jsonRecordSchema.safeParse(JSON.parse(text) as unknown);
-    if (!parsedResult.success) {
+    const parsedResult = decodeSchemaOrUndefined(
+      jsonRecordSchema,
+      JSON.parse(text) as unknown,
+    );
+    if (!parsedResult) {
       return new Response(text, {
         status: response.status,
         statusText: response.statusText,
@@ -350,9 +360,9 @@ export async function normalizeGeminiCodeAssistResponse(
       });
     }
 
-    const unwrapped = unwrapGeminiCodeAssistPayload(parsedResult.data);
+    const unwrapped = unwrapGeminiCodeAssistPayload({ ...parsedResult });
 
-    if (unwrapped === parsedResult.data) {
+    if (unwrapped === parsedResult) {
       return new Response(text, {
         status: response.status,
         statusText: response.statusText,

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  googleAdapter,
   resolveGeminiProjectContext,
   resolveGoogleExecutionState,
 } from "@/lib/runtime/adapters/google";
@@ -259,33 +258,5 @@ describe("resolveGoogleExecutionState", () => {
     assert.ok(rewritten);
     const headers = new Headers(rewritten.init.headers);
     assert.equal(headers.get("authorization"), "Bearer oauth-access");
-  });
-});
-
-describe("googleAdapter.auth.parseStoredAuth", () => {
-  it("preserves method-aware oauth metadata", () => {
-    const parsed = googleAdapter.auth.parseStoredAuth({
-      type: "oauth",
-      methodID: "oauth",
-      methodType: "oauth",
-      access: "oauth-access",
-      refresh: "oauth-refresh",
-      expiresAt: Date.now() + 60_000,
-      createdAt: Date.now() - 1_000,
-      updatedAt: Date.now() - 1_000,
-      metadata: {
-        email: "dev@example.com",
-        projectId: "configured-project",
-        managedProjectId: "managed-project",
-      },
-    });
-
-    assert.equal(parsed?.methodID, "oauth");
-    assert.equal(parsed?.methodType, "oauth");
-    assert.deepEqual(parsed?.metadata, {
-      email: "dev@example.com",
-      projectId: "configured-project",
-      managedProjectId: "managed-project",
-    });
   });
 });

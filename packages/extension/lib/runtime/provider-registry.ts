@@ -1,9 +1,6 @@
 import { getRuntimeConfig } from "@/lib/runtime/config-store";
 import type { RuntimeProviderConfig } from "@/lib/runtime/config-store";
-import {
-  parseAdapterStoredAuth,
-  resolveAdapterForProvider,
-} from "@/lib/runtime/adapters";
+import { resolveAdapterForProvider } from "@/lib/runtime/adapters";
 import { getModelsDevData } from "@/lib/runtime/models-dev";
 import type {
   ModelsDevModel,
@@ -317,7 +314,7 @@ async function buildProviderFromSource(input: {
     id: input.providerID,
     name: input.config?.name ?? input.source.name,
     source: input.config ? "config" : "models.dev",
-    env: input.config?.env ?? input.source.env,
+    env: [...(input.config?.env ?? input.source.env)],
     connected: Boolean(input.authMap[input.providerID]),
     options: mergeRecord({}, input.config?.options ?? {}),
     models,
@@ -337,7 +334,7 @@ async function buildProviderFromSource(input: {
       {
         providerID: input.providerID,
         provider,
-        auth: parseAdapterStoredAuth(adapter, auth),
+        auth,
       },
       provider,
     )) ?? provider

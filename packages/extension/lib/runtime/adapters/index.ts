@@ -1,4 +1,3 @@
-import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import type { ModelsDevProvider } from "@/lib/runtime/models-dev";
 import type { ProviderModelInfo } from "@/lib/runtime/provider-registry";
 import { genericFactoryAdapters } from "./generic-factory";
@@ -7,56 +6,14 @@ import { githubCopilotAdapter } from "./github-copilot";
 import { gitlabAdapter } from "./gitlab";
 import { googleAdapter } from "./google";
 import { openaiAdapter } from "./openai";
-import type {
-  AIAdapter,
-  AdapterAuthContext,
-  AnyAuthMethodDefinition,
-  ParsedAuthRecord,
-  RegisteredAdapter,
-  RuntimeAdapterContext,
-} from "./types";
-
-function registerAdapter<
-  TPersistedAuthMeta extends ParsedAuthRecord["metadata"],
->(
-  adapter: AIAdapter<TPersistedAuthMeta>,
-): RegisteredAdapter {
-  return {
-    key: adapter.key,
-    displayName: adapter.displayName,
-    match: adapter.match,
-    auth: {
-      methods: (ctx) =>
-        adapter.auth.methods(ctx as AdapterAuthContext<TPersistedAuthMeta>),
-      parseStoredAuth: (auth) => adapter.auth.parseStoredAuth(auth),
-      serializeAuth: (input) =>
-        adapter.auth.serializeAuth({
-          result: input.result as AuthResult<TPersistedAuthMeta>,
-          method: input.method,
-        }),
-    },
-    createModel: (context) =>
-      adapter.createModel(
-        context as RuntimeAdapterContext<TPersistedAuthMeta>,
-      ),
-    patchCatalog: adapter.patchCatalog
-      ? (ctx, provider) =>
-          adapter.patchCatalog?.(
-            ctx as AdapterAuthContext<TPersistedAuthMeta>,
-            provider,
-          )
-      : undefined,
-  };
-}
+import type { RegisteredAdapter } from "./types";
 
 const allAdapters: RegisteredAdapter[] = [
-  ...Object.values(genericFactoryAdapters).map((adapter) =>
-    registerAdapter(adapter),
-  ),
-  registerAdapter(openaiAdapter),
-  registerAdapter(googleAdapter),
-  registerAdapter(githubCopilotAdapter),
-  registerAdapter(gitlabAdapter),
+  ...Object.values(genericFactoryAdapters),
+  openaiAdapter,
+  googleAdapter,
+  githubCopilotAdapter,
+  gitlabAdapter,
 ];
 
 const providerAdapters = new Map<string, RegisteredAdapter>();
@@ -117,22 +74,4 @@ export function resolveAdapterForModel(input: {
   const normalizedNpm = normalizeLookupNpm(input.model.api.npm);
   if (!normalizedNpm) return undefined;
   return npmAdapters.get(normalizedNpm);
-}
-
-export function parseAdapterStoredAuth(
-  adapter: RegisteredAdapter,
-  auth?: AuthRecord,
-): ParsedAuthRecord | undefined {
-  return adapter.auth.parseStoredAuth(auth);
-}
-
-export function serializeAdapterAuthResult(input: {
-  adapter: RegisteredAdapter;
-  method: Pick<AnyAuthMethodDefinition, "id" | "type">;
-  result: AuthResult;
-}): AuthResult {
-  return input.adapter.auth.serializeAuth({
-    method: input.method,
-    result: input.result,
-  });
 }

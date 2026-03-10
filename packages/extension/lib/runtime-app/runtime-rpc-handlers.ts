@@ -1,11 +1,32 @@
 import {
-  RuntimeAdminRpcGroup,
-  RuntimePublicRpcGroup,
+  RuntimeRpcGroup,
   RuntimeValidationError,
   isRuntimeRpcError,
   type RuntimeRpcError,
 } from "@llm-bridge/contracts";
-import { RuntimeApplication } from "@llm-bridge/runtime-core";
+import {
+  abortModelCall,
+  acquireModel,
+  cancelProviderAuthFlow,
+  createPermissionRequest,
+  dismissPermissionRequest,
+  disconnectProvider,
+  ensureOriginEnabled,
+  getOriginState,
+  getProviderAuthFlow,
+  listConnectedModels,
+  listModels,
+  listPending,
+  listPermissions,
+  listProviders,
+  openProviderAuthWindow,
+  resolvePermissionRequest,
+  setModelPermission,
+  setOriginEnabled,
+  startProviderAuthFlow,
+  streamModel,
+  generateModel,
+} from "@llm-bridge/runtime-core";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { ChatExecutionService } from "@/lib/runtime/ai/chat-execution-service";
@@ -48,16 +69,15 @@ function requireOrigin(operation: string, origin: string | undefined) {
   );
 }
 
-export const makeRuntimePublicRpcHandlers = Effect.gen(function* () {
-  const app = yield* RuntimeApplication;
+export const makeRuntimeRpcHandlers = Effect.gen(function* () {
   const chat = yield* ChatExecutionService;
 
-  return RuntimePublicRpcGroup.of({
-    getOriginState: ({ origin }) => serializeRpcError(app.getOriginState(origin)),
-    listPending: ({ origin }) => serializeRpcError(app.listPending(origin)),
+  return RuntimeRpcGroup.of({
+    getOriginState: ({ origin }) => serializeRpcError(getOriginState(origin)),
+    listPending: ({ origin }) => serializeRpcError(listPending(origin)),
     acquireModel: ({ origin, requestId, sessionID, modelId }) =>
       serializeRpcError(
-        app.acquireModel({
+        acquireModel({
           origin,
           requestID: requestId,
           sessionID,
@@ -66,7 +86,7 @@ export const makeRuntimePublicRpcHandlers = Effect.gen(function* () {
       ),
     modelDoGenerate: ({ origin, requestId, sessionID, modelId, options }) =>
       serializeRpcError(
-        app.modelDoGenerate({
+        generateModel({
           origin,
           requestID: requestId,
           sessionID,
@@ -76,7 +96,7 @@ export const makeRuntimePublicRpcHandlers = Effect.gen(function* () {
       ),
     modelDoStream: ({ origin, requestId, sessionID, modelId, options }) =>
       serializeRpcStream(
-        app.modelDoStream({
+        streamModel({
           origin,
           requestID: requestId,
           sessionID,
@@ -86,7 +106,7 @@ export const makeRuntimePublicRpcHandlers = Effect.gen(function* () {
       ),
     abortModelCall: ({ origin, sessionID, requestId }) =>
       serializeRpcError(
-        app.abortModelCall({
+        abortModelCall({
           origin,
           sessionID,
           requestID: requestId,
@@ -100,93 +120,30 @@ export const makeRuntimePublicRpcHandlers = Effect.gen(function* () {
       serializeRpcError(chat.abortStream(input)),
     listModels: ({ origin, connectedOnly, providerID }) =>
       serializeRpcError(
-        Effect.gen(function* () {
-          yield* app.ensureOriginEnabled(yield* requireOrigin("listModels", origin));
-          return yield* app.listModels({ connectedOnly, providerID });
-        }),
+        origin
+          ? Effect.gen(function* () {
+              yield* ensureOriginEnabled(yield* requireOrigin("listModels", origin));
+              return yield* listModels({ connectedOnly, providerID });
+            })
+          : listModels({ connectedOnly, providerID }),
       ),
-    requestPermission: (input) =>
+    createPermissionRequest: (input) =>
       serializeRpcError(
         Effect.gen(function* () {
-          yield* app.ensureOriginEnabled(input.origin);
-          const result = yield* app.requestPermission(input);
-          if (!("status" in result)) {
-            return yield* Effect.fail(
-              new RuntimeValidationError({
-                message: "Unexpected permission response for create action",
-              }),
-            );
-          }
-          return result;
+          yield* ensureOriginEnabled(input.origin);
+          return yield* createPermissionRequest(input);
         }),
       ),
-  });
-});
-
-export const RuntimePublicRpcHandlersLive = RuntimePublicRpcGroup.toLayer(
-  makeRuntimePublicRpcHandlers,
-);
-
-export const makeRuntimeAdminRpcHandlers = Effect.gen(function* () {
-  const app = yield* RuntimeApplication;
-  const chat = yield* ChatExecutionService;
-
-  return RuntimeAdminRpcGroup.of({
-    getOriginState: ({ origin }) => serializeRpcError(app.getOriginState(origin)),
-    listPending: ({ origin }) => serializeRpcError(app.listPending(origin)),
-    acquireModel: ({ origin, requestId, sessionID, modelId }) =>
-      serializeRpcError(
-        app.acquireModel({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-        }),
-      ),
-    modelDoGenerate: ({ origin, requestId, sessionID, modelId, options }) =>
-      serializeRpcError(
-        app.modelDoGenerate({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-          options,
-        }),
-      ),
-    modelDoStream: ({ origin, requestId, sessionID, modelId, options }) =>
-      serializeRpcStream(
-        app.modelDoStream({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-          options,
-        }),
-      ),
-    abortModelCall: ({ origin, sessionID, requestId }) =>
-      serializeRpcError(
-        app.abortModelCall({
-          origin,
-          sessionID,
-          requestID: requestId,
-        }),
-      ),
-    chatSendMessages: (input) =>
-      serializeRpcStream(chat.sendMessages(input)),
-    chatReconnectStream: (input) =>
-      serializeRpcStream(chat.reconnectStream(input)),
-    abortChatStream: (input) =>
-      serializeRpcError(chat.abortStream(input)),
-    listProviders: () => serializeRpcError(app.listProviders()),
-    listConnectedModels: () => serializeRpcError(app.listConnectedModels()),
-    listPermissions: ({ origin }) => serializeRpcError(app.listPermissions(origin)),
+    listProviders: () => serializeRpcError(listProviders()),
+    listConnectedModels: () => serializeRpcError(listConnectedModels()),
+    listPermissions: ({ origin }) => serializeRpcError(listPermissions(origin)),
     openProviderAuthWindow: ({ providerID }) =>
-      serializeRpcError(app.openProviderAuthWindow(providerID)),
+      serializeRpcError(openProviderAuthWindow(providerID)),
     getProviderAuthFlow: ({ providerID }) =>
-      serializeRpcError(app.getProviderAuthFlow(providerID)),
+      serializeRpcError(getProviderAuthFlow(providerID)),
     startProviderAuthFlow: ({ providerID, methodID, values }) =>
       serializeRpcError(
-        app.startProviderAuthFlow({
+        startProviderAuthFlow({
           providerID,
           methodID,
           values,
@@ -194,25 +151,34 @@ export const makeRuntimeAdminRpcHandlers = Effect.gen(function* () {
       ),
     cancelProviderAuthFlow: ({ providerID, reason }) =>
       serializeRpcError(
-        app.cancelProviderAuthFlow({
+        cancelProviderAuthFlow({
           providerID,
           reason,
         }),
       ),
     disconnectProvider: ({ providerID }) =>
-      serializeRpcError(app.disconnectProvider(providerID)),
-    updatePermission: (input) => serializeRpcError(app.updatePermission(input)),
-    listModels: ({ connectedOnly, providerID }) =>
+      serializeRpcError(disconnectProvider(providerID)),
+    setOriginEnabled: ({ origin, enabled }) =>
+      serializeRpcError(setOriginEnabled(origin, enabled)),
+    setModelPermission: ({ origin, modelId, status, capabilities }) =>
       serializeRpcError(
-        app.listModels({
-          connectedOnly,
-          providerID,
+        setModelPermission({
+          origin,
+          modelID: modelId,
+          status,
+          capabilities,
         }),
       ),
-    requestPermission: (input) => serializeRpcError(app.requestPermission(input)),
+    resolvePermissionRequest: (input) =>
+      serializeRpcError(resolvePermissionRequest(input)),
+    dismissPermissionRequest: ({ requestId }) =>
+      serializeRpcError(dismissPermissionRequest(requestId)),
   });
 });
 
-export const RuntimeAdminRpcHandlersLive = RuntimeAdminRpcGroup.toLayer(
-  makeRuntimeAdminRpcHandlers,
+export const RuntimeRpcHandlersLive = RuntimeRpcGroup.toLayer(
+  makeRuntimeRpcHandlers,
 );
+
+export const RuntimePublicRpcHandlersLive = RuntimeRpcHandlersLive;
+export const RuntimeAdminRpcHandlersLive = RuntimeRpcHandlersLive;

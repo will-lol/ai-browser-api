@@ -1,5 +1,6 @@
 import { authRecordSchema, type AuthRecord } from "@/lib/runtime/auth-types";
 import type { RuntimeDbAuth } from "@/lib/runtime/db/runtime-db-types";
+import { decodeSchemaOrUndefined } from "@/lib/runtime/effect-schema";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type { VaultKeyProviderApi } from "./vault-key-provider";
@@ -118,15 +119,15 @@ export function makeSecretVault(
             }),
         });
 
-        const authRecordResult = authRecordSchema.safeParse(parsed);
-        if (!authRecordResult.success) {
+        const authRecord = decodeSchemaOrUndefined(authRecordSchema, parsed);
+        if (!authRecord) {
           return yield* new VaultDecryptError({
             providerID: row.providerID,
             message: `Auth payload for provider ${row.providerID} is invalid.`,
           });
         }
 
-        return authRecordResult.data as AuthRecord;
+        return authRecord;
       }),
   };
 }

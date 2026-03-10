@@ -1,6 +1,6 @@
 # @llm-bridge/client
 
-Effect-first browser client for talking to the LLM Bridge extension via `window.postMessage`.
+Factory-based browser client for talking to the LLM Bridge extension via `window.postMessage`.
 
 ## Install
 
@@ -14,26 +14,20 @@ npm i @llm-bridge/client ai effect
 
 ```ts
 import { generateText } from "ai";
-import { BridgeClient, withBridgeClient } from "@llm-bridge/client";
-import * as Effect from "effect/Effect";
+import { createBridgeClient } from "@llm-bridge/client";
 
-const program = Effect.gen(function* () {
-  const client = yield* BridgeClient;
-  const models = yield* client.listModels;
-  const model = yield* client.getModel(models[0]!.id);
+const client = await createBridgeClient();
+const models = await client.listModels();
+const model = await client.getModel(models[0]!.id);
 
-  const response = yield* Effect.tryPromise(() =>
-    generateText({
-      model,
-      prompt: "Hello from the bridge",
-    }),
-  );
-
-  return response.text;
+const response = await generateText({
+  model,
+  prompt: "Hello from the bridge",
 });
 
-const text = await Effect.runPromise(withBridgeClient(program));
+const text = response.text;
 console.log(text);
+await client.close();
 ```
 
 ## Chat Usage
@@ -43,20 +37,12 @@ stable AI SDK UI path.
 
 ```ts
 import { Chat } from "@ai-sdk/react";
-import { BridgeClient, withBridgeClient } from "@llm-bridge/client";
-import * as Effect from "effect/Effect";
+import { createBridgeClient } from "@llm-bridge/client";
 
-const chat = await Effect.runPromise(
-  withBridgeClient(
-    Effect.gen(function* () {
-      const client = yield* BridgeClient;
-
-      return new Chat({
-        transport: client.getChatTransport(),
-      });
-    }),
-  ),
-);
+const client = await createBridgeClient();
+const chat = new Chat({
+  transport: client.getChatTransport(),
+});
 
 await chat.sendMessage(
   { text: "Hello from the bridge" },

@@ -1,22 +1,7 @@
-import * as Rpc from "@effect/rpc/Rpc";
-import * as RpcGroup from "@effect/rpc/RpcGroup";
-import * as Schema from "effect/Schema";
-import {
-  BridgeAbortChatStreamRequestSchema,
-  BridgeAbortRequestSchema,
-  BridgeChatReconnectStreamRequestSchema,
-  BridgeChatSendMessagesRequestSchema,
-  BridgeListModelsResponseSchema,
-  BridgeModelCallRequestSchema,
-  BridgeModelDescriptorResponseSchema,
-  BridgeModelRequestSchema,
-  BridgePermissionRequestSchema,
-  RuntimeCreatePermissionRequestResponseSchema,
-  RuntimeChatStreamChunkSchema,
-  RuntimeGenerateResponseSchema,
-  RuntimeStreamPartSchema,
-} from "./entities";
-import { RuntimeRpcErrorSchema } from "./errors";
+export {
+  RuntimeRpcGroup as PageBridgeRpcGroup,
+  type RuntimeRpc as PageBridgeRpc,
+} from "./runtime-rpc";
 
 export const PAGE_BRIDGE_READY_EVENT = "llm-bridge-ready";
 export const PAGE_BRIDGE_INIT_MESSAGE = "llm-bridge-init-v2";
@@ -62,60 +47,3 @@ export function isPageBridgePortControlMessage(
 
   return true;
 }
-
-export const PageBridgeRpcGroup = RpcGroup.make(
-  Rpc.make("listModels", {
-    payload: {},
-    success: BridgeListModelsResponseSchema,
-    error: RuntimeRpcErrorSchema,
-  }),
-  Rpc.make("getModel", {
-    payload: BridgeModelRequestSchema,
-    success: BridgeModelDescriptorResponseSchema,
-    error: RuntimeRpcErrorSchema,
-  }),
-  Rpc.make("requestPermission", {
-    payload: BridgePermissionRequestSchema,
-    success: RuntimeCreatePermissionRequestResponseSchema,
-    error: RuntimeRpcErrorSchema,
-  }),
-  Rpc.make("abort", {
-    payload: BridgeAbortRequestSchema,
-    success: Schema.Struct({
-      ok: Schema.Boolean,
-    }),
-    error: RuntimeRpcErrorSchema,
-  }),
-  Rpc.make("modelDoGenerate", {
-    payload: BridgeModelCallRequestSchema,
-    success: RuntimeGenerateResponseSchema,
-    error: RuntimeRpcErrorSchema,
-  }),
-  Rpc.make("modelDoStream", {
-    payload: BridgeModelCallRequestSchema,
-    success: RuntimeStreamPartSchema,
-    stream: true,
-    error: RuntimeRpcErrorSchema,
-  }),
-  Rpc.make("chatSendMessages", {
-    payload: BridgeChatSendMessagesRequestSchema,
-    success: RuntimeChatStreamChunkSchema,
-    stream: true,
-    error: RuntimeRpcErrorSchema,
-  }),
-  Rpc.make("chatReconnectStream", {
-    payload: BridgeChatReconnectStreamRequestSchema,
-    success: RuntimeChatStreamChunkSchema,
-    stream: true,
-    error: RuntimeRpcErrorSchema,
-  }),
-  Rpc.make("abortChatStream", {
-    payload: BridgeAbortChatStreamRequestSchema,
-    success: Schema.Struct({
-      ok: Schema.Boolean,
-    }),
-    error: RuntimeRpcErrorSchema,
-  }),
-);
-
-export type PageBridgeRpc = RpcGroup.Rpcs<typeof PageBridgeRpcGroup>;

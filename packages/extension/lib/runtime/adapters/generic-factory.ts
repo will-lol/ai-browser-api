@@ -15,69 +15,76 @@ import { createPerplexity } from "@ai-sdk/perplexity";
 import { createTogetherAI } from "@ai-sdk/togetherai";
 import { createVercel } from "@ai-sdk/vercel";
 import { createXai } from "@ai-sdk/xai";
-import { z } from "zod";
-import {
-  optionalBooleanSchema,
-  optionalNumberSchema,
-  optionalStringRecordSchema,
-  optionalTrimmedStringSchema,
-  parseProviderOptions,
-} from "./provider-options";
+import * as Schema from "effect/Schema";
+import { parseProviderOptions } from "./provider-options";
 import { defineAuthSchema } from "./schema";
 import type {
   AIAdapter,
   AdapterAuthContext,
   AuthMethodDefinition,
-  ParsedAuthRecord,
   RuntimeAdapterContext,
 } from "./types";
-import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import type {
   ProviderModelInfo,
   ProviderRuntimeInfo,
 } from "@/lib/runtime/provider-registry";
 
-const baseProviderOptionsSchema = z.object({
-  baseURL: optionalTrimmedStringSchema,
-  name: optionalTrimmedStringSchema,
+const baseProviderOptionsSchema = Schema.Struct({
+  baseURL: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
 });
 
-const openAICompatibleProviderOptionsSchema = baseProviderOptionsSchema.extend({
-  queryParams: optionalStringRecordSchema,
-  includeUsage: optionalBooleanSchema,
-  supportsStructuredOutputs: optionalBooleanSchema,
+const openAICompatibleProviderOptionsSchema = Schema.Struct({
+  baseURL: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
+  queryParams: Schema.optional(
+    Schema.Record({
+      key: Schema.String,
+      value: Schema.String,
+    }),
+  ),
+  includeUsage: Schema.optional(Schema.Boolean),
+  supportsStructuredOutputs: Schema.optional(Schema.Boolean),
 });
 
-const openAIProviderOptionsSchema = baseProviderOptionsSchema.extend({
-  organization: optionalTrimmedStringSchema,
-  project: optionalTrimmedStringSchema,
+const openAIProviderOptionsSchema = Schema.Struct({
+  baseURL: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
+  organization: Schema.optional(Schema.String),
+  project: Schema.optional(Schema.String),
 });
 
-const azureProviderOptionsSchema = baseProviderOptionsSchema.extend({
-  apiVersion: optionalTrimmedStringSchema,
-  resourceName: optionalTrimmedStringSchema,
-  useDeploymentBasedUrls: optionalBooleanSchema,
+const azureProviderOptionsSchema = Schema.Struct({
+  baseURL: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
+  apiVersion: Schema.optional(Schema.String),
+  resourceName: Schema.optional(Schema.String),
+  useDeploymentBasedUrls: Schema.optional(Schema.Boolean),
 });
 
-const bedrockProviderOptionsSchema = baseProviderOptionsSchema.extend({
-  region: optionalTrimmedStringSchema,
-  accessKeyId: optionalTrimmedStringSchema,
-  secretAccessKey: optionalTrimmedStringSchema,
-  sessionToken: optionalTrimmedStringSchema,
+const bedrockProviderOptionsSchema = Schema.Struct({
+  baseURL: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
+  region: Schema.optional(Schema.String),
+  accessKeyId: Schema.optional(Schema.String),
+  secretAccessKey: Schema.optional(Schema.String),
+  sessionToken: Schema.optional(Schema.String),
 });
 
-const gatewayProviderOptionsSchema = baseProviderOptionsSchema.extend({
-  metadataCacheRefreshMillis: optionalNumberSchema,
+const gatewayProviderOptionsSchema = Schema.Struct({
+  baseURL: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
+  metadataCacheRefreshMillis: Schema.optional(Schema.Number),
 });
 
-type BaseProviderOptions = z.output<typeof baseProviderOptionsSchema>;
-type OpenAICompatibleProviderOptions = z.output<
+type BaseProviderOptions = Schema.Schema.Type<typeof baseProviderOptionsSchema>;
+type OpenAICompatibleProviderOptions = Schema.Schema.Type<
   typeof openAICompatibleProviderOptionsSchema
 >;
-type OpenAIProviderOptions = z.output<typeof openAIProviderOptionsSchema>;
-type AzureProviderOptions = z.output<typeof azureProviderOptionsSchema>;
-type BedrockProviderOptions = z.output<typeof bedrockProviderOptionsSchema>;
-type GatewayProviderOptions = z.output<typeof gatewayProviderOptionsSchema>;
+type OpenAIProviderOptions = Schema.Schema.Type<typeof openAIProviderOptionsSchema>;
+type AzureProviderOptions = Schema.Schema.Type<typeof azureProviderOptionsSchema>;
+type BedrockProviderOptions = Schema.Schema.Type<typeof bedrockProviderOptionsSchema>;
+type GatewayProviderOptions = Schema.Schema.Type<typeof gatewayProviderOptionsSchema>;
 
 type AdapterModelContext<TProviderOptions extends Record<string, unknown>> = {
   provider: ProviderRuntimeInfo;
@@ -88,6 +95,21 @@ type AdapterModelContext<TProviderOptions extends Record<string, unknown>> = {
   headers?: Record<string, string>;
   fetch?: typeof fetch;
 };
+
+type ApiKeyProviderDescriptor<
+  TProviderOptions extends Record<string, unknown>,
+> = {
+  key: string;
+  displayName: string;
+  npm: string;
+  browserSupported?: boolean;
+  providerOptionsSchema: Schema.Schema<TProviderOptions, TProviderOptions, never>;
+  createLanguageModel?: (
+    input: AdapterModelContext<TProviderOptions>,
+  ) => LanguageModelV3 | Promise<LanguageModelV3>;
+};
+
+const requiredAuthStringSchema = Schema.String.pipe(Schema.minLength(1));
 
 function apiKeyLabel(ctx: AdapterAuthContext) {
   return ctx.provider.env[0] ?? `${ctx.providerID.toUpperCase()}_API_KEY`;
@@ -214,27 +236,16 @@ function buildGatewaySettings(
   };
 }
 
-type DirectFactoryAdapterInput<TProviderOptions extends Record<string, unknown>> = {
-  key: string;
-  displayName: string;
-  npm: string;
-  browserSupported?: boolean;
-  parseProviderOptions: (provider: ProviderRuntimeInfo) => TProviderOptions;
-  createLanguageModel?: (
-    input: AdapterModelContext<TProviderOptions>,
-  ) => LanguageModelV3 | Promise<LanguageModelV3>;
-};
-
 export function createApiKeyMethod(
   ctx: AdapterAuthContext,
-): AuthMethodDefinition {
+): AuthMethodDefinition<Record<string, string | undefined>> {
   return {
     id: "apikey",
     type: "apikey",
     label: "API Key",
     inputSchema: defineAuthSchema({
       apiKey: {
-        schema: z.string().trim().min(1, "API key is required"),
+        schema: requiredAuthStringSchema,
         ui: {
           type: "secret",
           label: apiKeyLabel(ctx),
@@ -248,30 +259,12 @@ export function createApiKeyMethod(
     async authorize(input) {
       return {
         type: "api",
-        key: input.values.apiKey,
-        methodID: "apikey" as const,
-        methodType: "apikey" as const,
+        key: input.values.apiKey ?? "",
+        methodID: "apikey",
+        methodType: "apikey",
       };
     },
   };
-}
-
-function parseGenericStoredAuth(
-  auth?: AuthRecord,
-): ParsedAuthRecord<undefined> | undefined {
-  if (!auth) return undefined;
-  if (auth.type !== "api") return undefined;
-  return {
-    ...auth,
-    metadata: undefined,
-  };
-}
-
-function serializeGenericAuth(input: {
-  result: AuthResult<undefined>;
-  method: Pick<AuthMethodDefinition, "id" | "type">;
-}) {
-  return input.result;
 }
 
 function createUnsupportedModelError(npm: string) {
@@ -284,254 +277,244 @@ function resolveApiKey(context: RuntimeAdapterContext) {
   return context.auth?.type === "api" ? context.auth.key : undefined;
 }
 
-function createDirectFactoryAdapter<TProviderOptions extends Record<string, unknown>>(
-  input: DirectFactoryAdapterInput<TProviderOptions>,
-) {
-  const adapter: AIAdapter<undefined> = {
-    key: input.key,
-    displayName: input.displayName,
+function createDirectFactoryAdapter<
+  TProviderOptions extends Record<string, unknown>,
+>(
+  descriptor: ApiKeyProviderDescriptor<TProviderOptions>,
+): AIAdapter {
+  return {
+    key: descriptor.key,
+    displayName: descriptor.displayName,
     match: {
-      npm: input.npm,
+      npm: descriptor.npm,
     },
-    auth: {
-      methods(ctx) {
-        return [createApiKeyMethod(ctx)];
-      },
-      parseStoredAuth: parseGenericStoredAuth,
-      serializeAuth: serializeGenericAuth,
+    listAuthMethods(ctx) {
+      return [createApiKeyMethod(ctx)];
     },
     async createModel(context) {
-      if (input.browserSupported === false || !input.createLanguageModel) {
+      if (
+        descriptor.browserSupported === false ||
+        !descriptor.createLanguageModel
+      ) {
         throw createUnsupportedModelError(context.model.api.npm);
       }
 
-      return input.createLanguageModel({
+      return descriptor.createLanguageModel({
         provider: context.provider,
-        providerOptions: input.parseProviderOptions(context.provider),
+        providerOptions: parseProviderOptions(
+          descriptor.providerOptionsSchema,
+          context.provider.options,
+        ),
         model: context.model,
         apiKey: resolveApiKey(context),
       });
     },
   };
-
-  return adapter;
 }
 
-export const genericFactoryAdapters = {
-  "@ai-sdk/openai-compatible": createDirectFactoryAdapter({
+const apiKeyProviderDescriptors = [
+  {
     key: "@ai-sdk/openai-compatible",
     displayName: "OpenAI Compatible",
     npm: "@ai-sdk/openai-compatible",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(openAICompatibleProviderOptionsSchema, provider.options),
+    providerOptionsSchema: openAICompatibleProviderOptionsSchema,
     createLanguageModel(input) {
       return createOpenAICompatible(
         buildOpenAICompatibleSettings(input),
       ).languageModel(input.model.api.id);
     },
-  }),
-  "@ai-sdk/openai": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/openai",
     displayName: "OpenAI",
     npm: "@ai-sdk/openai",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(openAIProviderOptionsSchema, provider.options),
+    providerOptionsSchema: openAIProviderOptionsSchema,
     createLanguageModel(input) {
       return createOpenAI(buildOpenAISettings(input)).responses(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/anthropic": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/anthropic",
     displayName: "Anthropic",
     npm: "@ai-sdk/anthropic",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     createLanguageModel(input) {
       return createAnthropic(buildAnthropicSettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/google": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/google",
     displayName: "Google",
     npm: "@ai-sdk/google",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     createLanguageModel(input) {
       return createGoogleGenerativeAI(buildGoogleSettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/azure": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/azure",
     displayName: "Azure",
     npm: "@ai-sdk/azure",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(azureProviderOptionsSchema, provider.options),
+    providerOptionsSchema: azureProviderOptionsSchema,
     createLanguageModel(input) {
       return createAzure(buildAzureSettings(input)).responses(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/amazon-bedrock": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/amazon-bedrock",
     displayName: "Amazon Bedrock",
     npm: "@ai-sdk/amazon-bedrock",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(bedrockProviderOptionsSchema, provider.options),
+    providerOptionsSchema: bedrockProviderOptionsSchema,
     createLanguageModel(input) {
       return createAmazonBedrock(buildBedrockSettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/cerebras": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/cerebras",
     displayName: "Cerebras",
     npm: "@ai-sdk/cerebras",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     createLanguageModel(input) {
       return createCerebras(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/cohere": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/cohere",
     displayName: "Cohere",
     npm: "@ai-sdk/cohere",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     createLanguageModel(input) {
       return createCohere(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/deepinfra": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/deepinfra",
     displayName: "DeepInfra",
     npm: "@ai-sdk/deepinfra",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     createLanguageModel(input) {
       return createDeepInfra(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/gateway": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/gateway",
     displayName: "Gateway",
     npm: "@ai-sdk/gateway",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(gatewayProviderOptionsSchema, provider.options),
+    providerOptionsSchema: gatewayProviderOptionsSchema,
     createLanguageModel(input) {
       return createGateway(buildGatewaySettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/groq": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/groq",
     displayName: "Groq",
     npm: "@ai-sdk/groq",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     createLanguageModel(input) {
       return createGroq(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/mistral": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/mistral",
     displayName: "Mistral",
     npm: "@ai-sdk/mistral",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     createLanguageModel(input) {
       return createMistral(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/perplexity": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/perplexity",
     displayName: "Perplexity",
     npm: "@ai-sdk/perplexity",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     createLanguageModel(input) {
       return createPerplexity(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/togetherai": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/togetherai",
     displayName: "Together AI",
     npm: "@ai-sdk/togetherai",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     createLanguageModel(input) {
       return createTogetherAI(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/vercel": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/vercel",
     displayName: "Vercel",
     npm: "@ai-sdk/vercel",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     createLanguageModel(input) {
       return createVercel(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@ai-sdk/xai": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/xai",
     displayName: "xAI",
     npm: "@ai-sdk/xai",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     createLanguageModel(input) {
       return createXai(buildApiKeySettings(input)).languageModel(
         input.model.api.id,
       );
     },
-  }),
-  "@openrouter/ai-sdk-provider": createDirectFactoryAdapter({
+  },
+  {
     key: "@openrouter/ai-sdk-provider",
     displayName: "OpenRouter",
     npm: "@openrouter/ai-sdk-provider",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     browserSupported: false,
-  }),
-  "@ai-sdk/google-vertex": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/google-vertex",
     displayName: "Google Vertex",
     npm: "@ai-sdk/google-vertex",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     browserSupported: false,
-  }),
-  "@ai-sdk/google-vertex/anthropic": createDirectFactoryAdapter({
+  },
+  {
     key: "@ai-sdk/google-vertex/anthropic",
     displayName: "Google Vertex Anthropic",
     npm: "@ai-sdk/google-vertex/anthropic",
-    parseProviderOptions: (provider) =>
-      parseProviderOptions(baseProviderOptionsSchema, provider.options),
+    providerOptionsSchema: baseProviderOptionsSchema,
     browserSupported: false,
-  }),
-} as const;
+  },
+] satisfies ReadonlyArray<ApiKeyProviderDescriptor<Record<string, unknown>>>;
+
+export const genericFactoryAdapters = Object.fromEntries(
+  apiKeyProviderDescriptors.map((descriptor) => [
+    descriptor.key,
+    createDirectFactoryAdapter(descriptor),
+  ]),
+) as Record<string, AIAdapter>;

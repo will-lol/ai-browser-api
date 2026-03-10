@@ -4,7 +4,6 @@ import { PendingRequestCard } from "@/components/extension/pending-request-card"
 import { Toaster, toast } from "sonner";
 import { currentOrigin } from "@/lib/extension-runtime-api";
 import { floatingPermissionDataResultAtom } from "@/lib/extension-runtime-atoms";
-import { isInterruptedOnlyCause } from "@/lib/effect-cause";
 
 interface FloatingPermissionPromptProps {
   className?: string;
@@ -30,7 +29,6 @@ export function FloatingPermissionPrompt({
   const originEnabled = data?.originState.enabled ?? true;
 
   useEffect(() => {
-    console.log("hi");
     const pendingIds = new Set(pendingRequests.map((request) => request.id));
     setSoftDismissedIds((prev) => {
       const next = new Set(Array.from(prev).filter((id) => pendingIds.has(id)));

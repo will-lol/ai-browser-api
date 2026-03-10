@@ -1,26 +1,25 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { z } from "zod";
+import * as Schema from "effect/Schema";
 import { mergeModelHeaders } from "./factory-language-model";
 import {
-  optionalMetadataString,
   parseOptionalMetadataObject,
 } from "./auth-metadata";
 import { wrapLanguageModel } from "./helpers";
 import {
-  optionalTrimmedStringSchema,
+  parseOptionalTrimmedString,
   parseProviderOptions,
 } from "./provider-options";
 import { defineAuthSchema } from "./schema";
 import type {
   AIAdapter,
   AdapterAuthorizeContext,
-  ParsedAuthRecord,
   RuntimeAdapterContext,
 } from "./types";
 import { browser } from "@wxt-dev/browser";
-import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
+import type { AuthRecord } from "@/lib/runtime/auth-store";
 import { normalizeDomain, sleep } from "@/lib/runtime/oauth-util";
 import { isObject } from "@/lib/runtime/util";
+import { decodeSchemaOrUndefined } from "@/lib/runtime/effect-schema";
 
 const COPILOT_HEADERS = {
   "User-Agent": "GitHubCopilotChat/0.35.0",
@@ -35,35 +34,35 @@ type CopilotAuthMetadata = {
   enterpriseUrl?: string;
 };
 
-const copilotProviderOptionsSchema = z.object({
-  baseURL: optionalTrimmedStringSchema,
-  name: optionalTrimmedStringSchema,
+const copilotProviderOptionsSchema = Schema.Struct({
+  baseURL: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
 });
 
-type CopilotProviderOptions = z.output<typeof copilotProviderOptionsSchema>;
+type CopilotProviderOptions = Schema.Schema.Type<typeof copilotProviderOptionsSchema>;
 
-const copilotAuthMetadataSchema = z.object({
-  enterpriseUrl: optionalMetadataString,
+const copilotAuthMetadataSchema = Schema.Struct({
+  enterpriseUrl: Schema.optional(Schema.String),
 });
 
-const copilotDeviceCodeSchema = z.object({
-  verification_uri: z.string(),
-  user_code: z.string(),
-  device_code: z.string(),
-  interval: z.number(),
-  expires_in: z.number().optional(),
+const copilotDeviceCodeSchema = Schema.Struct({
+  verification_uri: Schema.String,
+  user_code: Schema.String,
+  device_code: Schema.String,
+  interval: Schema.Number,
+  expires_in: Schema.optional(Schema.Number),
 });
 
-const copilotAccessTokenPollSchema = z.object({
-  access_token: z.string().optional(),
-  error: z.string().optional(),
-  error_description: z.string().optional(),
-  interval: z.number().optional(),
+const copilotAccessTokenPollSchema = Schema.Struct({
+  access_token: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
+  error_description: Schema.optional(Schema.String),
+  interval: Schema.optional(Schema.Number),
 });
 
-const copilotApiKeySchema = z.object({
-  token: z.string(),
-  expires_at: z.number().optional(),
+const copilotApiKeySchema = Schema.Struct({
+  token: Schema.String,
+  expires_at: Schema.optional(Schema.Number),
 });
 
 const RESPONSES_API_ALTERNATE_INPUT_TYPES = new Set([
@@ -130,7 +129,7 @@ function inspectCopilotRequest(options: Record<string, unknown>) {
   if (messages && messages.length > 0) {
     const last = messages[messages.length - 1];
     if (isObject(last)) {
-      const role = optionalTrimmedStringSchema.parse(last.role);
+      const role = parseOptionalTrimmedString(last.role);
       isAgent = role === "assistant" || role === "tool";
     }
 
@@ -148,8 +147,8 @@ function inspectCopilotRequest(options: Record<string, unknown>) {
   if (input && input.length > 0) {
     const lastInput = input[input.length - 1];
     if (isObject(lastInput)) {
-      const role = optionalTrimmedStringSchema.parse(lastInput.role);
-      const inputType = optionalTrimmedStringSchema.parse(lastInput.type);
+      const role = parseOptionalTrimmedString(lastInput.role);
+      const inputType = parseOptionalTrimmedString(lastInput.type);
       const hasAgentType = Boolean(
         inputType && RESPONSES_API_ALTERNATE_INPUT_TYPES.has(inputType),
       );
@@ -202,10 +201,11 @@ function shouldRefreshCopilotAccessToken(input: {
   return input.expiresAt <= input.now + 60_000;
 }
 
-function parseCopilotStoredAuth(
+function normalizeCopilotAuth(
   auth?: AuthRecord,
-): ParsedAuthRecord<CopilotAuthMetadata> | undefined {
-  if (!auth || auth.type !== "oauth") return undefined;
+): AuthRecord<CopilotAuthMetadata> | undefined {
+  if (!auth) return undefined;
+  if (auth.type !== "oauth") return auth;
 
   return {
     ...auth,
@@ -213,33 +213,14 @@ function parseCopilotStoredAuth(
   };
 }
 
-function serializeCopilotAuth(input: {
-  result: AuthResult<CopilotAuthMetadata>;
-  method: {
-    id: string;
-    type: "oauth" | "pat" | "apikey";
-  };
-}) {
-  return {
-    ...input.result,
-    metadata:
-      input.result.type === "oauth"
-        ? parseOptionalMetadataObject(
-            copilotAuthMetadataSchema,
-            input.result.metadata,
-          )
-        : undefined,
-  };
-}
-
-async function parseCopilotJson<TSchema extends z.ZodTypeAny>(input: {
+async function parseCopilotJson<TSchema extends Schema.Schema.AnyNoContext>(input: {
   response: Response;
   schema: TSchema;
   message: string;
 }) {
   const payload = await input.response.json().catch(() => undefined);
-  const result = input.schema.safeParse(payload);
-  if (result.success) return result.data;
+  const result = decodeSchemaOrUndefined(input.schema, payload);
+  if (result) return result;
   throw new Error(input.message);
 }
 
@@ -383,32 +364,34 @@ async function authorizeCopilotDevice(
 }
 
 export async function resolveCopilotExecutionState(
-  context: RuntimeAdapterContext<CopilotAuthMetadata>,
+  context: RuntimeAdapterContext,
 ) {
-  if (!context.auth) {
+  const auth = normalizeCopilotAuth(context.auth);
+
+  if (!auth) {
     return {
       apiKey: undefined,
       baseURL: context.model.api.url,
     };
   }
 
-  if (context.auth.type !== "oauth") {
+  if (auth.type !== "oauth") {
     return {
-      apiKey: context.auth.type === "api" ? context.auth.key : undefined,
+      apiKey: auth.type === "api" ? auth.key : undefined,
       baseURL: context.model.api.url,
     };
   }
 
-  const enterpriseUrl = context.auth.metadata?.enterpriseUrl;
+  const enterpriseUrl = auth.metadata?.enterpriseUrl;
   const domain = enterpriseUrl ? normalizeDomain(enterpriseUrl) : "github.com";
   const baseURL = enterpriseUrl
     ? `https://copilot-api.${normalizeDomain(enterpriseUrl)}`
     : "https://api.githubcopilot.com";
   const urls = getUrls(domain);
 
-  let access = context.auth.access;
-  const refresh = context.auth.refresh;
-  const expiresAt = context.auth.expiresAt;
+  let access = auth.access;
+  const refresh = auth.refresh;
+  const expiresAt = auth.expiresAt;
 
   if (
     shouldRefreshCopilotAccessToken({
@@ -448,9 +431,9 @@ export async function resolveCopilotExecutionState(
         typeof tokenData.expires_at === "number"
           ? tokenData.expires_at * 1000 - 5 * 60 * 1000
                 : context.runtime.now() + 25 * 60_000,
-      accountId: context.auth.accountId,
-      methodID: context.auth.methodID,
-      methodType: context.auth.methodType,
+      accountId: auth.accountId,
+      methodID: auth.methodID,
+      methodType: auth.methodType,
       metadata: enterpriseUrl
         ? { enterpriseUrl: normalizeDomain(enterpriseUrl) }
         : undefined,
@@ -469,59 +452,61 @@ export async function resolveCopilotExecutionState(
   };
 }
 
-export const githubCopilotAdapter: AIAdapter<CopilotAuthMetadata> = {
+const optionalAuthStringSchema = Schema.Union(Schema.String, Schema.Undefined);
+const deploymentTypeSchema = Schema.Union(
+  Schema.Literal("github.com", "enterprise"),
+  Schema.Undefined,
+);
+
+export const githubCopilotAdapter: AIAdapter = {
   key: "provider:github-copilot",
   displayName: "GitHub Copilot",
   match: {
     providerIDs: ["github-copilot"],
   },
-  auth: {
-    parseStoredAuth: parseCopilotStoredAuth,
-    serializeAuth: serializeCopilotAuth,
-    async methods() {
-      return [
-        {
-          id: "oauth-device",
-          type: "oauth",
-          label: "Login with GitHub Copilot",
-          inputSchema: defineAuthSchema({
-            deploymentType: {
-              schema: z.enum(["github.com", "enterprise"]).default("github.com"),
-              ui: {
-                type: "select",
-                label: "Deployment Type",
-                required: false,
-                defaultValue: "github.com",
-                options: [
-                  {
-                    label: "GitHub.com",
-                    value: "github.com",
-                  },
-                  {
-                    label: "Enterprise",
-                    value: "enterprise",
-                  },
-                ],
-              },
-            },
-            enterpriseUrl: {
-              schema: z.string().trim().optional(),
-              ui: {
-                type: "text",
-                label: "Enterprise URL (if using enterprise)",
-                placeholder: "company.ghe.com",
-                required: false,
-                condition: {
-                  key: "deploymentType",
-                  equals: "enterprise",
+  async listAuthMethods() {
+    return [
+      {
+        id: "oauth-device",
+        type: "oauth",
+        label: "Login with GitHub Copilot",
+        inputSchema: defineAuthSchema({
+          deploymentType: {
+            schema: deploymentTypeSchema,
+            ui: {
+              type: "select",
+              label: "Deployment Type",
+              required: false,
+              defaultValue: "github.com",
+              options: [
+                {
+                  label: "GitHub.com",
+                  value: "github.com",
                 },
+                {
+                  label: "Enterprise",
+                  value: "enterprise",
+                },
+              ],
+            },
+          },
+          enterpriseUrl: {
+            schema: optionalAuthStringSchema,
+            ui: {
+              type: "text",
+              label: "Enterprise URL (if using enterprise)",
+              placeholder: "company.ghe.com",
+              required: false,
+              condition: {
+                key: "deploymentType",
+                equals: "enterprise",
               },
             },
-          }),
-          authorize: authorizeCopilotDevice,
-        },
-      ];
-    },
+          },
+        }),
+        authorize: authorizeCopilotDevice,
+      },
+    ];
   },
   async patchCatalog(ctx, provider) {
     const models = await Promise.all(

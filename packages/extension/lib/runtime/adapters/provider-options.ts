@@ -1,26 +1,57 @@
-import { z } from "zod";
+import * as Either from "effect/Either";
+import * as Schema from "effect/Schema";
 
-const nonEmptyTrimmedStringSchema = z.preprocess(
-  (value) => (typeof value === "string" ? value.trim() : value),
-  z.string().min(1),
-);
+const stringRecordSchema = Schema.Record({
+  key: Schema.String,
+  value: Schema.String,
+});
 
-export const optionalTrimmedStringSchema =
-  nonEmptyTrimmedStringSchema.optional().catch(undefined);
+export function parseOptionalTrimmedString(value: unknown) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
 
-export const optionalBooleanSchema = z.boolean().optional().catch(undefined);
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
 
-export const optionalNumberSchema = z.number().optional().catch(undefined);
+export function parseOptionalBoolean(value: unknown) {
+  return typeof value === "boolean" ? value : undefined;
+}
 
-export const optionalStringRecordSchema = z
-  .record(z.string(), z.string())
-  .optional()
-  .catch(undefined);
+export function parseOptionalNumber(value: unknown) {
+  return typeof value === "number" ? value : undefined;
+}
+
+export function parseOptionalStringRecord(value: unknown) {
+  const decoded = Schema.decodeUnknownEither(stringRecordSchema)(value);
+  return Either.isRight(decoded) ? decoded.right : undefined;
+}
+
+function normalizeProviderOptionsRecord<T extends Record<string, unknown>>(
+  value: T,
+): T {
+  return Object.fromEntries(
+    Object.entries(value).map(([key, fieldValue]) => [
+      key,
+      typeof fieldValue === "string"
+        ? parseOptionalTrimmedString(fieldValue)
+        : fieldValue,
+    ]),
+  ) as T;
+}
 
 export function parseProviderOptions<
-  TSchema extends z.ZodObject<z.ZodRawShape>,
->(schema: TSchema, value: unknown): z.output<TSchema> {
-  const result = schema.safeParse(value);
-  if (result.success) return result.data;
-  return schema.parse({});
+  TSchema extends Schema.Schema.AnyNoContext,
+>(schema: TSchema, value: unknown): Schema.Schema.Type<TSchema> {
+  const decoded = Schema.decodeUnknownEither(schema)(value);
+  if (Either.isRight(decoded)) {
+    return normalizeProviderOptionsRecord(
+      decoded.right as Record<string, unknown>,
+    ) as Schema.Schema.Type<TSchema>;
+  }
+
+  return normalizeProviderOptionsRecord(
+    Schema.decodeUnknownSync(schema)({}),
+  ) as Schema.Schema.Type<TSchema>;
 }

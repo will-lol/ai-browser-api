@@ -1,20 +1,17 @@
 import { browser } from "@wxt-dev/browser";
 import type { LanguageModelV3CallOptions } from "@ai-sdk/provider";
 import { createOpenAI } from "@ai-sdk/openai";
-import { z } from "zod";
+import * as Schema from "effect/Schema";
 import {
   RuntimeAuthProviderError,
   RuntimeUpstreamServiceError,
   RuntimeValidationError,
 } from "@llm-bridge/contracts";
+import { decodeSchemaOrUndefined } from "@/lib/runtime/effect-schema";
 import {
-  optionalMetadataString,
   parseOptionalMetadataObject,
 } from "./auth-metadata";
-import {
-  optionalTrimmedStringSchema,
-  parseProviderOptions,
-} from "./provider-options";
+import { parseProviderOptions } from "./provider-options";
 import { createApiKeyMethod } from "./generic-factory";
 import { wrapLanguageModel } from "./helpers";
 import {
@@ -24,10 +21,9 @@ import {
 import type {
   AIAdapter,
   AdapterAuthorizeContext,
-  ParsedAuthRecord,
   RuntimeAdapterContext,
 } from "./types";
-import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
+import type { AuthRecord } from "@/lib/runtime/auth-store";
 import {
   waitForOAuthCallback,
   type OAuthWebRequestOnBeforeRequest,
@@ -63,52 +59,52 @@ type OpenAIAuthMetadata = {
   accountId?: string;
 };
 
-const openAIProviderOptionsSchema = z.object({
-  baseURL: optionalTrimmedStringSchema,
-  name: optionalTrimmedStringSchema,
-  organization: optionalTrimmedStringSchema,
-  project: optionalTrimmedStringSchema,
+const openAIProviderOptionsSchema = Schema.Struct({
+  baseURL: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
+  organization: Schema.optional(Schema.String),
+  project: Schema.optional(Schema.String),
 });
 
-type OpenAIProviderOptions = z.output<typeof openAIProviderOptionsSchema>;
+type OpenAIProviderOptions = Schema.Schema.Type<typeof openAIProviderOptionsSchema>;
 
-const openAIAuthMetadataSchema = z.object({
-  accountId: optionalMetadataString,
+const openAIAuthMetadataSchema = Schema.Struct({
+  accountId: Schema.optional(Schema.String),
 });
 
-const tokenResponseSchema = z.object({
-  id_token: z.string().optional(),
-  access_token: z.string(),
-  refresh_token: z.string(),
-  expires_in: z.number().optional(),
+const tokenResponseSchema = Schema.Struct({
+  id_token: Schema.optional(Schema.String),
+  access_token: Schema.String,
+  refresh_token: Schema.String,
+  expires_in: Schema.optional(Schema.Number),
 });
 
-const codexDeviceStartSchema = z.object({
-  device_auth_id: z.string(),
-  user_code: z.string(),
-  interval: z.string(),
+const codexDeviceStartSchema = Schema.Struct({
+  device_auth_id: Schema.String,
+  user_code: Schema.String,
+  interval: Schema.String,
 });
 
-const codexDevicePollSchema = z.object({
-  authorization_code: z.string(),
-  code_verifier: z.string(),
+const codexDevicePollSchema = Schema.Struct({
+  authorization_code: Schema.String,
+  code_verifier: Schema.String,
 });
 
 function isCodexOAuth(
-  auth?: ParsedAuthRecord<OpenAIAuthMetadata>,
-): auth is Extract<ParsedAuthRecord<OpenAIAuthMetadata>, { type: "oauth" }> {
+  auth?: AuthRecord<OpenAIAuthMetadata>,
+): auth is Extract<AuthRecord<OpenAIAuthMetadata>, { type: "oauth" }> {
   return auth?.type === "oauth" && auth.methodType === "oauth";
 }
 
-function normalizeOpenAIAuthMetadata(
+function parseOpenAIAuthMetadata(
   auth?: AuthRecord,
 ): OpenAIAuthMetadata | undefined {
   return parseOptionalMetadataObject(openAIAuthMetadataSchema, auth?.metadata);
 }
 
-function parseOpenAIStoredAuth(
+function normalizeOpenAIAuth(
   auth?: AuthRecord,
-): ParsedAuthRecord<OpenAIAuthMetadata> | undefined {
+): AuthRecord<OpenAIAuthMetadata> | undefined {
   if (!auth) return undefined;
   if (auth.type === "api") {
     return {
@@ -119,43 +115,18 @@ function parseOpenAIStoredAuth(
 
   return {
     ...auth,
-    metadata: normalizeOpenAIAuthMetadata(auth),
+    metadata: parseOpenAIAuthMetadata(auth),
   };
 }
 
-function serializeOpenAIAuth(input: {
-  result: AuthResult<OpenAIAuthMetadata>;
-  method: {
-    id: string;
-    type: "oauth" | "pat" | "apikey";
-  };
-}) {
-  if (input.result.type === "api") {
-    return {
-      ...input.result,
-      metadata: undefined,
-    };
-  }
-
-  const accountId =
-    input.result.accountId ?? input.result.metadata?.accountId;
-
-  return {
-    ...input.result,
-    metadata: parseOptionalMetadataObject(openAIAuthMetadataSchema, {
-      accountId,
-    }),
-  };
-}
-
-async function parseOpenAIJson<TSchema extends z.ZodTypeAny>(input: {
+async function parseOpenAIJson<TSchema extends Schema.Schema.AnyNoContext>(input: {
   response: Response;
   schema: TSchema;
   operation: string;
-}): Promise<z.output<TSchema>> {
+}): Promise<Schema.Schema.Type<TSchema>> {
   const payload = await input.response.json().catch(() => undefined);
-  const result = input.schema.safeParse(payload);
-  if (result.success) return result.data;
+  const result = decodeSchemaOrUndefined(input.schema, payload);
+  if (result) return result;
 
   throw codexAuthProviderError({
     operation: input.operation,
@@ -737,9 +708,11 @@ function buildCodexOAuthProvider(provider: ProviderInfo) {
 }
 
 export async function resolveOpenAIExecutionState(
-  context: RuntimeAdapterContext<OpenAIAuthMetadata>,
+  context: RuntimeAdapterContext,
 ) {
-  if (!context.auth) {
+  const auth = normalizeOpenAIAuth(context.auth);
+
+  if (!auth) {
     return {
       apiKey: undefined,
       baseURL: undefined,
@@ -747,19 +720,18 @@ export async function resolveOpenAIExecutionState(
     };
   }
 
-  if (!isCodexOAuth(context.auth)) {
+  if (!isCodexOAuth(auth)) {
     return {
-      apiKey: context.auth.type === "api" ? context.auth.key : undefined,
+      apiKey: auth.type === "api" ? auth.key : undefined,
       baseURL: undefined,
       headers: {},
     };
   }
 
-  let access = context.auth.access;
-  let refresh = context.auth.refresh;
-  let expiresAt = context.auth.expiresAt;
-  let effectiveAccountId =
-    context.auth.accountId ?? context.auth.metadata?.accountId;
+  let access = auth.access;
+  let refresh = auth.refresh;
+  let expiresAt = auth.expiresAt;
+  let effectiveAccountId = auth.accountId ?? auth.metadata?.accountId;
 
   if (
     refresh &&
@@ -777,8 +749,8 @@ export async function resolveOpenAIExecutionState(
       refresh,
       expiresAt,
       accountId: effectiveAccountId,
-      methodID: context.auth.methodID,
-      methodType: context.auth.methodType,
+      methodID: auth.methodID,
+      methodType: auth.methodType,
       metadata: effectiveAccountId ? { accountId: effectiveAccountId } : undefined,
     });
   }
@@ -818,35 +790,31 @@ function wrapCodexCallOptions(
   );
 }
 
-export const openaiAdapter: AIAdapter<OpenAIAuthMetadata> = {
+export const openaiAdapter: AIAdapter = {
   key: "provider:openai",
   displayName: "OpenAI",
   match: {
     providerIDs: ["openai"],
   },
-  auth: {
-    parseStoredAuth: parseOpenAIStoredAuth,
-    serializeAuth: serializeOpenAIAuth,
-    async methods(ctx) {
-      return [
-        createApiKeyMethod(ctx),
-        {
-          id: "oauth-browser",
-          type: "oauth",
-          label: "ChatGPT Pro/Plus (browser)",
-          authorize: authorizeBrowser,
-        },
-        {
-          id: "oauth-device",
-          type: "oauth",
-          label: "ChatGPT Pro/Plus (headless)",
-          authorize: authorizeDevice,
-        },
-      ];
-    },
+  async listAuthMethods(ctx) {
+    return [
+      createApiKeyMethod(ctx),
+      {
+        id: "oauth-browser",
+        type: "oauth",
+        label: "ChatGPT Pro/Plus (browser)",
+        authorize: authorizeBrowser,
+      },
+      {
+        id: "oauth-device",
+        type: "oauth",
+        label: "ChatGPT Pro/Plus (headless)",
+        authorize: authorizeDevice,
+      },
+    ];
   },
   async patchCatalog(ctx, provider) {
-    if (!isCodexOAuth(ctx.auth)) return provider;
+    if (!isCodexOAuth(normalizeOpenAIAuth(ctx.auth))) return provider;
     return buildCodexOAuthProvider(provider);
   },
   async createModel(context) {
@@ -867,7 +835,7 @@ export const openaiAdapter: AIAdapter<OpenAIAuthMetadata> = {
     );
     const baseModel = provider.responses(context.model.api.id);
 
-    if (!isCodexOAuth(context.auth)) {
+    if (!isCodexOAuth(normalizeOpenAIAuth(context.auth))) {
       return baseModel;
     }
 

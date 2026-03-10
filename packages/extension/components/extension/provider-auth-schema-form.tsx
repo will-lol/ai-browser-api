@@ -1,8 +1,7 @@
-import { useForm } from "@tanstack/react-form";
-import type { ReactNode } from "react";
-import type { z } from "zod";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import type { ExtensionResolvedAuthMethod } from "@/lib/extension-auth-methods";
+import { validateAuthMethodValues } from "@/lib/runtime/adapters/schema";
 import type { AuthField } from "@/lib/runtime/adapters/types";
 
 type AuthFormValues = Record<string, string>;
@@ -101,14 +100,6 @@ function renderInput(input: {
   );
 }
 
-function parseValues(
-  schema: z.ZodType<AuthFormValues> | undefined,
-  values: AuthFormValues,
-) {
-  if (!schema) return values;
-  return schema.parse(values);
-}
-
 function FieldBlock(input: {
   label: string;
   required?: boolean;
@@ -143,73 +134,90 @@ export function ProviderAuthSchemaForm({
   onBack,
   onSubmit,
 }: ProviderAuthSchemaFormProps) {
-  const form = useForm({
-    defaultValues: buildInitialValues(method.fields),
-    validators: method.inputSchema
-      ? {
-          onChange: method.inputSchema as never,
-          onSubmit: method.inputSchema as never,
-        }
-      : undefined,
-    onSubmit: async ({ value }) => {
-      const visibleValues = pickVisibleValues(method.fields, value);
-      const parsed = parseValues(method.inputSchema, visibleValues);
-      await onSubmit(parsed);
-    },
-  });
+  const [values, setValues] = useState<AuthFormValues>(() =>
+    buildInitialValues(method.fields),
+  );
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    setValues(buildInitialValues(method.fields));
+    setFieldErrors({});
+    setSubmitted(false);
+  }, [method]);
+
+  const visibleValues = useMemo(
+    () => pickVisibleValues(method.fields, values),
+    [method.fields, values],
+  );
+
+  const refreshErrors = (nextValues: AuthFormValues) => {
+    if (!submitted) {
+      return;
+    }
+
+    setFieldErrors(
+      validateAuthMethodValues(
+        method,
+        pickVisibleValues(method.fields, nextValues),
+      ),
+    );
+  };
+
+  const handleSubmit = async () => {
+    const nextErrors = validateAuthMethodValues(method, visibleValues);
+    setSubmitted(true);
+    setFieldErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      return;
+    }
+
+    await onSubmit(visibleValues);
+  };
 
   return (
     <form
       className="mt-2 flex flex-col gap-4 bg-secondary/20 px-4 py-4"
       onSubmit={(event) => {
         event.preventDefault();
-        void form.handleSubmit();
+        void handleSubmit();
       }}
     >
       <p className="text-xs font-medium text-foreground">{method.label}</p>
 
-      <form.Subscribe selector={(state) => state.values}>
-        {(values) => (
-          <>
-            {method.fields.length > 0 && (
-              <div className="flex flex-col gap-3">
-                {method.fields.map((field) => {
-                  if (!shouldRenderField(field, values)) return null;
+      {method.fields.length > 0 && (
+        <div className="flex flex-col gap-3">
+          {method.fields.map((field) => {
+            if (!shouldRenderField(field, values)) return null;
 
-                  return (
-                    <form.Field
-                      key={field.key}
-                      name={field.key}
-                    >
-                      {(fieldApi) => (
-                        <FieldBlock
-                          label={field.label}
-                          required={field.required}
-                          description={field.description}
-                          error={firstErrorMessage(fieldApi.state.meta.errors)}
-                        >
-                          {renderInput({
-                            field,
-                            value:
-                              typeof fieldApi.state.value === "string"
-                                ? fieldApi.state.value
-                                : "",
-                            disabled,
-                            onBlur: fieldApi.handleBlur,
-                            onChange: (value) => {
-                              fieldApi.handleChange(value);
-                            },
-                          })}
-                        </FieldBlock>
-                      )}
-                    </form.Field>
-                  );
+            return (
+              <FieldBlock
+                key={field.key}
+                label={field.label}
+                required={field.required}
+                description={field.description}
+                error={firstErrorMessage([fieldErrors[field.key]])}
+              >
+                {renderInput({
+                  field,
+                  value: values[field.key] ?? "",
+                  disabled,
+                  onBlur: () => undefined,
+                  onChange: (value) => {
+                    const nextValues = {
+                      ...values,
+                      [field.key]: value,
+                    };
+                    setValues(nextValues);
+                    refreshErrors(nextValues);
+                  },
                 })}
-              </div>
-            )}
-          </>
-        )}
-      </form.Subscribe>
+              </FieldBlock>
+            );
+          })}
+        </div>
+      )}
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 

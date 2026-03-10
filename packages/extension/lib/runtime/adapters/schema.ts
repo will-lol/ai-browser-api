@@ -1,24 +1,47 @@
 import { RuntimeValidationError } from "@llm-bridge/contracts";
-import { z } from "zod";
+import * as Either from "effect/Either";
+import * as Schema from "effect/Schema";
 import type { AuthField, AuthMethodDefinition, RuntimeAuthMethod } from "./types";
+import {
+  formatSchemaError,
+  formatSchemaFieldErrors,
+} from "@/lib/runtime/effect-schema";
 
 const AUTH_FIELD_METADATA = Symbol.for("llm-bridge.auth-fields");
 
-type AuthFieldTemplate = Omit<AuthField, "key">;
+type AuthFieldTemplate = {
+  type: AuthField["type"];
+  label: string;
+  placeholder?: string;
+  defaultValue?: string;
+  required?: boolean;
+  description?: string;
+  condition?: {
+    key: string;
+    equals: string;
+  };
+  options?: Array<{
+    label: string;
+    value: string;
+    hint?: string;
+  }>;
+};
 
-type AuthFieldDefinition<TSchema extends z.ZodTypeAny = z.ZodTypeAny> = {
+type AuthFieldDefinition<
+  TSchema extends Schema.Schema.AnyNoContext = Schema.Schema.AnyNoContext,
+> = {
   schema: TSchema;
   ui: AuthFieldTemplate;
 };
 
 type AuthSchemaShape = Record<string, AuthFieldDefinition>;
 
-type SchemaWithAuthFields = z.ZodTypeAny & {
+type SchemaWithAuthFields = Schema.Schema.AnyNoContext & {
   [AUTH_FIELD_METADATA]?: AuthField[];
 };
 
 export function defineAuthSchema<TShape extends AuthSchemaShape>(shape: TShape) {
-  const schemaShape: Record<string, z.ZodTypeAny> = {};
+  const schemaShape: Record<string, Schema.Schema.AnyNoContext> = {};
   const fields: AuthField[] = [];
 
   for (const [key, definition] of Object.entries(shape)) {
@@ -29,9 +52,11 @@ export function defineAuthSchema<TShape extends AuthSchemaShape>(shape: TShape) 
     } as AuthField);
   }
 
-  const schema = z.object(schemaShape) as z.ZodObject<{
-    [K in keyof TShape]: TShape[K]["schema"];
-  }>;
+  const schema = Schema.Struct(
+    Object.fromEntries(
+      Object.entries(schemaShape).map(([key, value]) => [key, value]),
+    ),
+  );
 
   Object.defineProperty(schema, AUTH_FIELD_METADATA, {
     value: fields,
@@ -44,7 +69,7 @@ export function defineAuthSchema<TShape extends AuthSchemaShape>(shape: TShape) 
 }
 
 export function getAuthSchemaFields(
-  schema?: z.ZodTypeAny,
+  schema?: Schema.Schema.AnyNoContext,
 ): ReadonlyArray<AuthField> {
   if (!schema) return [];
 
@@ -70,21 +95,62 @@ export function toRuntimeAuthMethod(
   };
 }
 
+function normalizeAuthMethodValues(
+  schema: Schema.Schema.AnyNoContext,
+  values: Record<string, string>,
+) {
+  const fields = getAuthSchemaFields(schema);
+
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => {
+      const field = fields.find((current) => current.key === key);
+      if (!field) {
+        return [key, value];
+      }
+
+      if (!field.required && value.trim().length === 0) {
+        return [key, undefined];
+      }
+
+      return [key, value];
+    }),
+  );
+}
+
 export function parseAuthMethodValues(
-  method: AuthMethodDefinition,
+  method: Pick<AuthMethodDefinition, "inputSchema">,
   values: Record<string, string>,
 ) {
   if (!method.inputSchema) {
-    return {} as Record<string, string>;
+    return {};
   }
 
-  const result = method.inputSchema.safeParse(values);
-  if (result.success) {
-    return result.data;
+  const result = Schema.decodeUnknownEither(method.inputSchema)(
+    normalizeAuthMethodValues(method.inputSchema, values),
+  );
+  if (Either.isRight(result)) {
+    return result.right;
   }
 
-  const issue = result.error.issues[0];
   throw new RuntimeValidationError({
-    message: issue?.message ?? "Authentication input is invalid",
+    message: formatSchemaError(result.left),
   });
+}
+
+export function validateAuthMethodValues(
+  method: Pick<AuthMethodDefinition, "inputSchema">,
+  values: Record<string, string>,
+) {
+  if (!method.inputSchema) {
+    return {};
+  }
+
+  const result = Schema.decodeUnknownEither(method.inputSchema)(
+    normalizeAuthMethodValues(method.inputSchema, values),
+  );
+  if (Either.isRight(result)) {
+    return {};
+  }
+
+  return formatSchemaFieldErrors(result.left);
 }

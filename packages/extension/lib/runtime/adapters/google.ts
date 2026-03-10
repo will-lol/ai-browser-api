@@ -1,30 +1,25 @@
 import { browser } from "@wxt-dev/browser";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { z } from "zod";
+import * as Schema from "effect/Schema";
 import {
-  optionalMetadataString,
   parseOptionalMetadataObject,
 } from "./auth-metadata";
 import { createGeminiCodeAssistFetch, GEMINI_CODE_ASSIST_HEADERS } from "./gemini-code-assist-transport";
 import { createApiKeyMethod } from "./generic-factory";
 import { wrapLanguageModel } from "./helpers";
-import {
-  optionalTrimmedStringSchema,
-  parseProviderOptions,
-} from "./provider-options";
+import { parseProviderOptions } from "./provider-options";
 import { defineAuthSchema } from "./schema";
 import { mergeModelHeaders } from "./factory-language-model";
 import type {
   AIAdapter,
-  AdapterAuthContext,
   AdapterAuthorizeContext,
-  ParsedAuthRecord,
   RuntimeAdapterContext,
 } from "./types";
-import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
+import type { AuthRecord } from "@/lib/runtime/auth-store";
 import { waitForOAuthCallback } from "@/lib/runtime/oauth-browser-callback-util";
 import { generatePKCE, generateState } from "@/lib/runtime/oauth-util";
 import type { ProviderInfo } from "@/lib/runtime/provider-registry";
+import { decodeSchemaOrUndefined } from "@/lib/runtime/effect-schema";
 
 const GEMINI_CLIENT_ID =
   "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
@@ -47,17 +42,17 @@ const GEMINI_PROJECT_REQUIRED_MESSAGE =
   "Google Gemini requires a Google Cloud project. Enable the Gemini for Google Cloud API on a project you control, then reconnect and set projectId in the Google OAuth form if needed.";
 
 type LoadCodeAssistPayload = {
-  cloudaicompanionProject?: string | { id?: string };
+  cloudaicompanionProject?: unknown;
   currentTier?: {
     id?: string;
     name?: string;
   };
-  allowedTiers?: Array<{
+  allowedTiers?: ReadonlyArray<{
     id?: string;
     isDefault?: boolean;
     userDefinedCloudaicompanionProject?: boolean;
   }>;
-  ineligibleTiers?: Array<{
+  ineligibleTiers?: ReadonlyArray<{
     reasonMessage?: string;
   }>;
 };
@@ -73,76 +68,67 @@ type GoogleAuthMetadata = {
   managedProjectId?: string;
 };
 
-const googleProviderOptionsSchema = z.object({
-  baseURL: optionalTrimmedStringSchema,
-  name: optionalTrimmedStringSchema,
+const googleProviderOptionsSchema = Schema.Struct({
+  baseURL: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
 });
 
-type GoogleProviderOptions = z.output<typeof googleProviderOptionsSchema>;
+type GoogleProviderOptions = Schema.Schema.Type<typeof googleProviderOptionsSchema>;
 
-const googleAuthMetadataSchema = z.object({
-  email: optionalMetadataString,
-  projectId: optionalMetadataString,
-  managedProjectId: optionalMetadataString,
+const googleAuthMetadataSchema = Schema.Struct({
+  email: Schema.optional(Schema.String),
+  projectId: Schema.optional(Schema.String),
+  managedProjectId: Schema.optional(Schema.String),
 });
 
-const googleTokenResponseSchema = z.object({
-  access_token: z.string(),
-  expires_in: z.number(),
-  refresh_token: z.string().optional(),
+const googleTokenResponseSchema = Schema.Struct({
+  access_token: Schema.String,
+  expires_in: Schema.Number,
+  refresh_token: Schema.optional(Schema.String),
 });
 
-const googleUserInfoSchema = z.object({
-  email: optionalMetadataString,
+const googleUserInfoSchema = Schema.Struct({
+  email: Schema.optional(Schema.String),
 });
 
-const loadCodeAssistPayloadSchema = z.object({
-  cloudaicompanionProject: z
-    .union([
-      z.object({
-        id: optionalMetadataString,
+const loadCodeAssistPayloadSchema = Schema.Struct({
+  cloudaicompanionProject: Schema.optional(Schema.Unknown),
+  currentTier: Schema.optional(
+    Schema.Struct({
+      id: Schema.optional(Schema.String),
+      name: Schema.optional(Schema.String),
+    }),
+  ),
+  allowedTiers: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.optional(Schema.String),
+        isDefault: Schema.optional(Schema.Boolean),
+        userDefinedCloudaicompanionProject: Schema.optional(Schema.Boolean),
       }),
-      optionalMetadataString,
-    ])
-    .catch(undefined)
-    .optional(),
-  currentTier: z
-    .object({
-      id: optionalMetadataString,
-      name: optionalMetadataString,
-    })
-    .catch({})
-    .optional(),
-  allowedTiers: z
-    .array(
-      z.object({
-        id: optionalMetadataString,
-        isDefault: z.boolean().optional(),
-        userDefinedCloudaicompanionProject: z.boolean().optional(),
+    ),
+  ),
+  ineligibleTiers: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        reasonMessage: Schema.optional(Schema.String),
       }),
-    )
-    .optional(),
-  ineligibleTiers: z
-    .array(
-      z.object({
-        reasonMessage: optionalMetadataString,
-      }),
-    )
-    .optional(),
+    ),
+  ),
 });
 
-const onboardUserPayloadSchema = z.object({
-  name: optionalMetadataString,
-  done: z.boolean().optional(),
-  response: z
-    .object({
-      cloudaicompanionProject: z
-        .object({
-          id: optionalMetadataString,
-        })
-        .optional(),
-    })
-    .optional(),
+const onboardUserPayloadSchema = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  done: Schema.optional(Schema.Boolean),
+  response: Schema.optional(
+    Schema.Struct({
+      cloudaicompanionProject: Schema.optional(
+        Schema.Struct({
+          id: Schema.optional(Schema.String),
+        }),
+      ),
+    }),
+  ),
 });
 
 type GoogleExecutionState = {
@@ -209,23 +195,16 @@ function buildGoogleSettings(input: {
   };
 }
 
-const projectIdInputSchema = z
-  .union([
-    z.string(),
-    z.object({
-      id: z.string().optional(),
-    }),
-  ])
-  .transform((value) =>
-    typeof value === "string"
-      ? readMetadataValue(value)
-      : readMetadataValue(value.id),
-  )
-  .catch(undefined);
-
 function normalizeProjectId(value: unknown): string | undefined {
-  const result = projectIdInputSchema.safeParse(value);
-  return result.success ? result.data : undefined;
+  if (typeof value === "string") {
+    return readMetadataValue(value);
+  }
+
+  if (value && typeof value === "object" && "id" in value) {
+    return readMetadataValue((value as { id?: unknown }).id);
+  }
+
+  return undefined;
 }
 
 function buildCodeAssistMetadata(
@@ -318,9 +297,9 @@ function buildPersistedMetadata(input: {
   });
 }
 
-function parseGoogleStoredAuth(
+function normalizeGoogleAuth(
   auth?: AuthRecord,
-): ParsedAuthRecord<GoogleAuthMetadata> | undefined {
+): AuthRecord<GoogleAuthMetadata> | undefined {
   if (!auth) return undefined;
   if (auth.type === "api") {
     return {
@@ -337,29 +316,6 @@ function parseGoogleStoredAuth(
   return {
     ...auth,
     metadata,
-  };
-}
-
-function serializeGoogleAuth(input: {
-  result: AuthResult<GoogleAuthMetadata>;
-  method: {
-    id: string;
-    type: "oauth" | "pat" | "apikey";
-  };
-}) {
-  if (input.result.type === "api") {
-    return {
-      ...input.result,
-      metadata: undefined,
-    };
-  }
-
-  return {
-    ...input.result,
-    metadata: parseOptionalMetadataObject(
-      googleAuthMetadataSchema,
-      input.result.metadata,
-    ),
   };
 }
 
@@ -407,12 +363,12 @@ async function exchangeAuthorizationCode(
   }
 
   const payload = await response.json().catch(() => undefined);
-  const result = googleTokenResponseSchema.safeParse(payload);
-  if (!result.success) {
+  const result = decodeSchemaOrUndefined(googleTokenResponseSchema, payload);
+  if (!result) {
     throw new Error("Gemini OAuth exchange returned an invalid response.");
   }
 
-  return result.data;
+  return result;
 }
 
 async function refreshAccessToken(refreshToken: string, clientSecret: string) {
@@ -437,12 +393,12 @@ async function refreshAccessToken(refreshToken: string, clientSecret: string) {
   }
 
   const payload = await response.json().catch(() => undefined);
-  const result = googleTokenResponseSchema.safeParse(payload);
-  if (!result.success) {
+  const result = decodeSchemaOrUndefined(googleTokenResponseSchema, payload);
+  if (!result) {
     throw new Error("Gemini token refresh returned an invalid response.");
   }
 
-  return result.data;
+  return result;
 }
 
 async function resolveUserEmail(accessToken: string) {
@@ -456,8 +412,7 @@ async function resolveUserEmail(accessToken: string) {
   );
   if (!response.ok) return undefined;
   const payload = await response.json().catch(() => undefined);
-  const result = googleUserInfoSchema.safeParse(payload);
-  return result.success ? result.data.email : undefined;
+  return decodeSchemaOrUndefined(googleUserInfoSchema, payload)?.email;
 }
 
 async function loadCodeAssist(
@@ -490,8 +445,7 @@ async function loadCodeAssist(
     }
 
     const payload = await response.json().catch(() => undefined);
-    const result = loadCodeAssistPayloadSchema.safeParse(payload);
-    return result.success ? result.data : null;
+    return decodeSchemaOrUndefined(loadCodeAssistPayloadSchema, payload) ?? null;
   } catch {
     return null;
   }
@@ -535,17 +489,17 @@ async function onboardCodeAssist(
       return undefined;
     }
 
-    let parsed = onboardUserPayloadSchema.safeParse(
+    let payload = decodeSchemaOrUndefined(
+      onboardUserPayloadSchema,
       await response.json().catch(() => undefined),
     );
-    if (!parsed.success) {
+    if (!payload) {
       return undefined;
     }
-    let payload = parsed.data;
     if (!payload.done && payload.name) {
       for (let attempt = 0; attempt < ONBOARD_MAX_ATTEMPTS; attempt += 1) {
         await wait(ONBOARD_POLL_DELAY_MS);
-        const opResponse = await fetch(`${base}/${payload.name}`, {
+        const opResponse: Response = await fetch(`${base}/${payload.name}`, {
           method: "GET",
           headers,
         });
@@ -554,13 +508,13 @@ async function onboardCodeAssist(
           return undefined;
         }
 
-        parsed = onboardUserPayloadSchema.safeParse(
+        payload = decodeSchemaOrUndefined(
+          onboardUserPayloadSchema,
           await opResponse.json().catch(() => undefined),
         );
-        if (!parsed.success) {
+        if (!payload) {
           return undefined;
         }
-        payload = parsed.data;
         if (payload.done) {
           break;
         }
@@ -659,12 +613,14 @@ export async function resolveGeminiProjectContext(
 }
 
 function isGeminiOAuth(
-  auth?: ParsedAuthRecord<GoogleAuthMetadata>,
-): auth is Extract<ParsedAuthRecord<GoogleAuthMetadata>, { type: "oauth" }> {
+  auth?: AuthRecord<GoogleAuthMetadata>,
+): auth is Extract<AuthRecord<GoogleAuthMetadata>, { type: "oauth" }> {
   return auth?.type === "oauth" && auth.methodType === "oauth";
 }
 
-async function authorizeGeminiOAuth(input: AdapterAuthorizeContext<{ projectId?: string }>) {
+async function authorizeGeminiOAuth(
+  input: AdapterAuthorizeContext<{ projectId?: string }>,
+) {
   const clientSecret = getGeminiClientSecret();
   const redirectUri = GEMINI_REDIRECT_URI;
   const pkce = await generatePKCE();
@@ -742,9 +698,11 @@ async function authorizeGeminiOAuth(input: AdapterAuthorizeContext<{ projectId?:
 }
 
 export async function resolveGoogleExecutionState(
-  context: RuntimeAdapterContext<GoogleAuthMetadata>,
+  context: RuntimeAdapterContext,
 ): Promise<GoogleExecutionState> {
-  if (!context.auth) {
+  const auth = normalizeGoogleAuth(context.auth);
+
+  if (!auth) {
     return {
       kind: "api",
       apiKey: undefined,
@@ -753,18 +711,18 @@ export async function resolveGoogleExecutionState(
     };
   }
 
-  if (context.auth.type === "api" || !isGeminiOAuth(context.auth)) {
+  if (auth.type === "api" || !isGeminiOAuth(auth)) {
     return {
       kind: "api",
-      apiKey: context.auth.type === "api" ? context.auth.key : undefined,
+      apiKey: auth.type === "api" ? auth.key : undefined,
       baseURL: context.model.api.url,
       headers: {},
     };
   }
 
-  let access = context.auth.access;
-  let refresh = context.auth.refresh;
-  let expiresAt = context.auth.expiresAt;
+  let access = auth.access;
+  let refresh = auth.refresh;
+  let expiresAt = auth.expiresAt;
 
   if (
     refresh &&
@@ -790,7 +748,7 @@ export async function resolveGoogleExecutionState(
     };
   }
 
-  const metadata = context.auth.metadata ?? {};
+  const metadata = auth.metadata ?? {};
   const projectId = readMetadataValue(metadata.projectId);
   const email = readMetadataValue(metadata.email);
   let managedProjectId = readMetadataValue(metadata.managedProjectId);
@@ -812,17 +770,17 @@ export async function resolveGoogleExecutionState(
   }
 
   const nextMetadata = buildPersistedMetadata({
-    previous: context.auth.metadata,
+    previous: auth.metadata,
     email,
     projectId,
     managedProjectId,
   });
 
   const shouldPersistAuth =
-    access !== context.auth.access ||
-    refresh !== context.auth.refresh ||
-    expiresAt !== context.auth.expiresAt ||
-    !isRecordEqual(context.auth.metadata, nextMetadata);
+    access !== auth.access ||
+    refresh !== auth.refresh ||
+    expiresAt !== auth.expiresAt ||
+    !isRecordEqual(auth.metadata, nextMetadata);
 
   if (shouldPersistAuth) {
     await context.authStore.set({
@@ -830,8 +788,8 @@ export async function resolveGoogleExecutionState(
       access,
       refresh,
       expiresAt,
-      methodID: context.auth.methodID,
-      methodType: context.auth.methodType,
+      methodID: auth.methodID,
+      methodType: auth.methodType,
       metadata: nextMetadata,
     });
   }
@@ -854,40 +812,38 @@ export async function resolveGoogleExecutionState(
   };
 }
 
-export const googleAdapter: AIAdapter<GoogleAuthMetadata> = {
+const optionalAuthStringSchema = Schema.Union(Schema.String, Schema.Undefined);
+
+export const googleAdapter: AIAdapter = {
   key: "provider:google",
   displayName: "Google",
   match: {
     providerIDs: ["google"],
   },
-  auth: {
-    parseStoredAuth: parseGoogleStoredAuth,
-    serializeAuth: serializeGoogleAuth,
-    async methods(ctx) {
-      return [
-        createApiKeyMethod(ctx),
-        {
-          id: "oauth",
-          type: "oauth",
-          label: "OAuth with Google (Gemini CLI)",
-          inputSchema: defineAuthSchema({
-            projectId: {
-              schema: z.string().trim().optional(),
-              ui: {
-                type: "text",
-                label: "Google Cloud project ID (optional)",
-                placeholder: "my-gcp-project",
-                required: false,
-              },
+  async listAuthMethods(ctx) {
+    return [
+      createApiKeyMethod(ctx),
+      {
+        id: "oauth",
+        type: "oauth",
+        label: "OAuth with Google (Gemini CLI)",
+        inputSchema: defineAuthSchema({
+          projectId: {
+            schema: optionalAuthStringSchema,
+            ui: {
+              type: "text",
+              label: "Google Cloud project ID (optional)",
+              placeholder: "my-gcp-project",
+              required: false,
             },
-          }),
-          authorize: authorizeGeminiOAuth,
-        },
-      ];
-    },
+          },
+        }),
+        authorize: authorizeGeminiOAuth,
+      },
+    ];
   },
   async patchCatalog(ctx, provider) {
-    if (!isGeminiOAuth(ctx.auth)) return provider;
+    if (!isGeminiOAuth(normalizeGoogleAuth(ctx.auth))) return provider;
     const models = Object.fromEntries(
       Object.entries(provider.models).map(([modelID, model]) => [
         modelID,

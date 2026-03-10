@@ -1,6 +1,6 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type { RuntimeAuthFlowInstruction } from "@llm-bridge/contracts";
-import type { z } from "zod";
+import type * as Schema from "effect/Schema";
 import type {
   AuthMethodType,
   AuthRecord,
@@ -55,28 +55,20 @@ export type { AuthMethodType } from "@/lib/runtime/auth-store";
 
 export type ParsedAuthRecord<
   TMetadata extends JsonObject | undefined = JsonObject | undefined,
-> =
-  | (Extract<AuthRecord<TMetadata>, { type: "api" }> & {
-      methodID: string;
-      methodType: AuthMethodType;
-    })
-  | (Extract<AuthRecord<TMetadata>, { type: "oauth" }> & {
-      methodID: string;
-      methodType: AuthMethodType;
-    });
+> = AuthRecord<TMetadata>;
 
-export interface AdapterAuthContext<
-  TMetadata extends JsonObject | undefined = JsonObject | undefined,
-> {
+export interface AdapterAuthContext {
   providerID: string;
   provider: ProviderRuntimeInfo;
-  auth?: ParsedAuthRecord<TMetadata>;
+  auth?: AuthRecord;
 }
 
 export interface AdapterAuthorizeContext<
-  TValues extends Record<string, string> = Record<string, string>,
-  TMetadata extends JsonObject | undefined = JsonObject | undefined,
-> extends AdapterAuthContext<TMetadata> {
+  TValues extends Record<string, string | undefined> = Record<
+    string,
+    string | undefined
+  >,
+> extends AdapterAuthContext {
   values: TValues;
   signal?: AbortSignal;
   oauth: {
@@ -97,9 +89,7 @@ export interface AdapterAuthorizeContext<
   };
 }
 
-export interface RuntimeAdapterContext<
-  TMetadata extends JsonObject | undefined = JsonObject | undefined,
-> extends AdapterAuthContext<TMetadata> {
+export interface RuntimeAdapterContext extends AdapterAuthContext {
   modelID: string;
   model: ProviderModelInfo;
   origin: string;
@@ -118,21 +108,22 @@ export interface RuntimeAdapterContext<
 export type RuntimeFetch = typeof globalThis.fetch;
 
 export interface AuthMethodDefinition<
-  TValues extends Record<string, string> = Record<string, string>,
-  TMetadata extends JsonObject | undefined = JsonObject | undefined,
+  TValues extends Record<string, string | undefined> = Record<
+    string,
+    string | undefined
+  >,
 > {
   id: string;
   type: AuthMethodType;
   label: string;
-  inputSchema?: z.ZodType<TValues>;
+  inputSchema?: Schema.Schema.AnyNoContext;
   authorize: (
-    ctx: AdapterAuthorizeContext<TValues, TMetadata>,
-  ) => Promise<AuthResult<TMetadata>>;
+    ctx: AdapterAuthorizeContext<TValues>,
+  ) => Promise<AuthResult>;
 }
 
 export type AnyAuthMethodDefinition = AuthMethodDefinition<
-  Record<string, string>,
-  JsonObject | undefined
+  Record<string, string | undefined>
 >;
 
 export type RuntimeAuthMethod = {
@@ -147,60 +138,25 @@ export interface ResolvedAuthMethod {
   method: RuntimeAuthMethod;
 }
 
-export interface AIAdapter<
-  TPersistedAuthMeta extends JsonObject | undefined = JsonObject | undefined,
-> {
+export interface AIAdapter {
   key: string;
   displayName: string;
   match: {
     npm?: string;
     providerIDs?: readonly string[];
   };
-  auth: {
-    methods: (
-      ctx: AdapterAuthContext<TPersistedAuthMeta>,
-    ) =>
-      | Promise<AnyAuthMethodDefinition[]>
-      | AnyAuthMethodDefinition[];
-    parseStoredAuth: (
-      auth?: AuthRecord,
-    ) => ParsedAuthRecord<TPersistedAuthMeta> | undefined;
-    serializeAuth: (input: {
-      result: AuthResult<TPersistedAuthMeta>;
-      method: Pick<AnyAuthMethodDefinition, "id" | "type">;
-    }) => AuthResult<TPersistedAuthMeta>;
-  };
+  listAuthMethods: (
+    ctx: AdapterAuthContext,
+  ) =>
+    | Promise<AnyAuthMethodDefinition[]>
+    | AnyAuthMethodDefinition[];
   createModel: (
-    context: RuntimeAdapterContext<TPersistedAuthMeta>,
+    context: RuntimeAdapterContext,
   ) => Promise<LanguageModelV3>;
   patchCatalog?: (
-    ctx: AdapterAuthContext<TPersistedAuthMeta>,
+    ctx: AdapterAuthContext,
     provider: ProviderInfo,
   ) => Promise<ProviderInfo | void> | ProviderInfo | void;
 }
 
-export type RegisteredAdapter = {
-  readonly key: string;
-  readonly displayName: string;
-  readonly match: {
-    readonly npm?: string;
-    readonly providerIDs?: readonly string[];
-  };
-  readonly auth: {
-    methods: (
-      ctx: AdapterAuthContext,
-    ) => Promise<AnyAuthMethodDefinition[]> | AnyAuthMethodDefinition[];
-    parseStoredAuth: (auth?: AuthRecord) => ParsedAuthRecord | undefined;
-    serializeAuth: (input: {
-      result: AuthResult;
-      method: Pick<AnyAuthMethodDefinition, "id" | "type">;
-    }) => AuthResult;
-  };
-  readonly createModel: (
-    context: RuntimeAdapterContext,
-  ) => Promise<LanguageModelV3>;
-  readonly patchCatalog?: (
-    ctx: AdapterAuthContext,
-    provider: ProviderInfo,
-  ) => Promise<ProviderInfo | void> | ProviderInfo | void;
-};
+export type RegisteredAdapter = AIAdapter;

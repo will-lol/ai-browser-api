@@ -6,11 +6,7 @@ import {
 } from "@llm-bridge/contracts";
 import type { AuthRecord, AuthResult } from "@/lib/runtime/auth-store";
 import type { RuntimeAuthFlowInstruction } from "@llm-bridge/contracts";
-import {
-  parseAdapterStoredAuth,
-  resolveAdapterForProvider,
-  serializeAdapterAuthResult,
-} from "@/lib/runtime/adapters";
+import { resolveAdapterForProvider } from "@/lib/runtime/adapters";
 import { parseAuthMethodValues, toRuntimeAuthMethod } from "@/lib/runtime/adapters/schema";
 import type {
   ResolvedAuthMethod,
@@ -46,9 +42,9 @@ async function listResolvedAuthMethods(
   });
   if (!adapter) return [];
 
-  const definitions = await adapter.auth.methods({
+  const definitions = await adapter.listAuthMethods({
     ...ctx,
-    auth: parseAdapterStoredAuth(adapter, ctx.auth),
+    auth: ctx.auth,
   });
   return definitions.map((definition) => ({
     adapter,
@@ -81,18 +77,10 @@ async function resolveAuthContext(
 async function persistAuth(
   providerID: string,
   input: {
-    adapter: ResolvedAuthMethod["adapter"];
-    definition: ResolvedAuthMethod["definition"];
     result: AuthResult;
   },
 ) {
-  const serialized = serializeAdapterAuthResult({
-    adapter: input.adapter,
-    method: input.definition,
-    result: input.result,
-  });
-
-  await setAuth(providerID, serialized);
+  await setAuth(providerID, input.result);
 }
 
 export async function listProviderAuthMethods(
@@ -137,7 +125,7 @@ export async function startProviderAuth(input: {
     );
     const result = await resolved.definition.authorize({
       ...ctx,
-      auth: parseAdapterStoredAuth(resolved.adapter, ctx.auth),
+      auth: ctx.auth,
       values: parsedValues,
       signal: input.signal,
       oauth: {
@@ -179,8 +167,6 @@ export async function startProviderAuth(input: {
     });
 
     await persistAuth(input.providerID, {
-      adapter: resolved.adapter,
-      definition: resolved.definition,
       result,
     });
 

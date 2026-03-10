@@ -15,12 +15,12 @@ import * as Option from "effect/Option";
 import {
   RUNTIME_ADMIN_RPC_PORT_NAME,
   RUNTIME_PUBLIC_RPC_PORT_NAME,
-  RuntimeAdminRpcGroup,
+  RuntimeAdminAllowedTags,
   RuntimeAuthorizationError,
-  RuntimePublicRpcGroup,
+  RuntimePublicAllowedTags,
+  RuntimeRpcGroup,
   RuntimeValidationError,
-  type RuntimeAdminRpc,
-  type RuntimePublicRpc,
+  type RuntimeRpc,
   type RuntimeRpcError,
 } from "@llm-bridge/contracts";
 
@@ -212,6 +212,7 @@ type RuntimeServerOptions<Rpcs extends Rpc.Any> = {
   readonly portName: string;
   readonly policy: RpcAccessPolicy;
   readonly rpcGroup: RpcGroup.RpcGroup<Rpcs>;
+  readonly allowedTags: ReadonlySet<string>;
 };
 
 function protocolForRole<Rpcs extends Rpc.Any>(
@@ -219,7 +220,7 @@ function protocolForRole<Rpcs extends Rpc.Any>(
 ) {
   return RpcServer.Protocol.make((writeRequest) =>
     Effect.gen(function* () {
-      const allowedTags = getRuntimeRpcAllowedTags(options.rpcGroup);
+      const allowedTags = options.allowedTags;
       const disconnects = yield* Mailbox.make<number>();
       let nextClientId = 0;
       const sessions = new Map<number, RuntimePortSession>();
@@ -376,12 +377,12 @@ function protocolForRole<Rpcs extends Rpc.Any>(
 
 export async function registerRuntimeRpcServer<PE, AE>(input: {
   publicLayer: Layer.Layer<
-    Rpc.ToHandler<RuntimePublicRpc> | Rpc.Middleware<RuntimePublicRpc>,
+    Rpc.ToHandler<RuntimeRpc> | Rpc.Middleware<RuntimeRpc>,
     PE,
     never
   >;
   adminLayer: Layer.Layer<
-    Rpc.ToHandler<RuntimeAdminRpc> | Rpc.Middleware<RuntimeAdminRpc>,
+    Rpc.ToHandler<RuntimeRpc> | Rpc.Middleware<RuntimeRpc>,
     AE,
     never
   >;
@@ -395,7 +396,8 @@ export async function registerRuntimeRpcServer<PE, AE>(input: {
       role: "public",
       portName: RUNTIME_PUBLIC_RPC_PORT_NAME,
       policy,
-      rpcGroup: RuntimePublicRpcGroup,
+      rpcGroup: RuntimeRpcGroup,
+      allowedTags: RuntimePublicAllowedTags,
     }).pipe(Scope.extend(scope)),
   );
 
@@ -404,12 +406,13 @@ export async function registerRuntimeRpcServer<PE, AE>(input: {
       role: "admin",
       portName: RUNTIME_ADMIN_RPC_PORT_NAME,
       policy,
-      rpcGroup: RuntimeAdminRpcGroup,
+      rpcGroup: RuntimeRpcGroup,
+      allowedTags: RuntimeAdminAllowedTags,
     }).pipe(Scope.extend(scope)),
   );
 
   await Effect.runPromise(
-    RpcServer.make(RuntimePublicRpcGroup, {
+    RpcServer.make(RuntimeRpcGroup, {
       disableTracing: true,
     }).pipe(
       Effect.provide(input.publicLayer),
@@ -420,7 +423,7 @@ export async function registerRuntimeRpcServer<PE, AE>(input: {
   );
 
   await Effect.runPromise(
-    RpcServer.make(RuntimeAdminRpcGroup, {
+    RpcServer.make(RuntimeRpcGroup, {
       disableTracing: true,
     }).pipe(
       Effect.provide(input.adminLayer),

@@ -61,7 +61,7 @@ export async function resolveExtensionAuthMethods(input: {
   });
   if (!adapter) return [];
 
-  const definitions = await adapter.auth.methods({
+  const definitions = await adapter.listAuthMethods({
     providerID: input.providerID,
     provider: toProviderRuntimeInfo(input.providerID, input.provider, source),
   });

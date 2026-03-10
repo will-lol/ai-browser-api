@@ -99,11 +99,7 @@ export function setRuntimeOriginEnabled(input: {
   const origin = input.origin ?? currentOrigin();
   const runtime = getRuntimeAdminRPC();
 
-  return runtime.updatePermission({
-    mode: "origin",
-    enabled: input.enabled,
-    origin,
-  });
+  return runtime.setOriginEnabled({ enabled: input.enabled, origin });
 }
 
 export function dismissRuntimePermissionRequest(input: {
@@ -111,8 +107,7 @@ export function dismissRuntimePermissionRequest(input: {
 }) {
   const runtime = getRuntimeAdminRPC();
 
-  return runtime.requestPermission({
-    action: "dismiss",
+  return runtime.dismissPermissionRequest({
     requestId: input.requestId,
   });
 }
@@ -123,8 +118,7 @@ export function resolveRuntimePermissionRequest(input: {
 }) {
   const runtime = getRuntimeAdminRPC();
 
-  return runtime.requestPermission({
-    action: "resolve",
+  return runtime.resolvePermissionRequest({
     requestId: input.requestId,
     decision: input.decision,
   });
@@ -138,9 +132,8 @@ export function updateRuntimeModelPermission(input: {
   const origin = input.origin ?? currentOrigin();
   const runtime = getRuntimeAdminRPC();
 
-  return runtime.updatePermission({
+  return runtime.setModelPermission({
     origin,
-    mode: "model",
     modelId: input.modelId,
     status: input.status,
   });

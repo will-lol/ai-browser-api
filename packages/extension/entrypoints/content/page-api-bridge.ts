@@ -2,12 +2,9 @@ import {
   PAGE_BRIDGE_INIT_MESSAGE,
   PAGE_BRIDGE_READY_EVENT,
   PageBridgeRpcGroup,
-  RuntimeValidationError,
+  RuntimeAuthorizationError,
   RuntimeDefectError,
   isPageBridgePortControlMessage,
-  type BridgeModelCallRequest,
-  type BridgeChatReconnectStreamRequest,
-  type BridgeChatSendMessagesRequest,
   type PageBridgePortControlMessage,
 } from "@llm-bridge/contracts";
 import * as RpcServer from "@effect/rpc/RpcServer";
@@ -20,40 +17,15 @@ import * as Exit from "effect/Exit";
 import * as Mailbox from "effect/Mailbox";
 import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
-import * as Stream from "effect/Stream";
 import { getRuntimePublicRPC } from "@/lib/runtime/rpc/runtime-public-rpc-client";
 
-function nextBridgeRequestId() {
-  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function normalizeModelCallInput(input: BridgeModelCallRequest) {
-  const requestId = input.requestId ?? nextBridgeRequestId();
-  const sessionID = input.sessionID ?? requestId;
-
-  return {
-    requestId,
-    sessionID,
-    modelId: input.modelId,
-    options: input.options,
-  };
-}
-
-function normalizeChatSendInput(input: BridgeChatSendMessagesRequest) {
-  return {
-    chatId: input.chatId,
-    modelId: input.modelId,
-    trigger: input.trigger,
-    messageId: input.messageId,
-    messages: input.messages,
-    options: input.options,
-  };
-}
-
-function normalizeChatReconnectInput(input: BridgeChatReconnectStreamRequest) {
-  return {
-    chatId: input.chatId,
-  };
+function unauthorized(operation: string) {
+  return Effect.fail(
+    new RuntimeAuthorizationError({
+      operation,
+      message: `${operation} is not available from page bridge clients`,
+    }),
+  );
 }
 
 function mapRuntimeEffect<A, E, R>(effect: Effect.Effect<A, E, R>) {
@@ -66,148 +38,103 @@ function createPageBridgeHandlers() {
   const runtime = getRuntimePublicRPC();
 
   return PageBridgeRpcGroup.of({
-    listModels: () =>
+    listModels: ({ connectedOnly, providerID }) =>
       mapRuntimeEffect(
         runtime.listModels({
           origin: window.location.origin,
-          connectedOnly: true,
-        }),
-      ).pipe(
-        Effect.map((models) => ({
-          models,
-        })),
-      ),
-
-    getModel: (input) =>
-      mapRuntimeEffect(
-        Effect.gen(function* () {
-          const requestId = input.requestId ?? nextBridgeRequestId();
-          const sessionID = input.sessionID ?? requestId;
-
-          return yield* runtime.acquireModel({
-            origin: window.location.origin,
-            requestId,
-            sessionID,
-            modelId: input.modelId,
-          });
+          connectedOnly,
+          providerID,
         }),
       ),
 
-    requestPermission: (input) =>
+    getOriginState: (_input) =>
       mapRuntimeEffect(
-        Effect.gen(function* () {
-          const result = yield* runtime.requestPermission({
-            action: "create",
-            origin: window.location.origin,
-            modelId: input.modelId,
-          });
-
-          if (!("status" in result)) {
-            return yield* new RuntimeValidationError({
-              message: "Unexpected permission response shape",
-            });
-          }
-
-          return result;
+        runtime.getOriginState({
+          origin: window.location.origin,
         }),
       ),
 
-    abort: (input) =>
+    listPending: (_input) =>
+      mapRuntimeEffect(
+        runtime.listPending({
+          origin: window.location.origin,
+        }),
+      ),
+
+    acquireModel: (input) =>
+      mapRuntimeEffect(
+        runtime.acquireModel({
+          ...input,
+          origin: window.location.origin,
+        }),
+      ),
+
+    createPermissionRequest: (input) =>
+      mapRuntimeEffect(
+        runtime.createPermissionRequest({
+          ...input,
+          origin: window.location.origin,
+        }),
+      ),
+
+    abortModelCall: (input) =>
       mapRuntimeEffect(
         Effect.gen(function* () {
-          if (!input.requestId) {
-            return { ok: true };
-          }
-
-          const sessionID = input.sessionID ?? input.requestId;
-
           yield* runtime.abortModelCall({
+            ...input,
             origin: window.location.origin,
-            sessionID,
-            requestId: input.requestId,
           });
-
-          return {
-            ok: true,
-          };
         }),
       ),
 
     modelDoGenerate: (input) =>
       mapRuntimeEffect(
-        Effect.gen(function* () {
-          const normalized = normalizeModelCallInput(input);
-          if (!normalized.options) {
-            return yield* new RuntimeValidationError({
-              message: "modelDoGenerate requires call options with prompt",
-            });
-          }
-          return yield* runtime.modelDoGenerate({
-            origin: window.location.origin,
-            requestId: normalized.requestId,
-            sessionID: normalized.sessionID,
-            modelId: normalized.modelId,
-            options: normalized.options,
-          });
+        runtime.modelDoGenerate({
+          ...input,
+          origin: window.location.origin,
         }),
       ),
 
-    modelDoStream: (input) => {
-      const normalized = normalizeModelCallInput(input);
-      const options = normalized.options;
-      if (!options) {
-        return Stream.fail(
-          new RuntimeValidationError({
-            message: "modelDoStream requires call options with prompt",
-          }),
-        );
-      }
-
-      return runtime.modelDoStream({
+    modelDoStream: (input) =>
+      runtime.modelDoStream({
+        ...input,
         origin: window.location.origin,
-        requestId: normalized.requestId,
-        sessionID: normalized.sessionID,
-        modelId: normalized.modelId,
-        options,
-      });
-    },
+      }),
 
-    chatSendMessages: (input) => {
-      const normalized = normalizeChatSendInput(input);
-
-      return runtime.chatSendMessages({
+    chatSendMessages: (input) =>
+      runtime.chatSendMessages({
+        ...input,
         origin: window.location.origin,
-        chatId: normalized.chatId,
-        modelId: normalized.modelId,
-        trigger: normalized.trigger,
-        messageId: normalized.messageId,
-        messages: normalized.messages,
-        options: normalized.options,
-      });
-    },
+      }),
 
-    chatReconnectStream: (input) => {
-      const normalized = normalizeChatReconnectInput(input);
-
-      return runtime.chatReconnectStream({
+    chatReconnectStream: (input) =>
+      runtime.chatReconnectStream({
+        ...input,
         origin: window.location.origin,
-        chatId: normalized.chatId,
-      });
-    },
+      }),
 
     abortChatStream: (input) =>
       mapRuntimeEffect(
         Effect.gen(function* () {
           yield* runtime.abortChatStream({
+            ...input,
             origin: window.location.origin,
-            chatId: input.chatId,
           });
-
-          return {
-            ok: true,
-          };
         }),
       ),
+
+    listProviders: () => unauthorized("listProviders"),
+    listConnectedModels: () => unauthorized("listConnectedModels"),
+    listPermissions: () => unauthorized("listPermissions"),
+    openProviderAuthWindow: () => unauthorized("openProviderAuthWindow"),
+    getProviderAuthFlow: () => unauthorized("getProviderAuthFlow"),
+    startProviderAuthFlow: () => unauthorized("startProviderAuthFlow"),
+    cancelProviderAuthFlow: () => unauthorized("cancelProviderAuthFlow"),
+    disconnectProvider: () => unauthorized("disconnectProvider"),
+    setOriginEnabled: () => unauthorized("setOriginEnabled"),
+    setModelPermission: () => unauthorized("setModelPermission"),
+    resolvePermissionRequest: () => unauthorized("resolvePermissionRequest"),
+    dismissPermissionRequest: () => unauthorized("dismissPermissionRequest"),
   });
 }
 

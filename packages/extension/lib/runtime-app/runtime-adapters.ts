@@ -13,22 +13,8 @@ import {
   isRuntimeRpcError,
 } from "@llm-bridge/contracts";
 import {
-  AuthRepository,
-  CatalogRepository,
-  MetaRepository,
-  ModelExecutionRepository,
-  ModelsRepository,
-  PendingRequestsRepository,
-  PermissionsRepository,
-  ProvidersRepository,
-  makeAuthRepository,
-  makeCatalogRepository,
-  makeMetaRepository,
-  makeModelExecutionRepository,
-  makeModelsRepository,
-  makePendingRequestsRepository,
-  makePermissionsRepository,
-  makeProvidersRepository,
+  RuntimeEnvironment,
+  type RuntimeEnvironmentApi,
 } from "@llm-bridge/runtime-core";
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 import * as Effect from "effect/Effect";
@@ -108,23 +94,14 @@ function mapStream(
 // This layer bridges runtime-core repositories to extension primitives.
 // Read paths stay on repositories; orchestration stays in runtime-core services.
 export function makeRuntimeCoreInfrastructureLayer() {
-  const ProvidersRepoLive = Layer.succeed(
-    ProvidersRepository,
-    makeProvidersRepository({
+  const runtimeEnvironment = {
+    providers: {
       listProviders,
-    }),
-  );
-
-  const ModelsRepoLive = Layer.succeed(
-    ModelsRepository,
-    makeModelsRepository({
+    },
+    models: {
       listModels,
-    }),
-  );
-
-  const AuthRepoLive = Layer.succeed(
-    AuthRepository,
-    makeAuthRepository({
+    },
+    auth: {
       openProviderAuthWindow: (providerID: string) =>
         tryExtensionPromise("auth.openProviderAuthWindow", () => {
           const manager = getAuthFlowManager();
@@ -176,12 +153,8 @@ export function makeRuntimeCoreInfrastructureLayer() {
             connected: false,
           };
         }),
-    }),
-  );
-
-  const PermissionsRepoLive = Layer.succeed(
-    PermissionsRepository,
-    makePermissionsRepository({
+    },
+    permissions: {
       getOriginState,
       listPermissions: listPermissionsForOrigin,
       getModelPermission: (origin: string, modelID: string) =>
@@ -196,13 +169,13 @@ export function makeRuntimeCoreInfrastructureLayer() {
             enabled,
           };
         }),
-      updatePermission: (input: {
+      setModelPermission: (input: {
         origin: string;
         modelID: string;
         status: "allowed" | "denied";
         capabilities?: ReadonlyArray<string>;
       }) =>
-        tryStoragePromise("permissions.updatePermission", async () => {
+        tryStoragePromise("permissions.setModelPermission", async () => {
           await setModelPermission(
             input.origin,
             input.modelID,
@@ -256,19 +229,11 @@ export function makeRuntimeCoreInfrastructureLayer() {
         tryStoragePromise("permissions.waitForPermissionDecision", () =>
           waitForPermissionDecision(requestId, timeoutMs, signal),
         ),
-    }),
-  );
-
-  const PendingRequestsRepoLive = Layer.succeed(
-    PendingRequestsRepository,
-    makePendingRequestsRepository({
+    },
+    pending: {
       listPending: listPendingRequestsForOrigin,
-    }),
-  );
-
-  const MetaRepoLive = Layer.succeed(
-    MetaRepository,
-    makeMetaRepository({
+    },
+    meta: {
       parseProviderModel,
       resolvePermissionTarget: (modelID: string) =>
         tryExtensionPromise("meta.resolvePermissionTarget", async () => {
@@ -289,12 +254,8 @@ export function makeRuntimeCoreInfrastructureLayer() {
             message: `Model ${modelID} was not found`,
           });
         }),
-    }),
-  );
-
-  const ModelExecutionRepoLive = Layer.succeed(
-    ModelExecutionRepository,
-    makeModelExecutionRepository({
+    },
+    modelExecution: {
       acquireModel: (input: {
         origin: string;
         sessionID: string;
@@ -350,12 +311,8 @@ export function makeRuntimeCoreInfrastructureLayer() {
             signal: input.signal,
           }).then((stream) => mapStream(stream)),
         ),
-    }),
-  );
-
-  const CatalogRepoLive = Layer.succeed(
-    CatalogRepository,
-    makeCatalogRepository({
+    },
+    catalog: {
       ensureCatalog: () =>
         tryExtensionPromise("catalog.ensure", () => ensureProviderCatalog()),
       refreshCatalog: () =>
@@ -366,17 +323,8 @@ export function makeRuntimeCoreInfrastructureLayer() {
         tryExtensionPromise("catalog.refreshProvider", () =>
           refreshProviderCatalogForProvider(providerID),
         ),
-    }),
-  );
+    },
+  } satisfies RuntimeEnvironmentApi;
 
-  return Layer.mergeAll(
-    ProvidersRepoLive,
-    ModelsRepoLive,
-    AuthRepoLive,
-    PermissionsRepoLive,
-    PendingRequestsRepoLive,
-    MetaRepoLive,
-    ModelExecutionRepoLive,
-    CatalogRepoLive,
-  );
+  return Layer.succeed(RuntimeEnvironment, runtimeEnvironment);
 }

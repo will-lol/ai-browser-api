@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  githubCopilotAdapter,
   resolveCopilotExecutionState,
 } from "@/lib/runtime/adapters/github-copilot";
 import type { RuntimeAdapterContext } from "@/lib/runtime/adapters/types";
@@ -122,29 +121,5 @@ describe("resolveCopilotExecutionState", () => {
 
     assert.equal(output.apiKey, "enterprise-access-token");
     assert.equal(output.baseURL, "https://copilot-api.company.ghe.com");
-  });
-});
-
-describe("githubCopilotAdapter.auth.parseStoredAuth", () => {
-  it("preserves method-aware oauth metadata", () => {
-    const parsed = githubCopilotAdapter.auth.parseStoredAuth({
-      type: "oauth",
-      methodID: "oauth-device",
-      methodType: "oauth",
-      access: "legacy-access",
-      refresh: "legacy-refresh",
-      expiresAt: Date.now() + 60_000,
-      createdAt: Date.now() - 1_000,
-      updatedAt: Date.now() - 1_000,
-      metadata: {
-        enterpriseUrl: "https://company.ghe.com",
-      },
-    });
-
-    assert.equal(parsed?.methodID, "oauth-device");
-    assert.equal(parsed?.methodType, "oauth");
-    assert.deepEqual(parsed?.metadata, {
-      enterpriseUrl: "https://company.ghe.com",
-    });
   });
 });

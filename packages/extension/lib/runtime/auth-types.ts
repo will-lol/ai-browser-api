@@ -1,30 +1,17 @@
-import { z } from "zod";
+import * as Schema from "effect/Schema";
+import {
+  JsonObjectSchema,
+  type JsonValue as ContractJsonValue,
+} from "@llm-bridge/contracts";
 
 export type AuthMethodType = "oauth" | "pat" | "apikey";
 
-type JsonPrimitive = string | number | boolean | null;
-export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+export type JsonValue = ContractJsonValue;
 export type JsonObject = {
-  [key: string]: JsonValue;
+  readonly [key: string]: JsonValue;
 };
 
-const authMethodTypeSchema = z.enum(["oauth", "pat", "apikey"]);
-
-const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.null(),
-    z.array(jsonValueSchema),
-    z.record(z.string(), jsonValueSchema),
-  ]),
-);
-
-const jsonObjectSchema: z.ZodType<JsonObject> = z.record(
-  z.string(),
-  jsonValueSchema,
-);
+export const authMethodTypeSchema = Schema.Literal("oauth", "pat", "apikey");
 
 export type AuthRecord<TMetadata extends JsonObject | undefined = JsonObject | undefined> =
   | {
@@ -49,29 +36,31 @@ export type AuthRecord<TMetadata extends JsonObject | undefined = JsonObject | u
       updatedAt: number;
     };
 
-const authRecordBaseSchema = z.object({
-  methodID: z.string(),
+const authRecordBaseSchema = Schema.Struct({
+  methodID: Schema.String,
   methodType: authMethodTypeSchema,
-  metadata: jsonObjectSchema.optional(),
+  metadata: Schema.optional(JsonObjectSchema),
 });
 
-export const authRecordSchema: z.ZodType<AuthRecord> = z.union([
-  authRecordBaseSchema.extend({
-    type: z.literal("api"),
-    key: z.string(),
-    createdAt: z.number(),
-    updatedAt: z.number(),
+export const authRecordSchema = Schema.Union(
+  Schema.Struct({
+    ...authRecordBaseSchema.fields,
+    type: Schema.Literal("api"),
+    key: Schema.String,
+    createdAt: Schema.Number,
+    updatedAt: Schema.Number,
   }),
-  authRecordBaseSchema.extend({
-    type: z.literal("oauth"),
-    access: z.string(),
-    refresh: z.string().optional(),
-    expiresAt: z.number().optional(),
-    accountId: z.string().optional(),
-    createdAt: z.number(),
-    updatedAt: z.number(),
+  Schema.Struct({
+    ...authRecordBaseSchema.fields,
+    type: Schema.Literal("oauth"),
+    access: Schema.String,
+    refresh: Schema.optional(Schema.String),
+    expiresAt: Schema.optional(Schema.Number),
+    accountId: Schema.optional(Schema.String),
+    createdAt: Schema.Number,
+    updatedAt: Schema.Number,
   }),
-]);
+);
 
 export type AuthResult<TMetadata extends JsonObject | undefined = JsonObject | undefined> =
   | {

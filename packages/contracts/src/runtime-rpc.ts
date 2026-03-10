@@ -12,6 +12,7 @@ import {
   RuntimeCancelProviderAuthFlowResponseSchema,
   RuntimeCreatePermissionRequestInputSchema,
   RuntimeCreatePermissionRequestResponseSchema,
+  RuntimeDismissPermissionRequestInputSchema,
   RuntimeDismissPermissionRequestResponseSchema,
   RuntimeDisconnectProviderResponseSchema,
   RuntimeGenerateResponseSchema,
@@ -23,12 +24,13 @@ import {
   RuntimePendingRequestSchema,
   RuntimePermissionEntrySchema,
   RuntimeProviderSummarySchema,
-  RuntimeRequestPermissionInputSchema,
+  RuntimeResolvePermissionRequestInputSchema,
   RuntimeResolvePermissionRequestResponseSchema,
+  RuntimeSetModelPermissionInputSchema,
+  RuntimeSetOriginEnabledInputSchema,
   RuntimeSetOriginEnabledResponseSchema,
   RuntimeStartProviderAuthFlowResponseSchema,
   RuntimeStreamPartSchema,
-  RuntimeUpdatePermissionInputSchema,
   RuntimeUpdatePermissionResponseSchema,
 } from "./entities";
 import { RuntimeRpcErrorSchema } from "./errors";
@@ -107,7 +109,7 @@ const RuntimeAbortChatStreamRpc = Rpc.make("abortChatStream", {
   error: RuntimeRpcErrorSchema,
 });
 
-const RuntimePublicRequestPermissionRpc = Rpc.make("requestPermission", {
+const RuntimeCreatePermissionRequestRpc = Rpc.make("createPermissionRequest", {
   payload: RuntimeCreatePermissionRequestInputSchema,
   success: RuntimeCreatePermissionRequestResponseSchema,
   error: RuntimeRpcErrorSchema,
@@ -181,26 +183,31 @@ const RuntimeDisconnectProviderRpc = Rpc.make("disconnectProvider", {
   error: RuntimeRpcErrorSchema,
 });
 
-const RuntimeUpdatePermissionRpc = Rpc.make("updatePermission", {
-  payload: RuntimeUpdatePermissionInputSchema,
-  success: Schema.Union(
-    RuntimeSetOriginEnabledResponseSchema,
-    RuntimeUpdatePermissionResponseSchema,
-  ),
+const RuntimeSetOriginEnabledRpc = Rpc.make("setOriginEnabled", {
+  payload: RuntimeSetOriginEnabledInputSchema,
+  success: RuntimeSetOriginEnabledResponseSchema,
   error: RuntimeRpcErrorSchema,
 });
 
-const RuntimeAdminRequestPermissionRpc = Rpc.make("requestPermission", {
-  payload: RuntimeRequestPermissionInputSchema,
-  success: Schema.Union(
-    RuntimeCreatePermissionRequestResponseSchema,
-    RuntimeDismissPermissionRequestResponseSchema,
-    RuntimeResolvePermissionRequestResponseSchema,
-  ),
+const RuntimeSetModelPermissionRpc = Rpc.make("setModelPermission", {
+  payload: RuntimeSetModelPermissionInputSchema,
+  success: RuntimeUpdatePermissionResponseSchema,
   error: RuntimeRpcErrorSchema,
 });
 
-const RuntimeSharedRpcs = [
+const RuntimeResolvePermissionRequestRpc = Rpc.make("resolvePermissionRequest", {
+  payload: RuntimeResolvePermissionRequestInputSchema,
+  success: RuntimeResolvePermissionRequestResponseSchema,
+  error: RuntimeRpcErrorSchema,
+});
+
+const RuntimeDismissPermissionRequestRpc = Rpc.make("dismissPermissionRequest", {
+  payload: RuntimeDismissPermissionRequestInputSchema,
+  success: RuntimeDismissPermissionRequestResponseSchema,
+  error: RuntimeRpcErrorSchema,
+});
+
+const RuntimeRpcRequests = [
   RuntimeListModelsRpc,
   RuntimeGetOriginStateRpc,
   RuntimeListPendingRpc,
@@ -211,11 +218,7 @@ const RuntimeSharedRpcs = [
   RuntimeChatSendMessagesRpc,
   RuntimeChatReconnectStreamRpc,
   RuntimeAbortChatStreamRpc,
-] as const;
-
-const RuntimePublicOnlyRpcs = [RuntimePublicRequestPermissionRpc] as const;
-
-const RuntimeAdminOnlyRpcs = [
+  RuntimeCreatePermissionRequestRpc,
   RuntimeListProvidersRpc,
   RuntimeListConnectedModelsRpc,
   RuntimeListPermissionsRpc,
@@ -224,20 +227,36 @@ const RuntimeAdminOnlyRpcs = [
   RuntimeStartProviderAuthFlowRpc,
   RuntimeCancelProviderAuthFlowRpc,
   RuntimeDisconnectProviderRpc,
-  RuntimeUpdatePermissionRpc,
-  RuntimeAdminRequestPermissionRpc,
+  RuntimeSetOriginEnabledRpc,
+  RuntimeSetModelPermissionRpc,
+  RuntimeResolvePermissionRequestRpc,
+  RuntimeDismissPermissionRequestRpc,
 ] as const;
 
-export const RuntimePublicRpcGroup = RpcGroup.make(
-  ...RuntimeSharedRpcs,
-  ...RuntimePublicOnlyRpcs,
+export const RuntimeRpcGroup = RpcGroup.make(...RuntimeRpcRequests);
+
+export type RuntimeRpc = RpcGroup.Rpcs<typeof RuntimeRpcGroup>;
+
+export const RuntimePublicAllowedTags = new Set([
+  "listModels",
+  "getOriginState",
+  "listPending",
+  "acquireModel",
+  "modelDoGenerate",
+  "modelDoStream",
+  "abortModelCall",
+  "chatSendMessages",
+  "chatReconnectStream",
+  "abortChatStream",
+  "createPermissionRequest",
+] as const);
+
+export const RuntimeAdminAllowedTags = new Set(
+  RuntimeRpcGroup.requests.keys(),
 );
 
-export type RuntimePublicRpc = RpcGroup.Rpcs<typeof RuntimePublicRpcGroup>;
+export const RuntimePublicRpcGroup = RuntimeRpcGroup;
+export const RuntimeAdminRpcGroup = RuntimeRpcGroup;
 
-export const RuntimeAdminRpcGroup = RpcGroup.make(
-  ...RuntimeSharedRpcs,
-  ...RuntimeAdminOnlyRpcs,
-);
-
-export type RuntimeAdminRpc = RpcGroup.Rpcs<typeof RuntimeAdminRpcGroup>;
+export type RuntimePublicRpc = RuntimeRpc;
+export type RuntimeAdminRpc = RuntimeRpc;

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import { ZodError } from "zod";
 import { getModelsDevData, modelsDevData } from "@/lib/runtime/models-dev";
 import {
   parseModelsDevData,
@@ -44,7 +43,7 @@ describe("models.dev snapshot parsing", () => {
   });
 
   it("rejects invalid top-level snapshots", () => {
-    expect(() => parseModelsDevData([])).toThrow(ZodError);
+    expect(() => parseModelsDevData([])).toThrow(Error);
   });
 
   it("rejects invalid provider entries", () => {
@@ -55,7 +54,7 @@ describe("models.dev snapshot parsing", () => {
           models: {},
         },
       }),
-    ).toThrow(ZodError);
+    ).toThrow(Error);
   });
 
   it("rejects invalid model entries", () => {
@@ -77,7 +76,7 @@ describe("models.dev snapshot parsing", () => {
           },
         },
       }),
-    ).toThrow(ZodError);
+    ).toThrow(Error);
   });
 
   it("rejects malformed snapshot text used by the update script", () => {
@@ -98,7 +97,7 @@ describe("models.dev snapshot parsing", () => {
           },
         }),
       ),
-    ).toThrow(ZodError);
+    ).toThrow(Error);
   });
 
   it("returns the canonical typed snapshot through getModelsDevData", async () => {

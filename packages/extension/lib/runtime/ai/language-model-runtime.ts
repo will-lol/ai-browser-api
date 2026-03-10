@@ -18,10 +18,7 @@ import {
 import { RetryError } from "ai";
 import type { AuthRecord } from "@/lib/runtime/auth-store";
 import { getAuth, removeAuth, setAuth } from "@/lib/runtime/auth-store";
-import {
-  parseAdapterStoredAuth,
-  resolveAdapterForModel,
-} from "@/lib/runtime/adapters";
+import { resolveAdapterForModel } from "@/lib/runtime/adapters";
 import { wrapExtensionError, wrapProviderError } from "@/lib/runtime/errors";
 import type { RuntimeAdapterContext } from "@/lib/runtime/adapters/types";
 import { getModel, getProvider } from "@/lib/runtime/provider-registry";
@@ -246,7 +243,7 @@ function buildAdapterContext(input: {
     origin: input.origin,
     sessionID: input.sessionID,
     requestID: input.requestID,
-    auth: parseAdapterStoredAuth(adapter, input.runtime.auth),
+    auth: input.runtime.auth,
     provider: input.runtime.provider,
     model: input.runtime.model,
     authStore: {

@@ -25,8 +25,8 @@ import {
   type RuntimeRpcError,
 } from "@llm-bridge/contracts";
 import {
-  PermissionService,
-  type PermissionServiceApi,
+  ensureModelAccess,
+  ensureOriginEnabled,
 } from "@llm-bridge/runtime-core";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -67,7 +67,6 @@ type ActiveChatGeneration = {
 };
 
 type ChatExecutionServiceDeps = {
-  permissions: PermissionServiceApi;
   prepareLanguageModelCall: (input: {
     modelID: string;
     origin: string;
@@ -372,7 +371,7 @@ export function makeChatExecutionService(input: ChatExecutionServiceDeps) {
 
   const sendMessages = (
     request: RuntimeChatSendMessagesInput,
-  ): Effect.Effect<ReadableStream<RuntimeChatStreamChunk>, RuntimeRpcError> =>
+  ) =>
     Effect.gen(function* () {
       const generationKey = toGenerationKey(request);
       const existing = generations.get(generationKey);
@@ -396,12 +395,12 @@ export function makeChatExecutionService(input: ChatExecutionServiceDeps) {
       const sessionID = request.chatId;
 
       const result = yield* Effect.gen(function* () {
-        yield* input.permissions.ensureOriginEnabled(request.origin);
-        yield* input.permissions.ensureRequestAllowed(
-          request.origin,
-          request.modelId,
-          generation.abortController.signal,
-        );
+        yield* ensureOriginEnabled(request.origin);
+        yield* ensureModelAccess({
+          origin: request.origin,
+          modelID: request.modelId,
+          signal: generation.abortController.signal,
+        });
         yield* ensureNotAborted(generation, "chat.sendMessages");
 
         const validatedMessages = yield* Effect.tryPromise({
@@ -529,7 +528,7 @@ export function makeChatExecutionService(input: ChatExecutionServiceDeps) {
 
   const reconnectStream = (
     request: RuntimeChatReconnectStreamInput,
-  ): Effect.Effect<ReadableStream<RuntimeChatStreamChunk>, RuntimeRpcError> =>
+  ) =>
     Effect.gen(function* () {
       const generation = generations.get(toGenerationKey(request));
       if (!generation) {
@@ -563,13 +562,12 @@ export class ChatExecutionService extends Context.Tag(
 
 export const ChatExecutionServiceLive = Layer.effect(
   ChatExecutionService,
-  Effect.gen(function* () {
-    return makeChatExecutionService({
-      permissions: yield* PermissionService,
+  Effect.succeed(
+    makeChatExecutionService({
       prepareLanguageModelCall: prepareRuntimeChatModelCall,
       convertMessages: convertToModelMessages,
       validateMessages: validateUIMessages,
       streamTextImpl: streamText,
-    });
-  }),
+    }),
+  ),
 );

@@ -7,10 +7,7 @@ import {
   it,
   mock,
 } from "bun:test";
-import {
-  openaiAdapter,
-  resolveOpenAIExecutionState,
-} from "@/lib/runtime/adapters/openai";
+import { resolveOpenAIExecutionState } from "@/lib/runtime/adapters/openai";
 import type { RuntimeAdapterContext } from "@/lib/runtime/adapters/types";
 
 function makeJwt(claims: Record<string, unknown>) {
@@ -280,30 +277,5 @@ describe("resolveOpenAIExecutionState", () => {
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expect(setAuthMock).toHaveBeenCalledTimes(0);
     expect(console.warn).toHaveBeenCalledTimes(0);
-  });
-});
-
-describe("openaiAdapter.auth.parseStoredAuth", () => {
-  it("preserves method-aware oauth records and normalizes metadata", () => {
-    const parsed = openaiAdapter.auth.parseStoredAuth({
-      type: "oauth",
-      methodID: "oauth-device",
-      methodType: "oauth",
-      access: "legacy-access",
-      refresh: "legacy-refresh",
-      expiresAt: Date.now() + 60_000,
-      metadata: {
-        accountId: "acct-legacy",
-      },
-      createdAt: Date.now() - 10_000,
-      updatedAt: Date.now() - 10_000,
-    });
-
-    expect(parsed).toBeDefined();
-    expect(parsed?.methodID).toBe("oauth-device");
-    expect(parsed?.methodType).toBe("oauth");
-    expect(parsed?.metadata).toEqual({
-      accountId: "acct-legacy",
-    });
   });
 });

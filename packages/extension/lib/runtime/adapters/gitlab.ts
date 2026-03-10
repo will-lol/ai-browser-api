@@ -1,21 +1,7 @@
-import { z } from "zod";
-import {
-  optionalMetadataString,
-  parseOptionalMetadataObject,
-} from "./auth-metadata";
-import { parseProviderOptions } from "./provider-options";
+import * as Schema from "effect/Schema";
+import { decodeSchemaOrUndefined } from "@/lib/runtime/effect-schema";
 import { defineAuthSchema } from "./schema";
-import type {
-  AIAdapter,
-  AdapterAuthorizeContext,
-  ParsedAuthRecord,
-} from "./types";
-import {
-  getAuth,
-  setAuth,
-  type AuthRecord,
-  type AuthResult,
-} from "@/lib/runtime/auth-store";
+import type { AIAdapter, AdapterAuthorizeContext } from "./types";
 import {
   RuntimeAuthProviderError,
   RuntimeUpstreamServiceError,
@@ -34,23 +20,14 @@ const GITLAB_COM_URL = "https://gitlab.com";
 const OAUTH_SCOPES = ["api"];
 const GITLAB_PROVIDER_ID = "gitlab";
 
-type GitLabAuthMetadata = {
-  instanceUrl?: string;
-};
-
-const gitLabProviderOptionsSchema = z.object({});
-
-const gitLabAuthMetadataSchema = z.object({
-  instanceUrl: optionalMetadataString,
+const gitLabTokenResponseSchema = Schema.Struct({
+  access_token: Schema.String,
+  refresh_token: Schema.String,
+  expires_in: Schema.Number,
 });
 
-const gitLabTokenResponseSchema = z.object({
-  access_token: z.string(),
-  refresh_token: z.string(),
-  expires_in: z.number(),
-});
-
-const refreshLocks = new Map<string, Promise<void>>();
+const optionalAuthStringSchema = Schema.Union(Schema.String, Schema.Undefined);
+const requiredAuthStringSchema = Schema.String.pipe(Schema.minLength(1));
 
 function gitlabUpstreamError(input: {
   operation: string;
@@ -119,54 +96,19 @@ async function exchangeAuthorizationCode(
   }
 
   const payload = await response.json().catch(() => undefined);
-  const result = gitLabTokenResponseSchema.safeParse(payload);
-  if (!result.success) {
+  const result = decodeSchemaOrUndefined(gitLabTokenResponseSchema, payload);
+  if (!result) {
     throw gitlabAuthProviderError({
       operation: "oauth.exchangeAuthorizationCode.parse",
       message: "GitLab OAuth token response was invalid.",
     });
   }
 
-  return result.data;
-}
-
-async function exchangeRefreshToken(instanceUrl: string, refreshToken: string) {
-  const response = await fetch(`${instanceUrl}/oauth/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json",
-    },
-    body: new URLSearchParams({
-      client_id: CLIENT_ID,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }).toString(),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw gitlabUpstreamError({
-      operation: "oauth.exchangeRefreshToken",
-      statusCode: response.status,
-      detail,
-    });
-  }
-
-  const payload = await response.json().catch(() => undefined);
-  const result = gitLabTokenResponseSchema.safeParse(payload);
-  if (!result.success) {
-    throw gitlabAuthProviderError({
-      operation: "oauth.exchangeRefreshToken.parse",
-      message: "GitLab refresh token response was invalid.",
-    });
-  }
-
-  return result.data;
+  return result;
 }
 
 async function authorizeGitLabOAuth(
-  input: AdapterAuthorizeContext<Record<string, string>>,
+  input: AdapterAuthorizeContext<Record<string, string | undefined>>,
 ) {
   const instanceUrl = normalizeInstanceUrl(
     input.values.instanceUrl?.trim() || GITLAB_COM_URL,
@@ -229,7 +171,7 @@ async function authorizeGitLabOAuth(
 }
 
 async function authorizeGitLabPat(
-  input: AdapterAuthorizeContext<Record<string, string>>,
+  input: AdapterAuthorizeContext<Record<string, string | undefined>>,
 ) {
   const instanceUrl = normalizeInstanceUrl(
     input.values.instanceUrl?.trim() || GITLAB_COM_URL,
@@ -265,100 +207,58 @@ async function authorizeGitLabPat(
   };
 }
 
-function parseGitLabStoredAuth(
-  auth?: AuthRecord,
-): ParsedAuthRecord<GitLabAuthMetadata> | undefined {
-  if (!auth) return undefined;
-  const metadata = parseOptionalMetadataObject(
-    gitLabAuthMetadataSchema,
-    auth.metadata,
-  );
-
-  if (auth.type === "api") {
-    return {
-      ...auth,
-      metadata,
-    };
-  }
-
-  return {
-    ...auth,
-    metadata,
-  };
-}
-
-function serializeGitLabAuth(input: {
-  result: AuthResult<GitLabAuthMetadata>;
-  method: {
-    id: string;
-    type: "oauth" | "pat" | "apikey";
-  };
-}) {
-  return {
-    ...input.result,
-    metadata: parseOptionalMetadataObject(
-      gitLabAuthMetadataSchema,
-      input.result.metadata,
-    ),
-  };
-}
-
-export const gitlabAdapter: AIAdapter<GitLabAuthMetadata> = {
+export const gitlabAdapter: AIAdapter = {
   key: "provider:gitlab",
   displayName: "GitLab",
   match: {
     providerIDs: ["gitlab"],
   },
-  auth: {
-    parseStoredAuth: parseGitLabStoredAuth,
-    serializeAuth: serializeGitLabAuth,
-    async methods() {
-      return [
-        {
-          id: "oauth",
-          type: "oauth",
-          label: "GitLab OAuth",
-          inputSchema: defineAuthSchema({
-            instanceUrl: {
-              schema: z.string().trim().optional(),
-              ui: {
-                type: "text",
-                label: "GitLab instance URL",
-                placeholder: "https://gitlab.com",
-                required: false,
-              },
+  async listAuthMethods() {
+    return [
+      {
+        id: "oauth",
+        type: "oauth",
+        label: "GitLab OAuth",
+        inputSchema: defineAuthSchema({
+          instanceUrl: {
+            schema: optionalAuthStringSchema,
+            ui: {
+              type: "text",
+              label: "GitLab instance URL",
+              placeholder: "https://gitlab.com",
+              required: false,
             },
-          }),
-          authorize: authorizeGitLabOAuth,
-        },
-        {
-          id: "pat",
-          type: "pat",
-          label: "GitLab Personal Access Token",
-          inputSchema: defineAuthSchema({
-            instanceUrl: {
-              schema: z.string().trim().optional(),
-              ui: {
-                type: "text",
-                label: "GitLab instance URL",
-                placeholder: "https://gitlab.com",
-                required: false,
-              },
+          },
+        }),
+        authorize: authorizeGitLabOAuth,
+      },
+      {
+        id: "pat",
+        type: "pat",
+        label: "GitLab Personal Access Token",
+        inputSchema: defineAuthSchema({
+          instanceUrl: {
+            schema: optionalAuthStringSchema,
+            ui: {
+              type: "text",
+              label: "GitLab instance URL",
+              placeholder: "https://gitlab.com",
+              required: false,
             },
-            token: {
-              schema: z.string().trim().min(1, "GitLab personal access token is required"),
-              ui: {
-                type: "secret",
-                label: "Personal Access Token",
-                placeholder: "glpat-xxxxxxxxxxxxxxxxxxxx",
-                required: true,
-              },
+          },
+          token: {
+            schema: requiredAuthStringSchema,
+            ui: {
+              type: "secret",
+              label: "Personal Access Token",
+              placeholder: "glpat-xxxxxxxxxxxxxxxxxxxx",
+              required: true,
             },
-          }),
-          authorize: authorizeGitLabPat,
-        },
-      ];
-    },
+          },
+        }),
+        authorize: authorizeGitLabPat,
+      },
+    ];
   },
   async createModel() {
     throw new Error(
