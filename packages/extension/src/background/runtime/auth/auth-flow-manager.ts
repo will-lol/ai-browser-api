@@ -5,6 +5,7 @@ import {
   isRuntimeRpcError,
   type RuntimeAuthFlowInstruction,
 } from "@llm-bridge/contracts";
+import * as Effect from "effect/Effect";
 import type { RuntimeAuthMethod } from "@/background/runtime/providers/adapters/types";
 import {
   listProviderAuthMethods,
@@ -150,7 +151,7 @@ class AuthFlowManager {
   private async idleSnapshot(
     providerID: string,
   ): Promise<RuntimeAuthFlowSnapshot> {
-    const methods = await listProviderAuthMethods(providerID);
+    const methods = await Effect.runPromise(listProviderAuthMethods(providerID));
     const now = this.currentTimestamp();
     return {
       providerID,
@@ -163,7 +164,7 @@ class AuthFlowManager {
   }
 
   private async buildIdleFlow(providerID: string): Promise<AuthFlowState> {
-    const methods = await listProviderAuthMethods(providerID);
+    const methods = await Effect.runPromise(listProviderAuthMethods(providerID));
     const now = this.currentTimestamp();
     return {
       providerID,
@@ -280,7 +281,7 @@ class AuthFlowManager {
       });
     }
 
-    flow.methods = await listProviderAuthMethods(input.providerID);
+    flow.methods = await Effect.runPromise(listProviderAuthMethods(input.providerID));
     const selected = flow.methods.find(
       (method) => method.id === input.methodID,
     );
@@ -299,7 +300,7 @@ class AuthFlowManager {
     await this.setFlow(flow);
 
     try {
-      const task = startProviderAuth({
+      const task = Effect.runPromise(startProviderAuth({
         providerID: input.providerID,
         methodID: selected.id,
         values: input.values ?? {},
@@ -313,7 +314,7 @@ class AuthFlowManager {
           latest.instruction = instruction;
           await this.setFlow(latest);
         },
-      });
+      }));
       flow.task = task;
 
       await task;
@@ -330,7 +331,7 @@ class AuthFlowManager {
       latest.error = undefined;
       latest.instruction = undefined;
       this.clearExecution(latest);
-      latest.methods = await listProviderAuthMethods(input.providerID);
+      latest.methods = await Effect.runPromise(listProviderAuthMethods(input.providerID));
       await this.setFlow(latest);
       return this.snapshot(latest);
     } catch (error) {
@@ -356,7 +357,7 @@ class AuthFlowManager {
       }
       latest.instruction = undefined;
       this.clearExecution(latest);
-      latest.methods = await listProviderAuthMethods(input.providerID);
+      latest.methods = await Effect.runPromise(listProviderAuthMethods(input.providerID));
       await this.setFlow(latest);
       return this.snapshot(latest);
     }

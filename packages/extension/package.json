@@ -12,8 +12,6 @@
     "update-models": "bun scripts/update-models-snapshot.ts"
   },
   "dependencies": {
-    "@effect-atom/atom-react": "^0.5.0",
-    "@effect/experimental": "^0.58.0",
     "@ai-sdk/amazon-bedrock": "^4.0.69",
     "@ai-sdk/anthropic": "^3.0.50",
     "@ai-sdk/azure": "^3.0.38",
@@ -36,6 +34,7 @@
     "@effect/rpc": "^0.73.2",
     "@llm-bridge/bridge-codecs": "workspace:*",
     "@llm-bridge/contracts": "workspace:*",
+    "@llm-bridge/reactive-core": "workspace:*",
     "@llm-bridge/runtime-core": "workspace:*",
     "@llm-bridge/runtime-events": "workspace:*",
     "@tanstack/react-router": "^1.132.24",

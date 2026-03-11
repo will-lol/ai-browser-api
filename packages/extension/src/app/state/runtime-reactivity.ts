@@ -1,9 +1,6 @@
-import { Atom } from "@effect-atom/atom-react";
-import * as Reactivity from "@effect/experimental/Reactivity";
 import type { RuntimeEvent } from "@llm-bridge/contracts";
-import * as Effect from "effect/Effect";
-import * as Runtime from "effect/Runtime";
-import { extensionAtomRuntime } from "@/app/state/atom-runtime";
+import { createReactivityBridgeResource } from "@llm-bridge/reactive-core";
+import { extensionReactiveRuntime } from "@/app/state/atom-runtime";
 import { subscribeRuntimeEvents } from "@/app/events/runtime-events";
 
 export const runtimeReactivityKeys = {
@@ -44,18 +41,10 @@ function reactivityKeysForRuntimeEvent(
   }
 }
 
-export const runtimeEventReactivityBridgeAtom = extensionAtomRuntime
-  .atom(
-    Effect.gen(function* () {
-      const runtime = yield* Effect.runtime<Reactivity.Reactivity>();
-      const runFork = Runtime.runFork(runtime);
-      const unsubscribe = subscribeRuntimeEvents((event) => {
-        const keys = reactivityKeysForRuntimeEvent(event);
-        if (keys.length === 0) return;
-        runFork(Reactivity.invalidate(keys));
-      });
-
-      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
-    }),
-  )
-  .pipe(Atom.keepAlive);
+export const runtimeEventReactivityBridgeResource = createReactivityBridgeResource(
+  extensionReactiveRuntime,
+  {
+    subscribe: subscribeRuntimeEvents,
+    keysForEvent: reactivityKeysForRuntimeEvent,
+  },
+);

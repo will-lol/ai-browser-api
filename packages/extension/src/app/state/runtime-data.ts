@@ -1,6 +1,9 @@
-import { Atom, Result } from "@effect-atom/atom-react";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import {
+  combineQueryStates,
+  createQueryResource,
+  useQueryResourceState,
+} from "@llm-bridge/reactive-core";
 import {
   fetchModels,
   fetchOriginState,
@@ -9,98 +12,176 @@ import {
   fetchProviderAuthFlow,
   fetchProviders,
 } from "@/app/api/runtime-api";
-import { extensionAtomRuntime } from "@/app/state/atom-runtime";
+import { extensionReactiveRuntime } from "@/app/state/atom-runtime";
 import { runtimeReactivityKeys } from "@/app/state/runtime-reactivity";
 
-class ModelsKey extends Data.Class<{
-  connectedOnly?: boolean;
-  providerID?: string;
-}> {}
+const providersResource = createQueryResource(extensionReactiveRuntime, {
+  key: runtimeReactivityKeys.providers,
+  load: fetchProviders(),
+});
 
-const modelsResultAtomFamily = Atom.family((key: ModelsKey) =>
-  extensionAtomRuntime
-    .atom(
-      fetchModels({
-        connectedOnly: key.connectedOnly,
-        providerID: key.providerID,
-      }),
-    )
-    .pipe(Atom.withReactivity([runtimeReactivityKeys.models])),
-);
-
-export const providersResultAtom = extensionAtomRuntime
-  .atom(fetchProviders())
-  .pipe(Atom.withReactivity([runtimeReactivityKeys.providers]));
-
-const providerAuthFlowResultAtom = Atom.family((providerID: string) =>
-  extensionAtomRuntime
-    .atom(
-      fetchProviderAuthFlow({
-        providerID,
-      }).pipe(Effect.map((response) => response.result)),
-    )
-    .pipe(Atom.withReactivity([runtimeReactivityKeys.authFlow(providerID)])),
-);
-
-const originStateResultAtom = Atom.family((origin: string) =>
-  extensionAtomRuntime
-    .atom(fetchOriginState(origin))
-    .pipe(Atom.withReactivity([runtimeReactivityKeys.origin(origin)])),
-);
-
-const permissionsResultAtom = Atom.family((origin: string) =>
-  extensionAtomRuntime
-    .atom(fetchPermissions(origin))
-    .pipe(Atom.withReactivity([runtimeReactivityKeys.permissions(origin)])),
-);
-
-const pendingRequestsResultAtom = Atom.family((origin: string) =>
-  extensionAtomRuntime
-    .atom(fetchPendingRequests(origin))
-    .pipe(Atom.withReactivity([runtimeReactivityKeys.pending(origin)])),
-);
-
-function modelsResultAtom(input?: {
+function buildModelsResource(input?: {
   connectedOnly?: boolean;
   providerID?: string;
 }) {
-  return modelsResultAtomFamily(
-    new ModelsKey({
+  return createQueryResource(extensionReactiveRuntime, {
+    key: runtimeReactivityKeys.models,
+    load: fetchModels({
       connectedOnly: input?.connectedOnly,
       providerID: input?.providerID,
     }),
-  );
+  });
 }
 
-export const providerConnectDataResultAtom = Atom.family((providerID: string) =>
-  Atom.make((get) =>
-    Result.all({
-      providers: get(providersResultAtom),
-      authFlow: get(providerAuthFlowResultAtom(providerID)),
-    }),
-  ),
-);
+function buildProviderAuthFlowResource(providerID: string) {
+  return createQueryResource(extensionReactiveRuntime, {
+    key: runtimeReactivityKeys.authFlow(providerID),
+    load: fetchProviderAuthFlow({
+      providerID,
+    }).pipe(Effect.map((response) => response.result)),
+  });
+}
 
-export const floatingPermissionDataResultAtom = Atom.family((origin: string) =>
-  Atom.make((get) =>
-    Result.all({
-      originState: get(originStateResultAtom(origin)),
-      pendingRequests: get(pendingRequestsResultAtom(origin)),
-    }),
-  ),
-);
+function buildOriginStateResource(origin: string) {
+  return createQueryResource(extensionReactiveRuntime, {
+    key: runtimeReactivityKeys.origin(origin),
+    load: fetchOriginState(origin),
+  });
+}
 
-export const sitePermissionsDataResultAtom = Atom.family((origin: string) =>
-  Atom.make((get) =>
-    Result.all({
-      originState: get(originStateResultAtom(origin)),
-      models: get(
-        modelsResultAtom({
-          connectedOnly: true,
-        }),
-      ),
-      permissions: get(permissionsResultAtom(origin)),
-      pendingRequests: get(pendingRequestsResultAtom(origin)),
-    }),
-  ),
-);
+function buildPermissionsResource(origin: string) {
+  return createQueryResource(extensionReactiveRuntime, {
+    key: runtimeReactivityKeys.permissions(origin),
+    load: fetchPermissions(origin),
+  });
+}
+
+function buildPendingRequestsResource(origin: string) {
+  return createQueryResource(extensionReactiveRuntime, {
+    key: runtimeReactivityKeys.pending(origin),
+    load: fetchPendingRequests(origin),
+  });
+}
+
+const modelsResources = new Map<string, ReturnType<typeof buildModelsResource>>();
+const providerAuthFlowResources = new Map<
+  string,
+  ReturnType<typeof buildProviderAuthFlowResource>
+>();
+const originStateResources = new Map<
+  string,
+  ReturnType<typeof buildOriginStateResource>
+>();
+const permissionsResources = new Map<
+  string,
+  ReturnType<typeof buildPermissionsResource>
+>();
+const pendingRequestsResources = new Map<
+  string,
+  ReturnType<typeof buildPendingRequestsResource>
+>();
+
+function modelResourceKey(input?: {
+  connectedOnly?: boolean;
+  providerID?: string;
+}) {
+  return `${input?.connectedOnly === true ? "connected" : "all"}:${input?.providerID ?? ""}`;
+}
+
+function getModelsResource(input?: {
+  connectedOnly?: boolean;
+  providerID?: string;
+}): ReturnType<typeof buildModelsResource> {
+  const key = modelResourceKey(input);
+  const cached = modelsResources.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const resource = buildModelsResource(input);
+  modelsResources.set(key, resource);
+  return resource;
+}
+
+function getProviderAuthFlowResource(
+  providerID: string,
+): ReturnType<typeof buildProviderAuthFlowResource> {
+  const cached = providerAuthFlowResources.get(providerID);
+  if (cached) {
+    return cached;
+  }
+
+  const resource = buildProviderAuthFlowResource(providerID);
+  providerAuthFlowResources.set(providerID, resource);
+  return resource;
+}
+
+function getOriginStateResource(
+  origin: string,
+): ReturnType<typeof buildOriginStateResource> {
+  const cached = originStateResources.get(origin);
+  if (cached) {
+    return cached;
+  }
+
+  const resource = buildOriginStateResource(origin);
+  originStateResources.set(origin, resource);
+  return resource;
+}
+
+function getPermissionsResource(
+  origin: string,
+): ReturnType<typeof buildPermissionsResource> {
+  const cached = permissionsResources.get(origin);
+  if (cached) {
+    return cached;
+  }
+
+  const resource = buildPermissionsResource(origin);
+  permissionsResources.set(origin, resource);
+  return resource;
+}
+
+function getPendingRequestsResource(
+  origin: string,
+): ReturnType<typeof buildPendingRequestsResource> {
+  const cached = pendingRequestsResources.get(origin);
+  if (cached) {
+    return cached;
+  }
+
+  const resource = buildPendingRequestsResource(origin);
+  pendingRequestsResources.set(origin, resource);
+  return resource;
+}
+
+export function useProvidersState() {
+  return useQueryResourceState(providersResource);
+}
+
+export function useProviderConnectData(providerID: string) {
+  return combineQueryStates({
+    providers: useQueryResourceState(providersResource),
+    authFlow: useQueryResourceState(getProviderAuthFlowResource(providerID)),
+  });
+}
+
+export function useFloatingPermissionData(origin: string) {
+  return combineQueryStates({
+    originState: useQueryResourceState(getOriginStateResource(origin)),
+    pendingRequests: useQueryResourceState(getPendingRequestsResource(origin)),
+  });
+}
+
+export function useSitePermissionsData(origin: string) {
+  return combineQueryStates({
+    originState: useQueryResourceState(getOriginStateResource(origin)),
+    models: useQueryResourceState(
+      getModelsResource({
+        connectedOnly: true,
+      }),
+    ),
+    permissions: useQueryResourceState(getPermissionsResource(origin)),
+    pendingRequests: useQueryResourceState(getPendingRequestsResource(origin)),
+  });
+}

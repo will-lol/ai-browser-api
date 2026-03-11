@@ -1,15 +1,12 @@
-import type {
-  LanguageModelV3GenerateResult,
-  LanguageModelV3StreamPart,
-} from "@ai-sdk/provider";
 import { APICallError } from "@ai-sdk/provider";
 import { RetryError } from "ai";
-import { isRuntimeRpcError } from "@llm-bridge/contracts";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
 import {
   prepareRuntimeLanguageModelCall,
   type RuntimeLanguageModelCallOptions,
 } from "./language-model-runtime-context";
-import { wrapExtensionError, wrapProviderError } from "@/background/runtime/core/errors";
+import { wrapProviderError } from "@/background/runtime/core/errors";
 
 function logRuntimeModelDebug(event: string, details?: unknown) {
   console.log(`[language-model-runtime] ${event}`, details);
@@ -28,16 +25,14 @@ function logRuntimeModelError(
   });
 }
 
-export async function getRuntimeModelDescriptor(input: {
+export function getRuntimeModelDescriptor(input: {
   modelID: string;
   origin: string;
   sessionID: string;
   requestID: string;
 }) {
-  let providerID: string | undefined;
-
-  try {
-    const preparedCall = await prepareRuntimeLanguageModelCall({
+  return Effect.gen(function* () {
+    const preparedCall = yield* prepareRuntimeLanguageModelCall({
       modelID: input.modelID,
       origin: input.origin,
       sessionID: input.sessionID,
@@ -52,9 +47,17 @@ export async function getRuntimeModelDescriptor(input: {
       } satisfies RuntimeLanguageModelCallOptions,
     });
 
-    providerID = preparedCall.providerID;
-    const supportedUrls = await Promise.resolve(
-      preparedCall.languageModel.supportedUrls ?? {},
+    const supportedUrls = yield* Effect.promise(() =>
+      Promise.resolve(preparedCall.languageModel.supportedUrls ?? {}),
+    ).pipe(
+      Effect.catchAllDefect((defect) =>
+        defect instanceof Error &&
+        (APICallError.isInstance(defect) || RetryError.isInstance(defect))
+          ? Effect.fail(
+              wrapProviderError(defect, preparedCall.providerID, "describe"),
+            )
+          : Effect.die(defect),
+      ),
     );
 
     return {
@@ -62,39 +65,37 @@ export async function getRuntimeModelDescriptor(input: {
       modelId: input.modelID,
       supportedUrls,
     };
-  } catch (error) {
-    if (isRuntimeRpcError(error)) throw error;
-    if (
-      providerID &&
-      error instanceof Error &&
-      (APICallError.isInstance(error) || RetryError.isInstance(error))
-    ) {
-      throw wrapProviderError(error, providerID, "describe");
-    }
-    throw wrapExtensionError(error, "model.describe");
-  }
+  });
 }
 
-export async function runLanguageModelGenerate(input: {
+export function runLanguageModelGenerate(input: {
   modelID: string;
   origin: string;
   sessionID: string;
   requestID: string;
   options: RuntimeLanguageModelCallOptions;
   signal?: AbortSignal;
-}): Promise<LanguageModelV3GenerateResult> {
+}) {
   logRuntimeModelDebug("generate.started", input);
 
-  let providerID: string | undefined;
+  return Effect.gen(function* () {
+    const preparedCall = yield* prepareRuntimeLanguageModelCall(input);
 
-  try {
-    const preparedCall = await prepareRuntimeLanguageModelCall(input);
-    providerID = preparedCall.providerID;
-
-    const result = await preparedCall.languageModel.doGenerate({
-      ...preparedCall.callOptions,
-      abortSignal: input.signal,
-    });
+    const result = yield* Effect.promise(() =>
+      preparedCall.languageModel.doGenerate({
+        ...preparedCall.callOptions,
+        abortSignal: input.signal,
+      }),
+    ).pipe(
+      Effect.catchAllDefect((defect) =>
+        defect instanceof Error &&
+        (APICallError.isInstance(defect) || RetryError.isInstance(defect))
+          ? Effect.fail(
+              wrapProviderError(defect, preparedCall.providerID, "generate"),
+            )
+          : Effect.die(defect),
+      ),
+    );
 
     logRuntimeModelDebug("generate.succeeded", {
       providerID: preparedCall.providerID,
@@ -102,40 +103,48 @@ export async function runLanguageModelGenerate(input: {
       ...input,
     });
     return result;
-  } catch (error) {
-    logRuntimeModelError("generate.failed", error, input);
-    if (isRuntimeRpcError(error)) throw error;
-    if (
-      providerID &&
-      error instanceof Error &&
-      (APICallError.isInstance(error) || RetryError.isInstance(error))
-    ) {
-      throw wrapProviderError(error, providerID, "generate");
-    }
-    throw wrapExtensionError(error, "model.generate");
-  }
+  }).pipe(
+    Effect.catchAllCause((cause) => {
+      logRuntimeModelError(
+        "generate.failed",
+        Cause.squash(cause) instanceof Error
+          ? (Cause.squash(cause) as Error)
+          : new Error(String(Cause.squash(cause))),
+        input,
+      );
+      return Effect.failCause(cause);
+    }),
+  );
 }
 
-export async function runLanguageModelStream(input: {
+export function runLanguageModelStream(input: {
   modelID: string;
   origin: string;
   sessionID: string;
   requestID: string;
   options: RuntimeLanguageModelCallOptions;
   signal?: AbortSignal;
-}): Promise<ReadableStream<LanguageModelV3StreamPart>> {
+}) {
   logRuntimeModelDebug("stream.started", input);
 
-  let providerID: string | undefined;
+  return Effect.gen(function* () {
+    const preparedCall = yield* prepareRuntimeLanguageModelCall(input);
 
-  try {
-    const preparedCall = await prepareRuntimeLanguageModelCall(input);
-    providerID = preparedCall.providerID;
-
-    const result = await preparedCall.languageModel.doStream({
-      ...preparedCall.callOptions,
-      abortSignal: input.signal,
-    });
+    const result = yield* Effect.promise(() =>
+      preparedCall.languageModel.doStream({
+        ...preparedCall.callOptions,
+        abortSignal: input.signal,
+      }),
+    ).pipe(
+      Effect.catchAllDefect((defect) =>
+        defect instanceof Error &&
+        (APICallError.isInstance(defect) || RetryError.isInstance(defect))
+          ? Effect.fail(
+              wrapProviderError(defect, preparedCall.providerID, "stream"),
+            )
+          : Effect.die(defect),
+      ),
+    );
 
     logRuntimeModelDebug("stream.succeeded", {
       providerID: preparedCall.providerID,
@@ -143,16 +152,16 @@ export async function runLanguageModelStream(input: {
       ...input,
     });
     return result.stream;
-  } catch (error) {
-    logRuntimeModelError("stream.failed", error, input);
-    if (isRuntimeRpcError(error)) throw error;
-    if (
-      providerID &&
-      error instanceof Error &&
-      (APICallError.isInstance(error) || RetryError.isInstance(error))
-    ) {
-      throw wrapProviderError(error, providerID, "stream");
-    }
-    throw wrapExtensionError(error, "model.stream");
-  }
+  }).pipe(
+    Effect.catchAllCause((cause) => {
+      logRuntimeModelError(
+        "stream.failed",
+        Cause.squash(cause) instanceof Error
+          ? (Cause.squash(cause) as Error)
+          : new Error(String(Cause.squash(cause))),
+        input,
+      );
+      return Effect.failCause(cause);
+    }),
+  );
 }

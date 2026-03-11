@@ -1,12 +1,11 @@
+import { useChat } from "@ai-sdk/react";
 import type { ChatTransport, UIMessage } from "ai";
-import { Chat, useChat } from "@ai-sdk/react";
+import { Bot, Loader2, RefreshCw, Send, User } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import {
-  createBridgeClient,
-  type BridgeClientApi,
-  type BridgeModelSummary,
-} from "@llm-bridge/client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Send, User, Bot, Loader2, RefreshCw } from "lucide-react";
+  useBridgeChatTransport,
+  useBridgeModels,
+} from "@llm-bridge/client-react";
 
 const DEFAULT_MODEL_ID = "google/gemini-3.1-pro-preview";
 const TRANSPORT_UNAVAILABLE_ERROR = "Bridge chat transport is not ready yet.";
@@ -31,115 +30,21 @@ function getMessageText(message: UIMessage) {
 }
 
 export function App() {
-  const [models, setModels] = useState<ReadonlyArray<BridgeModelSummary>>([]);
-  const [selectedModelId, setSelectedModelId] = useState("");
-  const [status, setStatus] = useState("Idle");
+  const { models, refresh, status, error: modelsError } = useBridgeModels();
+  const {
+    transport,
+    isReady: isChatReady,
+    isLoading: isTransportLoading,
+    error: transportError,
+  } = useBridgeChatTransport();
   const [input, setInput] = useState("");
-  const [chat, setChat] = useState<Chat<UIMessage> | null>(null);
-
-  const refreshInFlightRef = useRef<Promise<void> | null>(null);
-  const startupRefreshTriggeredRef = useRef(false);
+  const [requestedModelId, setRequestedModelId] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const selectedModelIdRef = useRef(selectedModelId);
-  const bridgeClientRef = useRef<BridgeClientApi | null>(null);
-  const bridgeClientPromiseRef = useRef<Promise<BridgeClientApi> | null>(null);
-  const unavailableChatRef = useRef(
-    new Chat<UIMessage>({
-      transport: unavailableChatTransport,
-    }),
-  );
-  selectedModelIdRef.current = selectedModelId;
-
-  const pushDebug = useCallback((event: string, details?: unknown) => {
-    console.log(`[example-app] ${new Date().toISOString()} ${event}`, details);
-  }, []);
-
-  const pushError = useCallback((event: string, error: unknown) => {
-    console.error(`[example-app] ${new Date().toISOString()} ${event}`, {
-      error,
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-  }, []);
-
-  const ensureBridgeClient = useCallback(async () => {
-    if (bridgeClientRef.current) {
-      return bridgeClientRef.current;
-    }
-    if (!bridgeClientPromiseRef.current) {
-      bridgeClientPromiseRef.current = createBridgeClient().then((client) => {
-        bridgeClientRef.current = client;
-        return client;
-      });
-    }
-
-    return bridgeClientPromiseRef.current;
-  }, []);
-
-  const createChatCallbacks = useCallback(
-    () => ({
-      onError: (error: Error) => {
-        pushError("stream.failed", error);
-      },
-      onFinish: ({ message }: { message: UIMessage }) => {
-        pushDebug("stream.completed", {
-          selectedModelId: selectedModelIdRef.current,
-          assistantMessageId: message.id,
-        });
-      },
-    }),
-    [pushDebug, pushError],
-  );
-
-  const refreshModels = useCallback(async () => {
-    if (refreshInFlightRef.current) {
-      pushDebug("refreshModels.reusedInFlight");
-      return refreshInFlightRef.current;
-    }
-
-    setStatus("Loading models...");
-    pushDebug("refreshModels.started");
-
-    const refreshTask = (async () => {
-      try {
-        const client = await ensureBridgeClient();
-        const googleModels = await client.listModels();
-
-        setModels(googleModels);
-        pushDebug("refreshModels.loaded", {
-          count: googleModels.length,
-          modelIds: googleModels.map((model) => model.id),
-        });
-
-        if (googleModels.length === 0) {
-          setSelectedModelId("");
-          setStatus("No connected Google models.");
-          pushDebug("refreshModels.empty");
-          return;
-        }
-
-        const preferred = googleModels.find(
-          (model) => model.id === DEFAULT_MODEL_ID,
-        );
-        setSelectedModelId((current) => {
-          if (googleModels.some((model) => model.id === current))
-            return current;
-          return preferred?.id ?? googleModels[0]?.id ?? "";
-        });
-
-        setStatus("Ready");
-      } catch (error) {
-        pushError("refreshModels.failed", error);
-        setStatus("Failed to load models");
-      }
-    })();
-
-    refreshInFlightRef.current = refreshTask.finally(() => {
-      refreshInFlightRef.current = null;
-    });
-
-    return refreshInFlightRef.current;
-  }, [ensureBridgeClient, pushDebug, pushError]);
+  const selectedModelId =
+    models.find((model) => model.id === requestedModelId)?.id ??
+    models.find((model) => model.id === DEFAULT_MODEL_ID)?.id ??
+    models[0]?.id ??
+    "";
 
   const {
     messages,
@@ -148,19 +53,35 @@ export function App() {
     error,
     status: chatStatus,
   } = useChat({
-    chat: chat ?? unavailableChatRef.current,
+    transport: transport ?? unavailableChatTransport,
   });
 
-  const isLoading = chatStatus === "submitted" || chatStatus === "streaming";
-  const isChatReady = chat !== null;
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-  const handleSubmit = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!input.trim() || isLoading || !selectedModelId || !isChatReady) return;
+  const isLoading = chatStatus === "submitted" || chatStatus === "streaming";
+  const isModelsLoading = status === "loading";
+  const hasModelsFailure = status === "error" && models.length === 0;
+  const hasTransportFailure = transportError != null;
+
+  const statusText = isModelsLoading
+    ? "Loading..."
+    : hasModelsFailure
+      ? "Failed to load models"
+      : `${models.length} models connected`;
+
+  async function handleSubmit(event?: React.FormEvent) {
+    event?.preventDefault();
 
     const prompt = input.trim();
+    if (!prompt || isLoading || !selectedModelId || !isChatReady) {
+      return;
+    }
+
     clearError();
     setInput("");
+
     await sendMessage(
       { text: prompt },
       {
@@ -169,98 +90,37 @@ export function App() {
         },
       },
     );
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    if (error) {
-      clearError();
-    }
-    setInput(e.target.value);
-  };
-
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages]);
-
-  useEffect(() => {
-    if (startupRefreshTriggeredRef.current) return;
-
-    startupRefreshTriggeredRef.current = true;
-    void refreshModels();
-  }, [refreshModels]);
-
-  useEffect(() => {
-    let disposed = false;
-
-    void ensureBridgeClient()
-      .then((client) => client.getChatTransport())
-      .then((nextTransport) => {
-        if (disposed) {
-          return;
-        }
-
-        // `useChat` does not hot-swap `transport`, so bootstrap the bridge
-        // transport once and vary the selected model per request instead.
-        setChat(
-          new Chat<UIMessage>({
-            transport: nextTransport,
-            ...createChatCallbacks(),
-          }),
-        );
-        pushDebug("chatTransport.loaded");
-      })
-      .catch((error) => {
-        if (disposed) {
-          return;
-        }
-
-        setChat(null);
-        pushError("chatTransport.failed", error);
-      });
-
-    return () => {
-      disposed = true;
-      const client = bridgeClientRef.current;
-      bridgeClientRef.current = null;
-      bridgeClientPromiseRef.current = null;
-      void client?.close().catch(() => undefined);
-    };
-  }, [createChatCallbacks, ensureBridgeClient, pushDebug, pushError]);
+  }
 
   return (
-    <div className="flex flex-col h-screen bg-[#0b1220] text-[#e5edf8] font-sans">
-      {/* Header */}
-      <header className="flex items-center justify-between px-6 py-4 border-b border-[#223557] bg-[#101a2f] shrink-0">
+    <div className="flex h-screen flex-col bg-[#0b1220] font-sans text-[#e5edf8]">
+      <header className="flex shrink-0 items-center justify-between border-b border-[#223557] bg-[#101a2f] px-6 py-4">
         <div>
-          <h1 className="text-xl font-semibold m-0 tracking-wide">
+          <h1 className="m-0 text-xl font-semibold tracking-wide">
             LLM Bridge
           </h1>
-          <p className="text-sm text-[#94a7c4] mt-1 m-0">
-            {status === "Loading models..."
-              ? "Loading..."
-              : `${models.length} models connected`}
-          </p>
+          <p className="m-0 mt-1 text-sm text-[#94a7c4]">{statusText}</p>
         </div>
 
         <div className="flex items-center gap-4">
           <button
             type="button"
-            onClick={() => void refreshModels()}
-            disabled={status === "Loading models..."}
-            className="p-2 rounded-lg bg-[#0d1730] border border-[#334b75] text-[#e5edf8] hover:bg-[#223557] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Refresh Models"
+            onClick={() => {
+              void refresh();
+            }}
+            disabled={isModelsLoading}
+            className="rounded-lg border border-[#334b75] bg-[#0d1730] p-2 text-[#e5edf8] transition-colors hover:bg-[#223557] disabled:cursor-not-allowed disabled:opacity-50"
+            title="Refresh models"
           >
             <RefreshCw
-              className={`w-5 h-5 ${status === "Loading models..." ? "animate-spin" : ""}`}
+              className={`h-5 w-5 ${isModelsLoading ? "animate-spin" : ""}`}
             />
           </button>
+
           <select
-            className="px-4 py-2 rounded-lg bg-[#0d1730] border border-[#334b75] text-[#e5edf8] focus:outline-none focus:border-blue-500 min-w-[200px]"
+            className="min-w-[200px] rounded-lg border border-[#334b75] bg-[#0d1730] px-4 py-2 text-[#e5edf8] focus:border-blue-500 focus:outline-none"
             value={selectedModelId}
-            onChange={(event) => setSelectedModelId(event.target.value)}
+            onChange={(event) => setRequestedModelId(event.target.value)}
             disabled={models.length === 0}
           >
             {models.length === 0 ? (
@@ -276,19 +136,18 @@ export function App() {
         </div>
       </header>
 
-      {/* Chat Messages Area */}
-      <main className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-8">
+      <main className="flex-1 space-y-8 overflow-y-auto p-4 sm:p-6">
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-[#94a7c4] space-y-4">
-            <Bot className="w-16 h-16 opacity-50" />
+          <div className="flex h-full flex-col items-center justify-center space-y-4 text-[#94a7c4]">
+            <Bot className="h-16 w-16 opacity-50" />
             <h2 className="text-xl font-medium">How can I help you today?</h2>
-            <p className="text-sm opacity-75 text-center max-w-md">
-              Type a message below to start chatting. The AI SDK will stream the
-              response directly via your local Bridge model.
+            <p className="max-w-md text-center text-sm opacity-75">
+              Type a message below to start chatting. The bridge chat transport
+              handles the connection to your local extension.
             </p>
           </div>
         ) : (
-          <div className="max-w-4xl mx-auto space-y-8 pb-4">
+          <div className="mx-auto max-w-4xl space-y-8 pb-4">
             {messages.map((message) => (
               <div
                 key={message.id}
@@ -297,33 +156,30 @@ export function App() {
                 }`}
               >
                 <div
-                  className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-sm
-                    ${
-                      message.role === "user"
-                        ? "bg-blue-600 text-white"
-                        : "bg-[#223557] text-[#e5edf8]"
-                    }
-                  `}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full shadow-sm ${
+                    message.role === "user"
+                      ? "bg-blue-600 text-white"
+                      : "bg-[#223557] text-[#e5edf8]"
+                  }`}
                 >
                   {message.role === "user" ? (
-                    <User className="w-5 h-5" />
+                    <User className="h-5 w-5" />
                   ) : (
-                    <Bot className="w-5 h-5" />
+                    <Bot className="h-5 w-5" />
                   )}
                 </div>
+
                 <div
-                  className={`flex flex-col max-w-[85%] ${
+                  className={`flex max-w-[85%] flex-col ${
                     message.role === "user" ? "items-end" : "items-start"
                   }`}
                 >
                   <div
-                    className={`px-5 py-3.5 rounded-2xl whitespace-pre-wrap break-words leading-relaxed
-                      ${
-                        message.role === "user"
-                          ? "bg-blue-600 text-white rounded-tr-sm"
-                          : "bg-[#101a2f] text-[#e5edf8] border border-[#223557] rounded-tl-sm"
-                      }
-                    `}
+                    className={`break-words whitespace-pre-wrap rounded-2xl px-5 py-3.5 leading-relaxed ${
+                      message.role === "user"
+                        ? "rounded-tr-sm bg-blue-600 text-white"
+                        : "rounded-tl-sm border border-[#223557] bg-[#101a2f] text-[#e5edf8]"
+                    }`}
                   >
                     {getMessageText(message)}
                   </div>
@@ -331,35 +187,38 @@ export function App() {
               </div>
             ))}
 
-            {/* Loading Indicator */}
             {chatStatus === "submitted" &&
               messages[messages.length - 1]?.role === "user" && (
-                <div className="flex gap-4 md:gap-6 flex-row max-w-4xl mx-auto">
-                  <div className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-sm bg-[#223557] text-[#e5edf8]">
-                    <Bot className="w-5 h-5" />
+                <div className="mx-auto flex max-w-4xl gap-4 md:gap-6">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#223557] text-[#e5edf8] shadow-sm">
+                    <Bot className="h-5 w-5" />
                   </div>
-                  <div className="px-5 py-4 rounded-2xl bg-[#101a2f] border border-[#223557] rounded-tl-sm flex items-center gap-2">
+                  <div className="flex items-center gap-2 rounded-2xl rounded-tl-sm border border-[#223557] bg-[#101a2f] px-5 py-4">
                     <span
-                      className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
+                      className="h-2 w-2 animate-bounce rounded-full bg-[#94a7c4]"
                       style={{ animationDelay: "0ms" }}
-                    ></span>
+                    />
                     <span
-                      className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
+                      className="h-2 w-2 animate-bounce rounded-full bg-[#94a7c4]"
                       style={{ animationDelay: "150ms" }}
-                    ></span>
+                    />
                     <span
-                      className="w-2 h-2 rounded-full bg-[#94a7c4] animate-bounce"
+                      className="h-2 w-2 animate-bounce rounded-full bg-[#94a7c4]"
                       style={{ animationDelay: "300ms" }}
-                    ></span>
+                    />
                   </div>
                 </div>
               )}
 
-            {/* Error Message */}
-            {error && (
+            {(error || hasModelsFailure || hasTransportFailure) && (
               <div className="flex justify-center">
-                <div className="bg-red-900/50 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg text-sm max-w-lg text-center">
-                  An error occurred: {error.message}. Please try again.
+                <div className="max-w-lg rounded-lg border border-red-500/50 bg-red-900/50 px-4 py-3 text-center text-sm text-red-200">
+                  {error?.message ??
+                    modelsError?.message ??
+                    transportError?.message ??
+                    (hasModelsFailure
+                      ? "Failed to load models from the bridge."
+                      : "Failed to initialize the bridge chat transport.")}
                 </div>
               </div>
             )}
@@ -369,49 +228,55 @@ export function App() {
         )}
       </main>
 
-      {/* Input Area */}
-      <footer className="p-4 sm:p-6 bg-[#0b1220] border-t border-[#223557] shrink-0">
+      <footer className="shrink-0 border-t border-[#223557] bg-[#0b1220] p-4 sm:p-6">
         <form
-          onSubmit={handleSubmit}
-          className="max-w-4xl mx-auto relative flex items-end bg-[#101a2f] border border-[#334b75] rounded-2xl focus-within:ring-2 focus-within:ring-blue-500/50 focus-within:border-blue-500 transition-all shadow-sm"
+          onSubmit={(event) => {
+            void handleSubmit(event);
+          }}
+          className="relative mx-auto flex max-w-4xl items-end rounded-2xl border border-[#334b75] bg-[#101a2f] shadow-sm transition-all focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/50"
         >
           <textarea
-            className="w-full bg-transparent text-[#e5edf8] placeholder-[#94a7c4] border-none focus:ring-0 resize-none py-4 pl-5 pr-14 max-h-32 min-h-[56px] focus:outline-none rounded-2xl"
+            className="max-h-32 min-h-[56px] w-full resize-none rounded-2xl border-none bg-transparent py-4 pl-5 pr-14 text-[#e5edf8] placeholder-[#94a7c4] focus:outline-none focus:ring-0"
             placeholder={
               models.length === 0
                 ? "Connecting to models..."
-                : !isChatReady
-                  ? "Preparing selected model..."
+                : !isChatReady || isTransportLoading
+                  ? "Preparing chat transport..."
                   : "Message the AI..."
             }
             value={input}
-            onChange={handleInputChange}
+            onChange={(event) => {
+              if (error) {
+                clearError();
+              }
+              setInput(event.target.value);
+            }}
             disabled={models.length === 0 || isLoading || !isChatReady}
             rows={1}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (input.trim() && !isLoading && isChatReady) {
-                  void handleSubmit();
-                }
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void handleSubmit();
               }
             }}
           />
+
           <button
             type="submit"
             disabled={
               !input.trim() || isLoading || models.length === 0 || !isChatReady
             }
-            className="absolute right-2 bottom-2 p-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:bg-transparent disabled:text-[#94a7c4] flex items-center justify-center"
+            className="absolute right-2 bottom-2 flex items-center justify-center rounded-xl bg-blue-600 p-2 text-white transition-colors hover:bg-blue-700 disabled:bg-transparent disabled:text-[#94a7c4] disabled:opacity-50"
           >
             {isLoading ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
+              <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
-              <Send className="w-5 h-5" />
+              <Send className="h-5 w-5" />
             )}
           </button>
         </form>
-        <p className="text-center text-xs text-[#94a7c4] mt-3">
+
+        <p className="mt-3 text-center text-xs text-[#94a7c4]">
           Powered by Vercel AI SDK and @llm-bridge/client
         </p>
       </footer>

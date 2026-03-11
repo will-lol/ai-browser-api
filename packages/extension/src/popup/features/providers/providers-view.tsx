@@ -1,13 +1,13 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react";
 import { useMemo, useState } from "react";
+import { useMutationResource } from "@llm-bridge/reactive-core";
 import { Button } from "@/shared/ui/button";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { SearchInput } from "@/popup/components/search-input";
 import { useFrozenOrder } from "@/popup/hooks/use-frozen-order";
-import { providersResultAtom } from "@/app/state/runtime-data";
+import { useProvidersState } from "@/app/state/runtime-data";
 import {
-  disconnectProviderAtom,
-  openProviderAuthWindowAtom,
+  disconnectProviderMutation,
+  openProviderAuthWindowMutation,
 } from "@/app/state/runtime-mutations";
 
 export function ProvidersView() {
@@ -16,17 +16,15 @@ export function ProvidersView() {
     providerID: string;
     type: "connect" | "disconnect";
   } | null>(null);
-  const providersResult = useAtomValue(providersResultAtom);
-  const disconnectProvider = useAtomSet(disconnectProviderAtom, {
-    mode: "promise",
-  });
-  const openProviderAuthWindow = useAtomSet(openProviderAuthWindowAtom, {
-    mode: "promise",
-  });
+  const providersState = useProvidersState();
+  const disconnectProvider = useMutationResource(disconnectProviderMutation);
+  const openProviderAuthWindow = useMutationResource(
+    openProviderAuthWindowMutation,
+  );
 
   const providers = useMemo(
-    () => Result.getOrElse(providersResult, () => []),
-    [providersResult],
+    () => providersState.value ?? [],
+    [providersState.value],
   );
 
   const frozenOrder = useFrozenOrder(
@@ -61,7 +59,7 @@ export function ProvidersView() {
     );
   }, [frozenOrder, providers, search]);
 
-  if (providersResult._tag === "Failure" && providers.length === 0) {
+  if (providersState.hasError && providers.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
         <p className="text-xs text-destructive">Failed to load providers.</p>
@@ -69,7 +67,7 @@ export function ProvidersView() {
     );
   }
 
-  if (providersResult._tag === "Initial") {
+  if (providersState.isLoading && providers.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
         <p className="text-xs text-muted-foreground">Loading providers...</p>
@@ -119,7 +117,7 @@ export function ProvidersView() {
                         providerID: provider.id,
                         type: "disconnect",
                       });
-                      void disconnectProvider({
+                      void disconnectProvider.execute({
                         providerID: provider.id,
                       })
                         .catch((error) => {
@@ -142,9 +140,9 @@ export function ProvidersView() {
                       providerID: provider.id,
                       type: "connect",
                     });
-                    void openProviderAuthWindow({
-                      providerID: provider.id,
-                    })
+                      void openProviderAuthWindow.execute({
+                        providerID: provider.id,
+                      })
                       .catch((error) => {
                         console.error(
                           "[providers-view] failed to open auth window",

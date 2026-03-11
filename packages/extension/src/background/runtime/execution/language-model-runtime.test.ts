@@ -1,13 +1,14 @@
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import { APICallError } from "@ai-sdk/provider";
 import { RuntimeUpstreamServiceError } from "@llm-bridge/contracts";
+import * as Effect from "effect/Effect";
 
-const getAuthMock = mock(async () => ({
+const getAuthMock = mock(async (_providerID?: string) => ({
   type: "api" as const,
   key: "token-1",
 }));
-const setAuthMock = mock(async () => undefined);
-const removeAuthMock = mock(async () => undefined);
+const setAuthMock = mock(async (_providerID?: string, _value?: unknown) => undefined);
+const removeAuthMock = mock(async (_providerID?: string) => undefined);
 
 const getProviderMock = mock(async () => ({
   id: "openai",
@@ -101,22 +102,25 @@ const adapter = {
 };
 
 mock.module("@/background/runtime/auth/auth-store", () => ({
-  getAuth: getAuthMock,
-  setAuth: setAuthMock,
-  removeAuth: removeAuthMock,
+  getAuth: () => Effect.promise(() => getAuthMock()),
+  setAuth: (providerID: string, value: unknown) =>
+    Effect.promise(() => setAuthMock(providerID, value)),
+  removeAuth: (providerID: string) =>
+    Effect.promise(() => removeAuthMock(providerID)),
+  runSecurityEffect: <A>(effect: Effect.Effect<A>) => Effect.runPromise(effect),
 }));
 
 mock.module("@/background/runtime/catalog/provider-registry", () => ({
-  getProvider: getProviderMock,
-  getModel: getModelMock,
-  listModelRows: mock(async () => []),
-  listProviderRows: mock(async () => []),
-  ensureProviderCatalog: mock(async () => undefined),
-  refreshProviderCatalog: mock(async () => undefined),
-  refreshProviderCatalogForProvider: mock(async () => undefined),
+  getProvider: () => Effect.promise(() => getProviderMock()),
+  getModel: () => Effect.promise(() => getModelMock()),
+  listModelRows: mock(() => Effect.succeed([])),
+  listProviderRows: mock(() => Effect.succeed([])),
+  ensureProviderCatalog: mock(() => Effect.void),
+  refreshProviderCatalog: mock(() => Effect.succeed(Date.now())),
+  refreshProviderCatalogForProvider: mock(() => Effect.void),
 }));
 
-mock.module("@/background/runtime/adapters", () => ({
+mock.module("@/background/runtime/providers/adapters", () => ({
   resolveAdapterForModel: () => adapter,
   parseAdapterStoredAuth: () => ({
     type: "api" as const,
@@ -146,11 +150,12 @@ afterAll(() => {
 
 describe("language-model-runtime error normalization", () => {
   it("wraps generate provider failures as RuntimeUpstreamServiceError", async () => {
-    await expect(
-      runLanguageModelGenerate({
-        modelID: "openai/gpt-4o-mini",
-        origin: "https://example.test",
-        sessionID: "session-1",
+    const result = await Effect.runPromise(
+      Effect.either(
+        runLanguageModelGenerate({
+          modelID: "openai/gpt-4o-mini",
+          origin: "https://example.test",
+          sessionID: "session-1",
         requestID: "request-1",
         options: {
           prompt: [
@@ -160,8 +165,13 @@ describe("language-model-runtime error normalization", () => {
             },
           ],
         },
-      }),
-    ).rejects.toMatchObject({
+        }),
+      ),
+    );
+
+    expect("left" in result).toBe(true);
+    if ("left" in result) {
+      expect(result.left).toMatchObject({
       _tag: "RuntimeUpstreamServiceError",
       providerID: "openai",
       operation: "generate",
@@ -171,15 +181,17 @@ describe("language-model-runtime error normalization", () => {
       },
       retryable: true,
       message: "Rate limited",
-    } satisfies Partial<RuntimeUpstreamServiceError>);
+      } satisfies Partial<RuntimeUpstreamServiceError>);
+    }
   });
 
   it("wraps stream provider failures as RuntimeUpstreamServiceError", async () => {
-    await expect(
-      runLanguageModelStream({
-        modelID: "openai/gpt-4o-mini",
-        origin: "https://example.test",
-        sessionID: "session-1",
+    const result = await Effect.runPromise(
+      Effect.either(
+        runLanguageModelStream({
+          modelID: "openai/gpt-4o-mini",
+          origin: "https://example.test",
+          sessionID: "session-1",
         requestID: "request-2",
         options: {
           prompt: [
@@ -189,8 +201,13 @@ describe("language-model-runtime error normalization", () => {
             },
           ],
         },
-      }),
-    ).rejects.toMatchObject({
+        }),
+      ),
+    );
+
+    expect("left" in result).toBe(true);
+    if ("left" in result) {
+      expect(result.left).toMatchObject({
       _tag: "RuntimeUpstreamServiceError",
       providerID: "openai",
       operation: "stream",
@@ -200,6 +217,7 @@ describe("language-model-runtime error normalization", () => {
       },
       retryable: true,
       message: "Overloaded",
-    } satisfies Partial<RuntimeUpstreamServiceError>);
+      } satisfies Partial<RuntimeUpstreamServiceError>);
+    }
   });
 });

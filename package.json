@@ -6,9 +6,9 @@
   ],
   "scripts": {
     "dev": "bun run --workspaces --parallel dev",
-    "build": "bun run --filter @llm-bridge/contracts build && bun run --filter @llm-bridge/runtime-events build && bun run --filter @llm-bridge/runtime-core build && bun run --filter @llm-bridge/bridge-codecs build && bun run --filter @llm-bridge/client build && bun run --filter @llm-bridge/extension build && bun run --filter @llm-bridge/example-app build",
+    "build": "bun run --filter @llm-bridge/contracts build && bun run --filter @llm-bridge/runtime-events build && bun run --filter @llm-bridge/runtime-core build && bun run --filter @llm-bridge/bridge-codecs build && bun run --filter @llm-bridge/client build && bun run --filter @llm-bridge/reactive-core build && bun run --filter @llm-bridge/client-react build && bun run --filter @llm-bridge/extension build && bun run --filter @llm-bridge/example-app build",
     "zip": "bun run --filter @llm-bridge/extension zip",
-    "typecheck": "bun run --filter @llm-bridge/bridge-codecs build && bun run --filter @llm-bridge/client build && bun run --workspaces --sequential typecheck",
+    "typecheck": "bun run --filter @llm-bridge/bridge-codecs build && bun run --filter @llm-bridge/client build && bun run --filter @llm-bridge/reactive-core build && bun run --filter @llm-bridge/client-react build && bun run --workspaces --sequential typecheck",
     "lint": "bun run --workspaces --parallel lint",
     "knip": "knip"
   },

@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import * as Effect from "effect/Effect";
 
 const MAX_PENDING_REQUESTS = 3;
 const MAX_PENDING_REQUESTS_PER_ORIGIN = 2;
@@ -168,12 +169,14 @@ mock.module("@/app/events/runtime-events", () => ({
 }));
 
 mock.module("@/background/runtime/permissions/permission-targets", () => ({
-  resolveTrustedPermissionTargets: async (modelIds: string[]) =>
-    new Map(
-      modelIds.flatMap((modelId) => {
-        const target = trustedTargetsById.get(modelId);
-        return target ? [[modelId, target] as const] : [];
-      }),
+  resolveTrustedPermissionTargets: (modelIds: string[]) =>
+    Effect.succeed(
+      new Map(
+        modelIds.flatMap((modelId) => {
+          const target = trustedTargetsById.get(modelId);
+          return target ? [[modelId, target] as const] : [];
+        }),
+      ),
     ),
 }));
 
@@ -270,12 +273,12 @@ describe("createPermissionRequest", () => {
       status: "pending",
     });
 
-    const result = await createPermissionRequest({
+    const result = await Effect.runPromise(createPermissionRequest({
       origin: TEST_ORIGIN,
       modelId: "openai/gpt-4o-mini",
       modelName: "spoofed",
       provider: "spoofed",
-    });
+    }));
 
     expect(result).toEqual({
       status: "requested",
@@ -313,12 +316,12 @@ describe("createPermissionRequest", () => {
     });
 
     await expect(
-      createPermissionRequest({
+      Effect.runPromise(createPermissionRequest({
         origin: TEST_ORIGIN,
         modelId: "openai/model-3",
         modelName: "Model 3",
         provider: "openai",
-      }),
+      })),
     ).rejects.toThrow(/Too many pending permission requests for origin/);
 
     expect(pendingRows.map((row) => row.id)).toEqual([
@@ -367,12 +370,12 @@ describe("createPermissionRequest", () => {
     });
 
     await expect(
-      createPermissionRequest({
+      Effect.runPromise(createPermissionRequest({
         origin: "https://four.test",
         modelId: "openai/model-4",
         modelName: "Model 4",
         provider: "openai",
-      }),
+      })),
     ).rejects.toThrow(/Too many pending permission requests$/);
 
     expect(pendingRows.map((row) => row.id)).toEqual([
@@ -421,12 +424,12 @@ describe("createPermissionRequest", () => {
     });
     addPendingPermission("https://three.test", "openai/model-3");
 
-    const result = await createPermissionRequest({
+    const result = await Effect.runPromise(createPermissionRequest({
       origin: "https://four.test",
       modelId: "openai/model-4",
       modelName: "Model 4",
       provider: "openai",
-    });
+    }));
 
     expect(result.status).toBe("requested");
     expect(pendingRows.map((row) => row.id)).toEqual([

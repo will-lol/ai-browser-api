@@ -1,9 +1,8 @@
-import { Result, useAtomValue } from "@effect-atom/atom-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PendingRequestCard } from "@/app/components/pending-request-card";
 import { Toaster, toast } from "sonner";
 import { currentOrigin } from "@/app/api/runtime-api";
-import { floatingPermissionDataResultAtom } from "@/app/state/runtime-data";
+import { useFloatingPermissionData } from "@/app/state/runtime-data";
 
 interface FloatingPermissionPromptProps {
   className?: string;
@@ -15,16 +14,13 @@ export function FloatingPermissionPrompt({
   containerMode = "fixed",
 }: FloatingPermissionPromptProps = {}) {
   const origin = currentOrigin();
-  const dataResult = useAtomValue(floatingPermissionDataResultAtom(origin));
+  const dataState = useFloatingPermissionData(origin);
   const openToastIdsRef = useRef<Set<string>>(new Set());
   const [softDismissedIds, setSoftDismissedIds] = useState<Set<string>>(
     () => new Set(),
   );
 
-  const data = useMemo(
-    () => Result.getOrElse(dataResult, () => null),
-    [dataResult],
-  );
+  const data = dataState.value;
   const pendingRequests = useMemo(() => data?.pendingRequests ?? [], [data]);
   const originEnabled = data?.originState.enabled ?? true;
 

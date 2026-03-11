@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import * as Effect from "effect/Effect";
 import { getModelsDevData, modelsDevData } from "@/background/runtime/catalog/models-dev";
 import {
   parseModelsDevData,
@@ -100,7 +101,7 @@ describe("models.dev snapshot parsing", () => {
   });
 
   it("returns the canonical typed snapshot through getModelsDevData", async () => {
-    const parsed = await getModelsDevData();
+    const parsed = await Effect.runPromise(getModelsDevData());
 
     expect(parsed).toBe(modelsDevData);
     expect(Object.keys(parsed).length).toBeGreaterThan(0);

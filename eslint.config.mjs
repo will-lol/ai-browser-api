@@ -28,7 +28,9 @@ export default defineConfig(
   {
     files: [
       "packages/client/src/**/*.{ts,tsx,mts,cts}",
+      "packages/client-react/src/**/*.{ts,tsx,mts,cts}",
       "packages/contracts/src/**/*.{ts,tsx,mts,cts}",
+      "packages/reactive-core/src/**/*.{ts,tsx,mts,cts}",
       "packages/runtime-core/src/**/*.{ts,tsx,mts,cts}",
       "packages/example-app/src/**/*.{ts,tsx,mts,cts}",
       "packages/extension/src/**/*.{ts,tsx,mts,cts}",
@@ -59,6 +61,8 @@ export default defineConfig(
   },
   {
     files: [
+      "packages/client-react/**/*.{js,jsx,ts,tsx}",
+      "packages/reactive-core/**/*.{js,jsx,ts,tsx}",
       "packages/extension/**/*.{js,jsx,ts,tsx}",
       "packages/example-app/**/*.{js,jsx,ts,tsx}",
     ],
@@ -78,6 +82,79 @@ export default defineConfig(
     },
   },
   {
+    files: ["packages/client/**/*.{js,jsx,ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["react", "react-dom", "@effect-atom/*", "@effect/experimental*"],
+              message:
+                "@llm-bridge/client must remain framework-agnostic and must not depend on React or effect-atom.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/client-react/**/*.{js,jsx,ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@llm-bridge/extension",
+                "@llm-bridge/contracts",
+                "@llm-bridge/runtime-core",
+                "@llm-bridge/runtime-events",
+                "@llm-bridge/bridge-codecs",
+                "@/app/*",
+                "@/background/*",
+                "@/popup/*",
+                "@/content/*",
+              ],
+              message:
+                "@llm-bridge/client-react may only depend on the public client package and the private reactive core.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/reactive-core/**/*.{js,jsx,ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@llm-bridge/client",
+                "@llm-bridge/client-react",
+                "@llm-bridge/extension",
+                "@llm-bridge/contracts",
+                "@llm-bridge/runtime-core",
+                "@llm-bridge/runtime-events",
+                "@llm-bridge/bridge-codecs",
+                "@/app/*",
+                "@/background/*",
+                "@/popup/*",
+                "@/content/*",
+              ],
+              message:
+                "@llm-bridge/reactive-core must remain generic and may not depend on product-specific packages.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["packages/extension/**/*.{js,jsx,ts,tsx}"],
     rules: {
       "no-restricted-imports": [
@@ -91,9 +168,10 @@ export default defineConfig(
                 "../../client/src/*",
                 "../../../client/src/*",
                 "../../../../client/src/*",
+                "@llm-bridge/client-react",
               ],
               message:
-                "Do not import internal src files from other workspace packages.",
+                "Extension code must not import internal src files from other workspace packages or the public client-react package.",
             },
           ],
         },

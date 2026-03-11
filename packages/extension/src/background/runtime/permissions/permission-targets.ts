@@ -1,4 +1,5 @@
 import { runtimeDb } from "@/background/storage/runtime-db";
+import * as Effect from "effect/Effect";
 
 interface TrustedPermissionTarget {
   modelId: string;
@@ -22,94 +23,102 @@ type TrustedPermissionTargetResolution =
       provider: string;
     };
 
-async function resolveTrustedPermissionTargetResolutions(
+function resolveTrustedPermissionTargetResolutions(
   modelIds: ReadonlyArray<string>,
-): Promise<Map<string, TrustedPermissionTargetResolution>> {
-  const uniqueModelIds = Array.from(new Set(modelIds));
-  if (uniqueModelIds.length === 0) {
-    return new Map();
-  }
-
-  const modelRows = await runtimeDb.models.bulkGet(uniqueModelIds);
-  const providerIDs = Array.from(
-    new Set(modelRows.flatMap((row) => (row ? [row.providerID] : []))),
-  );
-  const providerRows =
-    providerIDs.length === 0
-      ? []
-      : await runtimeDb.providers.bulkGet(providerIDs);
-  const providerById = new Map(
-    providerRows
-      .filter((row): row is NonNullable<typeof row> => row != null)
-      .map((row) => [row.id, row] as const),
-  );
-  const resolutions = new Map<string, TrustedPermissionTargetResolution>();
-
-  modelRows.forEach((row, index) => {
-    const modelId = uniqueModelIds[index];
-    if (!modelId) return;
-
-    if (!row) {
-      resolutions.set(modelId, {
-        status: "missing",
-        modelId,
-      });
-      return;
+): Effect.Effect<Map<string, TrustedPermissionTargetResolution>> {
+  return Effect.gen(function* () {
+    const uniqueModelIds = Array.from(new Set(modelIds));
+    if (uniqueModelIds.length === 0) {
+      return new Map();
     }
 
-    const provider = providerById.get(row.providerID);
-    if (!provider) {
-      resolutions.set(modelId, {
-        status: "missing",
-        modelId,
-      });
-      return;
-    }
+    const modelRows = yield* Effect.promise(() =>
+      runtimeDb.models.bulkGet(uniqueModelIds),
+    );
+    const providerIDs = Array.from(
+      new Set(modelRows.flatMap((row) => (row ? [row.providerID] : []))),
+    );
+    const providerRows =
+      providerIDs.length === 0
+        ? []
+        : yield* Effect.promise(() => runtimeDb.providers.bulkGet(providerIDs));
+    const providerById = new Map(
+      providerRows
+        .filter((row): row is NonNullable<typeof row> => row != null)
+        .map((row) => [row.id, row] as const),
+    );
+    const resolutions = new Map<string, TrustedPermissionTargetResolution>();
 
-    if (!provider.connected) {
-      resolutions.set(modelId, {
-        status: "disconnected",
-        modelId,
-        provider: row.providerID,
-      });
-      return;
-    }
+    modelRows.forEach((row, index) => {
+      const modelId = uniqueModelIds[index];
+      if (!modelId) return;
 
-    resolutions.set(modelId, {
-      status: "resolved",
-      target: {
-        modelId,
-        modelName: row.info.name,
-        provider: row.providerID,
-        capabilities: [...row.capabilities],
-      },
+      if (!row) {
+        resolutions.set(modelId, {
+          status: "missing",
+          modelId,
+        });
+        return;
+      }
+
+      const provider = providerById.get(row.providerID);
+      if (!provider) {
+        resolutions.set(modelId, {
+          status: "missing",
+          modelId,
+        });
+        return;
+      }
+
+      if (!provider.connected) {
+        resolutions.set(modelId, {
+          status: "disconnected",
+          modelId,
+          provider: row.providerID,
+        });
+        return;
+      }
+
+      resolutions.set(modelId, {
+        status: "resolved",
+        target: {
+          modelId,
+          modelName: row.info.name,
+          provider: row.providerID,
+          capabilities: [...row.capabilities],
+        },
+      });
     });
+
+    return resolutions;
   });
-
-  return resolutions;
 }
 
-export async function resolveTrustedPermissionTargets(
+export function resolveTrustedPermissionTargets(
   modelIds: ReadonlyArray<string>,
-): Promise<Map<string, TrustedPermissionTarget>> {
-  const targets = new Map<string, TrustedPermissionTarget>();
-  const resolutions = await resolveTrustedPermissionTargetResolutions(modelIds);
+): Effect.Effect<Map<string, TrustedPermissionTarget>> {
+  return Effect.gen(function* () {
+    const targets = new Map<string, TrustedPermissionTarget>();
+    const resolutions = yield* resolveTrustedPermissionTargetResolutions(modelIds);
 
-  for (const [modelId, resolution] of resolutions) {
-    if (resolution.status !== "resolved") continue;
-    targets.set(modelId, resolution.target);
-  }
+    for (const [modelId, resolution] of resolutions) {
+      if (resolution.status !== "resolved") continue;
+      targets.set(modelId, resolution.target);
+    }
 
-  return targets;
+    return targets;
+  });
 }
 
-export async function resolveTrustedPermissionTarget(modelId: string) {
-  return (
-    (await resolveTrustedPermissionTargetResolutions([modelId])).get(
-      modelId,
-    ) ?? {
-      status: "missing",
-      modelId,
-    }
-  );
+export function resolveTrustedPermissionTarget(modelId: string) {
+  return Effect.gen(function* () {
+    return (
+      (yield* resolveTrustedPermissionTargetResolutions([modelId])).get(
+        modelId,
+      ) ?? {
+        status: "missing" as const,
+        modelId,
+      }
+    );
+  });
 }

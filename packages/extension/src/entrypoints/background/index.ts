@@ -235,7 +235,7 @@ function createRuntimeLayer() {
 
 async function sanitizePendingRequests() {
   try {
-    await sanitizePendingPermissionRequests();
+    await Effect.runPromise(sanitizePendingPermissionRequests());
   } catch (error) {
     console.warn("pending request sanitation failed", error);
   }
@@ -266,7 +266,9 @@ function startRuntimeCore(layers: ReturnType<typeof createRuntimeLayer>) {
 export default defineBackground(() => {
   const runtimeLayer = createRuntimeLayer();
 
-  void ensureProviderCatalog();
+  void Effect.runPromise(ensureProviderCatalog()).catch((error) => {
+    console.warn("provider catalog initialization failed", error);
+  });
 
   void startRuntimeCore(runtimeLayer).finally(() => {
     void updateActionState();

@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import * as Effect from "effect/Effect";
 
 const TEST_ORIGIN = "https://example.test";
 const STALE_MODEL_ID = "missing/model";
@@ -145,7 +146,7 @@ mock.module("@/background/runtime/permissions/permission-wait", () => ({
 }));
 
 mock.module("@/background/runtime/permissions/permission-targets", () => ({
-  resolveTrustedPermissionTargets: mock(async () => new Map()),
+  resolveTrustedPermissionTargets: mock(() => Effect.succeed(new Map())),
 }));
 
 mock.module("@/background/runtime/core/util", () => ({
@@ -210,7 +211,9 @@ describe("sanitizePendingPermissionRequests", () => {
       updatedAt: 1,
     });
 
-    const removedRequestIds = await sanitizePendingPermissionRequests();
+    const removedRequestIds = await Effect.runPromise(
+      sanitizePendingPermissionRequests(),
+    );
 
     expect(removedRequestIds).toEqual(["prm_stale"]);
     expect(Array.from(permissionRows.values())).toEqual([]);
@@ -232,7 +235,7 @@ describe("sanitizePendingPermissionRequests", () => {
         },
       },
     ]);
-    expect(await listPendingRequests()).toEqual([]);
+    expect(await Effect.runPromise(listPendingRequests())).toEqual([]);
   });
 
   it("removes disconnected-provider requests without deleting non-pending permissions", async () => {
@@ -256,7 +259,9 @@ describe("sanitizePendingPermissionRequests", () => {
       updatedAt: 1,
     });
 
-    const removedRequestIds = await sanitizePendingPermissionRequests();
+    const removedRequestIds = await Effect.runPromise(
+      sanitizePendingPermissionRequests(),
+    );
 
     expect(removedRequestIds).toEqual(["prm_disconnected"]);
     expect(Array.from(permissionRows.values())).toEqual([

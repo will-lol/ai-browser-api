@@ -1,5 +1,5 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react";
 import { useEffect, useMemo, useState } from "react";
+import { useMutationResource } from "@llm-bridge/reactive-core";
 import { ModelRow } from "@/popup/features/permissions/model-row";
 import { PendingRequestCard } from "@/app/components/pending-request-card";
 import { Button } from "@/shared/ui/button";
@@ -9,9 +9,8 @@ import { Blocks } from "lucide-react";
 import { SearchInput } from "@/popup/components/search-input";
 import { useFrozenOrder } from "@/popup/hooks/use-frozen-order";
 import { useNavigate } from "@tanstack/react-router";
-import { sitePermissionsDataResultAtom } from "@/app/state/runtime-data";
-import { setOriginEnabledAtom } from "@/app/state/runtime-mutations";
-import * as Cause from "effect/Cause";
+import { useSitePermissionsData } from "@/app/state/runtime-data";
+import { setOriginEnabledMutation } from "@/app/state/runtime-mutations";
 
 interface SitePermissionsViewProps {
   origin: string | null;
@@ -25,24 +24,13 @@ export function SitePermissionsView({
   const targetOrigin = origin ?? "";
   const hasActiveOrigin = origin != null;
   const [originTogglePending, setOriginTogglePending] = useState(false);
-  const dataResult = useAtomValue(sitePermissionsDataResultAtom(targetOrigin));
-  const setOriginEnabled = useAtomSet(setOriginEnabledAtom, {
-    mode: "promise",
-  });
+  const dataState = useSitePermissionsData(targetOrigin);
+  const setOriginEnabled = useMutationResource(setOriginEnabledMutation);
 
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const data = useMemo(
-    () => Result.getOrElse(dataResult, () => null),
-    [dataResult],
-  );
-  const hasInterruptedLoad = useMemo(
-    () =>
-      dataResult._tag === "Failure" &&
-      Cause.isInterruptedOnly(dataResult.cause),
-    [dataResult],
-  );
-  const hasLoadFailure = dataResult._tag === "Failure" && !hasInterruptedLoad;
+  const data = dataState.value;
+  const hasLoadFailure = dataState.hasError && data == null;
 
   const originEnabled = hasActiveOrigin && (data?.originState.enabled ?? true);
   const pendingRequests = useMemo(() => data?.pendingRequests ?? [], [data]);
@@ -127,9 +115,9 @@ export function SitePermissionsView({
     if (!hasLoadFailure) return;
     console.error(
       "[site-permissions] failed to load permissions data",
-      dataResult.cause,
+      dataState.error,
     );
-  }, [dataResult, hasLoadFailure]);
+  }, [dataState.error, hasLoadFailure]);
 
   if (originPending) {
     return (
@@ -159,7 +147,7 @@ export function SitePermissionsView({
     );
   }
 
-  if (dataResult._tag === "Initial" || data == null) {
+  if (dataState.isLoading || data == null) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
         <p className="text-xs text-muted-foreground">Loading models...</p>
@@ -209,7 +197,7 @@ export function SitePermissionsView({
           disabled={controlsDisabled}
           onCheckedChange={(checked) => {
             setOriginTogglePending(true);
-            void setOriginEnabled({
+            void setOriginEnabled.execute({
               enabled: checked,
               origin: targetOrigin,
             })

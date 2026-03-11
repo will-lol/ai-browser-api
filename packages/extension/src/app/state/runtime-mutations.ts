@@ -1,5 +1,4 @@
-import * as Reactivity from "@effect/experimental/Reactivity";
-import * as Effect from "effect/Effect";
+import { createMutationResource } from "@llm-bridge/reactive-core";
 import {
   cancelRuntimeProviderAuthFlow,
   disconnectRuntimeProvider,
@@ -10,153 +9,145 @@ import {
   updateRuntimeModelPermission,
   type PermissionDecision,
 } from "@/app/api/runtime-api";
-import { extensionAtomRuntime } from "@/app/state/atom-runtime";
+import { extensionReactiveRuntime } from "@/app/state/atom-runtime";
 import { runtimeReactivityKeys } from "@/app/state/runtime-reactivity";
 
-const invalidateKeys = (keys: ReadonlyArray<string>) =>
-  Reactivity.invalidate(keys);
-
-export const openProviderAuthWindowAtom = extensionAtomRuntime.fn(
-  Effect.fn(function* ({ providerID }: { providerID: string }) {
-    return yield* openRuntimeProviderAuthWindow({
-      providerID,
-    });
-  }),
+export const openProviderAuthWindowMutation = createMutationResource(
+  extensionReactiveRuntime,
+  {
+    run: ({ providerID }: { providerID: string }) =>
+      openRuntimeProviderAuthWindow({
+        providerID,
+      }),
+  },
 );
 
-export const disconnectProviderAtom = extensionAtomRuntime.fn(
-  Effect.fn(function* ({ providerID }: { providerID: string }) {
-    const result = yield* disconnectRuntimeProvider({
-      providerID,
-    });
-
-    yield* invalidateKeys([
+export const disconnectProviderMutation = createMutationResource(
+  extensionReactiveRuntime,
+  {
+    run: ({ providerID }: { providerID: string }) =>
+      disconnectRuntimeProvider({
+        providerID,
+      }),
+    invalidate: ({ providerID }) => [
       runtimeReactivityKeys.providers,
       runtimeReactivityKeys.models,
       runtimeReactivityKeys.authFlow(providerID),
-    ]);
-
-    return result;
-  }),
+    ],
+  },
 );
 
-export const startProviderAuthFlowAtom = extensionAtomRuntime.fn(
-  Effect.fn(function* ({
-    methodID,
-    providerID,
-    values,
-  }: {
-    providerID: string;
-    methodID: string;
-    values?: Record<string, string>;
-  }) {
-    const result = yield* startRuntimeProviderAuthFlow({
-      providerID,
+export const startProviderAuthFlowMutation = createMutationResource(
+  extensionReactiveRuntime,
+  {
+    run: ({
       methodID,
+      providerID,
       values,
-    });
-
-    yield* invalidateKeys([
+    }: {
+      providerID: string;
+      methodID: string;
+      values?: Record<string, string>;
+    }) =>
+      startRuntimeProviderAuthFlow({
+        providerID,
+        methodID,
+        values,
+      }),
+    invalidate: ({ providerID }) => [
       runtimeReactivityKeys.authFlow(providerID),
       runtimeReactivityKeys.providers,
       runtimeReactivityKeys.models,
-    ]);
-
-    return result;
-  }),
+    ],
+  },
 );
 
-export const cancelProviderAuthFlowAtom = extensionAtomRuntime.fn(
-  Effect.fn(function* ({
-    providerID,
-    reason,
-  }: {
-    providerID: string;
-    reason?: string;
-  }) {
-    const result = yield* cancelRuntimeProviderAuthFlow({
+export const cancelProviderAuthFlowMutation = createMutationResource(
+  extensionReactiveRuntime,
+  {
+    run: ({
       providerID,
       reason,
-    });
-
-    yield* invalidateKeys([
+    }: {
+      providerID: string;
+      reason?: string;
+    }) =>
+      cancelRuntimeProviderAuthFlow({
+        providerID,
+        reason,
+      }),
+    invalidate: ({ providerID }) => [
       runtimeReactivityKeys.authFlow(providerID),
       runtimeReactivityKeys.providers,
       runtimeReactivityKeys.models,
-    ]);
-
-    return result;
-  }),
+    ],
+  },
 );
 
-export const setOriginEnabledAtom = extensionAtomRuntime.fn(
-  Effect.fn(function* ({
-    enabled,
-    origin,
-  }: {
-    enabled: boolean;
-    origin: string;
-  }) {
-    const result = yield* setRuntimeOriginEnabled({
+export const setOriginEnabledMutation = createMutationResource(
+  extensionReactiveRuntime,
+  {
+    run: ({
       enabled,
       origin,
-    });
-
-    yield* invalidateKeys([
+    }: {
+      enabled: boolean;
+      origin: string;
+    }) =>
+      setRuntimeOriginEnabled({
+        enabled,
+        origin,
+      }),
+    invalidate: ({ origin }) => [
       runtimeReactivityKeys.origin(origin),
       runtimeReactivityKeys.permissions(origin),
       runtimeReactivityKeys.pending(origin),
-    ]);
-
-    return result;
-  }),
+    ],
+  },
 );
 
-export const updateModelPermissionAtom = extensionAtomRuntime.fn(
-  Effect.fn(function* ({
-    modelId,
-    origin,
-    status,
-  }: {
-    modelId: string;
-    origin: string;
-    status: "allowed" | "denied";
-  }) {
-    const result = yield* updateRuntimeModelPermission({
+export const updateModelPermissionMutation = createMutationResource(
+  extensionReactiveRuntime,
+  {
+    run: ({
       modelId,
       origin,
       status,
-    });
-
-    yield* invalidateKeys([
+    }: {
+      modelId: string;
+      origin: string;
+      status: "allowed" | "denied";
+    }) =>
+      updateRuntimeModelPermission({
+        modelId,
+        origin,
+        status,
+      }),
+    invalidate: ({ origin }) => [
       runtimeReactivityKeys.permissions(origin),
       runtimeReactivityKeys.pending(origin),
-    ]);
-
-    return result;
-  }),
+    ],
+  },
 );
 
-export const resolvePermissionDecisionAtom = extensionAtomRuntime.fn(
-  Effect.fn(function* ({
-    decision,
-    origin,
-    requestId,
-  }: {
-    requestId: string;
-    decision: PermissionDecision;
-    origin: string;
-  }) {
-    const result = yield* resolveRuntimePermissionRequest({
-      requestId,
+export const resolvePermissionDecisionMutation = createMutationResource(
+  extensionReactiveRuntime,
+  {
+    run: ({
       decision,
-    });
-
-    yield* invalidateKeys([
+      requestId,
+    }: {
+      requestId: string;
+      decision: PermissionDecision;
+      origin: string;
+    }) =>
+      resolveRuntimePermissionRequest({
+        requestId,
+        decision,
+      }),
+    invalidate: ({ origin }) => [
       runtimeReactivityKeys.permissions(origin),
       runtimeReactivityKeys.pending(origin),
-    ]);
-
-    return result;
-  }),
+    ],
+  },
 );

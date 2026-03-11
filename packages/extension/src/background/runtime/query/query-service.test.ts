@@ -1,5 +1,4 @@
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
-import { RuntimeInternalError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 
 const TEST_ORIGIN = "https://example.test";
@@ -67,10 +66,35 @@ mock.module("@/background/storage/runtime-db", () => ({
 }));
 
 mock.module("@/background/runtime/catalog/provider-registry", () => ({
-  listModelRows: mock(async () => []),
-  listProviderRows: mock(async () => []),
-  getProvider: mock(async () => undefined),
-  getModel: mock(async () => undefined),
+  listModelRows: mock(() => Effect.succeed([])),
+  listProviderRows: mock(() => Effect.succeed([])),
+  getProvider: mock(() => Effect.succeed(undefined)),
+  getModel: mock(() => Effect.succeed(undefined)),
+}));
+
+mock.module("@/background/runtime/permissions/permission-targets", () => ({
+  resolveTrustedPermissionTargets: (modelIds: string[]) =>
+    Effect.succeed(
+      new Map(
+        modelIds.flatMap((modelId) => {
+          const modelRow = modelRowsById.get(modelId);
+          if (!modelRow) return [];
+          const providerRow = providerRowsById.get(modelRow.providerID);
+          if (!providerRow?.connected) return [];
+          return [
+            [
+              modelId,
+              {
+                modelId,
+                modelName: modelRow.info.name,
+                provider: modelRow.providerID,
+                capabilities: modelRow.capabilities,
+              },
+            ] as const,
+          ];
+        }),
+      ),
+    ),
 }));
 
 const providerRegistry = await import("@/background/runtime/catalog/provider-registry");
@@ -92,8 +116,8 @@ beforeEach(() => {
   providersBulkGetMock.mockClear();
   listModelRowsMock.mockReset();
   listProviderRowsMock.mockReset();
-  listModelRowsMock.mockImplementation(async () => []);
-  listProviderRowsMock.mockImplementation(async () => []);
+  listModelRowsMock.mockImplementation(() => Effect.succeed([]));
+  listProviderRowsMock.mockImplementation(() => Effect.succeed([]));
 });
 
 afterAll(() => {
@@ -101,20 +125,14 @@ afterAll(() => {
 });
 
 describe("listPendingRequestsForOrigin", () => {
-  it("normalizes provider row failures into RuntimeInternalError", async () => {
-    listProviderRowsMock.mockRejectedValueOnce(new Error("db unavailable"));
+  it("leaves provider row failures as defects until the rpc boundary", async () => {
+    listProviderRowsMock.mockImplementationOnce(() =>
+      Effect.promise(() => Promise.reject(new Error("db unavailable"))),
+    );
 
-    const result = await Effect.runPromise(Effect.either(listProviders()));
-
-    expect("left" in result).toBe(true);
-    if ("left" in result) {
-      expect(result.left).toEqual(
-        new RuntimeInternalError({
-          operation: "query.listProviders",
-          message: "db unavailable",
-        }),
-      );
-    }
+    await expect(Effect.runPromise(listProviders())).rejects.toThrow(
+      /db unavailable/,
+    );
   });
 
   it("hydrates pending request display metadata from trusted model rows", async () => {
@@ -184,14 +202,6 @@ describe("listPendingRequestsForOrigin", () => {
         dismissed: false,
         status: "pending",
       },
-    ]);
-    expect(bulkGetMock).toHaveBeenCalledWith([
-      TRUSTED_MODEL_ID,
-      STALE_MODEL_ID,
-    ]);
-    expect(providersBulkGetMock).toHaveBeenCalledWith([
-      "openai",
-      "ghost-provider",
     ]);
   });
 });

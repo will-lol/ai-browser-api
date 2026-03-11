@@ -1,17 +1,13 @@
-import { RegistryProvider, useAtomMount } from "@effect-atom/atom-react";
+import { ReactiveRuntimeProvider } from "@llm-bridge/reactive-core";
 import { type ReactNode } from "react";
-import { runtimeEventReactivityBridgeAtom } from "@/app/state/runtime-reactivity";
-
-function RuntimeEventReactivityBridge() {
-  useAtomMount(runtimeEventReactivityBridgeAtom);
-  return null;
-}
+import { runtimeEventReactivityBridgeResource } from "@/app/state/runtime-reactivity";
 
 export function ExtensionAtomProvider({ children }: { children: ReactNode }) {
   return (
-    <RegistryProvider>
-      <RuntimeEventReactivityBridge />
+    <ReactiveRuntimeProvider
+      keepAliveResources={[runtimeEventReactivityBridgeResource]}
+    >
       {children}
-    </RegistryProvider>
+    </ReactiveRuntimeProvider>
   );
 }

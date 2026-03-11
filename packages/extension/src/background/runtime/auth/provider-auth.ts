@@ -1,8 +1,13 @@
 import { browser } from "@wxt-dev/browser";
-import { getAuth, removeAuth, setAuth } from "@/background/runtime/auth/auth-store";
+import * as Effect from "effect/Effect";
+import {
+  getAuth,
+  removeAuth,
+  runSecurityEffect,
+  setAuth,
+} from "@/background/runtime/auth/auth-store";
 import {
   RuntimeValidationError,
-  isRuntimeRpcError,
 } from "@llm-bridge/contracts";
 import type { AuthRecord, AuthResult } from "@/background/runtime/auth/auth-store";
 import type { RuntimeAuthFlowInstruction } from "@llm-bridge/contracts";
@@ -11,11 +16,7 @@ import {
   parseAuthMethodValues,
   toRuntimeAuthMethod,
 } from "@/background/runtime/providers/adapters/schema";
-import type {
-  ResolvedAuthMethod,
-  RuntimeAuthMethod,
-} from "@/background/runtime/providers/adapters/types";
-import { wrapAuthPluginError, wrapExtensionError } from "@/background/runtime/core/errors";
+import { wrapAuthPluginError } from "@/background/runtime/core/errors";
 import { getModelsDevData } from "@/background/runtime/catalog/models-dev";
 import { parseOAuthCallbackUrl } from "@/background/runtime/auth/oauth-util";
 import { getProvider } from "@/background/runtime/catalog/provider-registry";
@@ -27,80 +28,84 @@ type AuthContextResolved = {
   auth?: AuthRecord;
 };
 
-type StartProviderAuthResult = {
-  methodID: string;
-  connected: true;
-};
+function listResolvedAuthMethods(ctx: AuthContextResolved) {
+  return Effect.gen(function* () {
+    const modelsDev = yield* getModelsDevData();
+    const adapter = resolveAdapterForProvider({
+      providerID: ctx.providerID,
+      source: modelsDev[ctx.providerID],
+    });
+    if (!adapter) return [];
 
-async function listResolvedAuthMethods(
-  ctx: AuthContextResolved,
-): Promise<ResolvedAuthMethod[]> {
-  const modelsDev = await getModelsDevData();
-  const adapter = resolveAdapterForProvider({
-    providerID: ctx.providerID,
-    source: modelsDev[ctx.providerID],
+    const definitions = yield* Effect.promise(() =>
+      Promise.resolve(
+        adapter.listAuthMethods({
+          ...ctx,
+          auth: ctx.auth,
+        }),
+      ),
+    ).pipe(
+      Effect.catchAllDefect((defect) =>
+        Effect.fail(wrapAuthPluginError(defect, ctx.providerID, "auth.methods")),
+      ),
+    );
+    return definitions.map((definition) => ({
+      adapter,
+      definition,
+      method: toRuntimeAuthMethod(definition),
+    }));
   });
-  if (!adapter) return [];
-
-  const definitions = await adapter.listAuthMethods({
-    ...ctx,
-    auth: ctx.auth,
-  });
-  return definitions.map((definition) => ({
-    adapter,
-    definition,
-    method: toRuntimeAuthMethod(definition),
-  }));
 }
 
-async function resolveAuthContext(
+function resolveAuthContext(
   providerID: string,
   options: {
     provider?: ProviderRuntimeInfo;
     auth?: AuthRecord;
   } = {},
-): Promise<AuthContextResolved> {
-  const provider = options.provider ?? (await getProvider(providerID));
-  if (!provider) {
-    throw new RuntimeValidationError({
-      message: `Provider ${providerID} not found`,
-    });
-  }
-  const auth = options.auth ?? (await getAuth(providerID));
-  return {
-    providerID,
-    provider,
-    auth,
-  };
+) {
+  return Effect.gen(function* () {
+    const provider = options.provider ?? (yield* getProvider(providerID));
+    if (!provider) {
+      return yield* new RuntimeValidationError({
+        message: `Provider ${providerID} not found`,
+      });
+    }
+    const auth =
+      options.auth ??
+      (yield* Effect.promise(() => runSecurityEffect(getAuth(providerID))));
+    return {
+      providerID,
+      provider,
+      auth,
+    };
+  });
 }
 
-async function persistAuth(
+function persistAuth(
   providerID: string,
   input: {
     result: AuthResult;
   },
 ) {
-  await setAuth(providerID, input.result);
+  return Effect.promise(() => runSecurityEffect(setAuth(providerID, input.result)));
 }
 
-export async function listProviderAuthMethods(
+export function listProviderAuthMethods(
   providerID: string,
   options: {
     provider?: ProviderRuntimeInfo;
     auth?: AuthRecord;
   } = {},
-): Promise<RuntimeAuthMethod[]> {
-  try {
-    const ctx = await resolveAuthContext(providerID, options);
-    const methods = await listResolvedAuthMethods(ctx);
+) {
+  return Effect.gen(function* () {
+    const ctx = yield* resolveAuthContext(providerID, options);
+    const methods = yield* listResolvedAuthMethods(ctx);
     return methods.map((item) => item.method);
-  } catch (error) {
-    if (isRuntimeRpcError(error)) throw error;
-    throw wrapAuthPluginError(error, providerID, "auth.methods");
-  }
+  });
 }
 
-export async function startProviderAuth(input: {
+export function startProviderAuth(input: {
   providerID: string;
   methodID: string;
   values?: Record<string, string>;
@@ -108,13 +113,13 @@ export async function startProviderAuth(input: {
   onInstruction?: (
     instruction: RuntimeAuthFlowInstruction,
   ) => void | Promise<void>;
-}): Promise<StartProviderAuthResult> {
-  try {
-    const ctx = await resolveAuthContext(input.providerID);
-    const methods = await listResolvedAuthMethods(ctx);
+}) {
+  return Effect.gen(function* () {
+    const ctx = yield* resolveAuthContext(input.providerID);
+    const methods = yield* listResolvedAuthMethods(ctx);
     const resolved = methods.find((item) => item.method.id === input.methodID);
     if (!resolved) {
-      throw new RuntimeValidationError({
+      return yield* new RuntimeValidationError({
         message: `Auth method ${input.methodID} was not found for provider ${input.providerID}`,
       });
     }
@@ -123,50 +128,58 @@ export async function startProviderAuth(input: {
       resolved.definition,
       input.values ?? {},
     );
-    const result = await resolved.definition.authorize({
-      ...ctx,
-      auth: ctx.auth,
-      values: parsedValues,
-      signal: input.signal,
-      oauth: {
-        getRedirectURL(path = "oauth") {
-          if (!browser.identity?.getRedirectURL) {
-            throw new Error("Browser OAuth flow is unavailable");
-          }
-          return browser.identity.getRedirectURL(path);
-        },
-        async launchWebAuthFlow(url: string) {
-          if (!browser.identity?.launchWebAuthFlow) {
-            throw new Error("Browser OAuth flow is unavailable");
-          }
+    const result = yield* Effect.promise(() =>
+      resolved.definition.authorize({
+        ...ctx,
+        auth: ctx.auth,
+        values: parsedValues,
+        signal: input.signal,
+        oauth: {
+          getRedirectURL(path = "oauth") {
+            if (!browser.identity?.getRedirectURL) {
+              throw new Error("Browser OAuth flow is unavailable");
+            }
+            return browser.identity.getRedirectURL(path);
+          },
+          async launchWebAuthFlow(url: string) {
+            if (!browser.identity?.launchWebAuthFlow) {
+              throw new Error("Browser OAuth flow is unavailable");
+            }
 
-          const callbackUrl = await browser.identity.launchWebAuthFlow({
-            url,
-            interactive: true,
-          });
+            const callbackUrl = await browser.identity.launchWebAuthFlow({
+              url,
+              interactive: true,
+            });
 
-          if (!callbackUrl) {
-            throw new Error("OAuth flow did not return a callback URL");
-          }
+            if (!callbackUrl) {
+              throw new Error("OAuth flow did not return a callback URL");
+            }
 
-          return callbackUrl;
+            return callbackUrl;
+          },
+          parseCallback(url: string) {
+            return parseOAuthCallbackUrl(url);
+          },
         },
-        parseCallback(url: string) {
-          return parseOAuthCallbackUrl(url);
+        authFlow: {
+          async publish(instruction) {
+            if (!input.onInstruction) return;
+            await input.onInstruction(instruction);
+          },
         },
-      },
-      authFlow: {
-        async publish(instruction) {
-          if (!input.onInstruction) return;
-          await input.onInstruction(instruction);
+        runtime: {
+          now: () => Date.now(),
         },
-      },
-      runtime: {
-        now: () => Date.now(),
-      },
-    });
+      }),
+    ).pipe(
+      Effect.catchAllDefect((defect) =>
+        Effect.fail(
+          wrapAuthPluginError(defect, input.providerID, "auth.authorize"),
+        ),
+      ),
+    );
 
-    await persistAuth(input.providerID, {
+    yield* persistAuth(input.providerID, {
       result,
     });
 
@@ -174,17 +187,9 @@ export async function startProviderAuth(input: {
       methodID: resolved.method.id,
       connected: true,
     };
-  } catch (error) {
-    if (isRuntimeRpcError(error)) throw error;
-    throw wrapAuthPluginError(error, input.providerID, "auth.authorize");
-  }
+  });
 }
 
-export async function disconnectProvider(providerID: string) {
-  try {
-    await removeAuth(providerID);
-  } catch (error) {
-    if (isRuntimeRpcError(error)) throw error;
-    throw wrapExtensionError(error, "auth.disconnect");
-  }
+export function disconnectProvider(providerID: string) {
+  return Effect.promise(() => runSecurityEffect(removeAuth(providerID)));
 }

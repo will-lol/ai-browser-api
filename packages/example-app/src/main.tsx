@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { BridgeProvider } from "@llm-bridge/client-react";
 import { App } from "./App";
 import "./styles.css";
 
@@ -10,6 +11,8 @@ if (!container) {
 
 createRoot(container).render(
   <StrictMode>
-    <App />
+    <BridgeProvider>
+      <App />
+    </BridgeProvider>
   </StrictMode>,
 );

@@ -1,4 +1,6 @@
-import { listAuth, getAuth } from "@/background/runtime/auth/auth-store";
+import * as Effect from "effect/Effect";
+import type { AuthRecord } from "@/background/runtime/auth/auth-store";
+import { listAuth, runSecurityEffect } from "@/background/runtime/auth/auth-store";
 import { getRuntimeConfig } from "@/background/runtime/config/config-store";
 import type { RuntimeProviderConfig } from "@/background/runtime/config/config-store";
 import { getModelCapabilities, mergeRecord } from "@/background/runtime/core/util";
@@ -214,11 +216,11 @@ export function providerToRows(provider: ProviderInfo, updatedAt: number) {
   };
 }
 
-export async function buildProviderFromSource(input: {
+export function buildProviderFromSource(input: {
   providerID: string;
   source: ModelsDevProvider;
   config?: RuntimeProviderConfig;
-  authMap: Record<string, Awaited<ReturnType<typeof getAuth>>>;
+  authMap: Record<string, AuthRecord | undefined>;
 }) {
   const models = applyModelFilters(
     input.providerID,
@@ -232,7 +234,7 @@ export async function buildProviderFromSource(input: {
   );
 
   if (Object.keys(models).length === 0) {
-    return undefined;
+    return Effect.succeed(undefined);
   }
 
   const provider: ProviderInfo = {
@@ -250,22 +252,28 @@ export async function buildProviderFromSource(input: {
     providerID: input.providerID,
     source: input.source,
   });
-  if (!adapter?.patchCatalog) {
-    return provider;
+  const patchCatalog = adapter?.patchCatalog;
+  if (!patchCatalog) {
+    return Effect.succeed(provider);
   }
 
-  return (
-    (await adapter.patchCatalog(
-      {
-        providerID: input.providerID,
+  return Effect.promise(() =>
+    Promise.resolve(
+      patchCatalog(
+        {
+          providerID: input.providerID,
+          provider,
+          auth,
+        },
         provider,
-        auth,
-      },
-      provider,
-    )) ?? provider
-  );
+      ),
+    ),
+  ).pipe(Effect.map((patched) => patched ?? provider));
 }
 
-export async function loadProviderCatalogInputs() {
-  return Promise.all([getRuntimeConfig(), listAuth()]);
+export function loadProviderCatalogInputs() {
+  return Effect.all([
+    Effect.promise(() => getRuntimeConfig()),
+    Effect.promise(() => runSecurityEffect(listAuth())),
+  ]);
 }

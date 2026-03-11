@@ -1,6 +1,5 @@
 import type {
   PermissionStatus,
-  RuntimeRpcError,
   RuntimeAuthFlowSnapshot,
   RuntimeCancelProviderAuthFlowResponse,
   RuntimeCreatePermissionRequestResponse,
@@ -153,6 +152,6 @@ export class RuntimeEnvironment extends Context.Tag(
 
 export type AppEffect<
   A,
-  E extends RuntimeRpcError = RuntimeRpcError,
+  E = unknown,
   R = RuntimeEnvironment,
 > = Effect.Effect<A, E, R>;

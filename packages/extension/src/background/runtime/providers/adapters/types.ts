@@ -86,12 +86,6 @@ export type AnyAuthMethodDefinition = AuthMethodDefinition<
 
 export type RuntimeAuthMethod = RuntimeResolvedAuthMethod;
 
-export interface ResolvedAuthMethod {
-  adapter: RegisteredAdapter;
-  definition: AnyAuthMethodDefinition;
-  method: RuntimeAuthMethod;
-}
-
 export interface AIAdapter {
   key: string;
   displayName: string;

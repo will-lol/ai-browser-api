@@ -1,17 +1,17 @@
+import * as Effect from "effect/Effect";
 import type { RuntimeEnvironmentApi } from "@llm-bridge/runtime-core";
 import { getAuthFlowManager } from "@/background/runtime/auth/auth-flow-manager";
 import { disconnectProvider } from "@/background/runtime/auth/provider-auth";
-import { tryExtensionPromise } from "@/background/rpc/runtime-environment-shared";
 
 export function makeRuntimeAuthEnvironment(): RuntimeEnvironmentApi["auth"] {
   return {
     openProviderAuthWindow: (providerID: string) =>
-      tryExtensionPromise("auth.openProviderAuthWindow", () => {
+      Effect.promise(() => {
         const manager = getAuthFlowManager();
         return manager.openProviderAuthWindow(providerID);
       }),
     getProviderAuthFlow: (providerID: string) =>
-      tryExtensionPromise("auth.getProviderAuthFlow", async () => {
+      Effect.promise(async () => {
         const manager = getAuthFlowManager();
         return {
           providerID,
@@ -23,7 +23,7 @@ export function makeRuntimeAuthEnvironment(): RuntimeEnvironmentApi["auth"] {
       methodID: string;
       values?: Record<string, string>;
     }) =>
-      tryExtensionPromise("auth.startProviderAuthFlow", async () => {
+      Effect.promise(async () => {
         const manager = getAuthFlowManager();
         return {
           providerID: input.providerID,
@@ -34,7 +34,7 @@ export function makeRuntimeAuthEnvironment(): RuntimeEnvironmentApi["auth"] {
       providerID: string;
       reason?: string;
     }) =>
-      tryExtensionPromise("auth.cancelProviderAuthFlow", async () => {
+      Effect.promise(async () => {
         const manager = getAuthFlowManager();
         return {
           providerID: input.providerID,
@@ -42,18 +42,18 @@ export function makeRuntimeAuthEnvironment(): RuntimeEnvironmentApi["auth"] {
         };
       }),
     disconnectProvider: (providerID: string) =>
-      tryExtensionPromise("auth.disconnectProvider", async () => {
+      Effect.gen(function* () {
         const manager = getAuthFlowManager();
-        await manager
-          .cancelProviderAuthFlow({
+        yield* Effect.promise(() =>
+          manager.cancelProviderAuthFlow({
             providerID,
             reason: "disconnect",
           })
-          .catch(() => {
-            // Ignore cancellation failures and continue disconnecting stored auth.
-          });
+        ).pipe(
+          Effect.catchAllDefect(() => Effect.void),
+        );
 
-        await disconnectProvider(providerID);
+        yield* disconnectProvider(providerID);
         return {
           providerID,
           connected: false,

@@ -1,7 +1,7 @@
-import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react";
 import { Check } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useMutationResource } from "@llm-bridge/reactive-core";
 import { ProviderAuthSchemaForm } from "@/popup/features/providers/provider-auth-schema-form";
 import { Button } from "@/shared/ui/button";
 import {
@@ -12,27 +12,18 @@ import {
   CardTitle,
 } from "@/shared/ui/card";
 import { Separator } from "@/shared/ui/separator";
-import { providerConnectDataResultAtom } from "@/app/state/runtime-data";
+import { useProviderConnectData } from "@/app/state/runtime-data";
 import {
-  cancelProviderAuthFlowAtom,
-  startProviderAuthFlowAtom,
+  cancelProviderAuthFlowMutation,
+  startProviderAuthFlowMutation,
 } from "@/app/state/runtime-mutations";
 
 export function ConnectProviderWindow({ providerID }: { providerID: string }) {
   const [busyAction, setBusyAction] = useState<"cancel" | "start" | null>(null);
-  const connectDataResult = useAtomValue(
-    providerConnectDataResultAtom(providerID),
-  );
-  const connectData = useMemo(
-    () => Result.getOrElse(connectDataResult, () => null),
-    [connectDataResult],
-  );
-  const startAuthFlow = useAtomSet(startProviderAuthFlowAtom, {
-    mode: "promise",
-  });
-  const cancelAuthFlow = useAtomSet(cancelProviderAuthFlowAtom, {
-    mode: "promise",
-  });
+  const connectDataState = useProviderConnectData(providerID);
+  const connectData = connectDataState.value;
+  const startAuthFlow = useMutationResource(startProviderAuthFlowMutation);
+  const cancelAuthFlow = useMutationResource(cancelProviderAuthFlowMutation);
 
   const provider = useMemo(
     () => (connectData?.providers ?? []).find((item) => item.id === providerID),
@@ -99,7 +90,7 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
   async function handleStart(methodID: string, values: Record<string, string>) {
     setFlowError(null);
     setBusyAction("start");
-    await startAuthFlow({
+    await startAuthFlow.execute({
       providerID,
       methodID,
       values,
@@ -116,7 +107,7 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
 
     if (flow.status === "authorizing") {
       setBusyAction("cancel");
-      await cancelAuthFlow({
+      await cancelAuthFlow.execute({
         providerID,
         reason: "user",
       }).finally(() => {
@@ -142,9 +133,8 @@ export function ConnectProviderWindow({ providerID }: { providerID: string }) {
 
   const status = flow?.status ?? "idle";
   const isBusy = busyAction !== null;
-  const isLoading = connectDataResult._tag === "Initial";
-  const hasLoadFailure =
-    connectDataResult._tag === "Failure" && connectData == null;
+  const isLoading = connectDataState.isLoading && connectData == null;
+  const hasLoadFailure = connectDataState.hasError && connectData == null;
 
   const displayError =
     flowError ??

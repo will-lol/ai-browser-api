@@ -36,7 +36,10 @@ import {
   prepareRuntimeChatModelCall,
   type PreparedRuntimeChatModelCall,
 } from "@/background/runtime/execution/language-model-runtime";
-import { wrapExtensionError, wrapProviderError } from "@/background/runtime/core/errors";
+import {
+  wrapExtensionError,
+  wrapProviderError,
+} from "@/background/runtime/core/errors";
 
 const decodeJsonValue = Schema.decodeUnknownSync(JsonValueSchema);
 
@@ -71,7 +74,7 @@ type ChatExecutionServiceDeps = {
     requestID: string;
     messages: Array<ModelMessage>;
     options?: Parameters<typeof prepareRuntimeChatModelCall>[0]["options"];
-  }) => Promise<PreparedRuntimeChatModelCall>;
+  }) => Effect.Effect<PreparedRuntimeChatModelCall, RuntimeRpcError>;
   convertMessages: typeof convertToModelMessages;
   validateMessages: typeof validateUIMessages;
   streamTextImpl: typeof streamText;
@@ -192,7 +195,6 @@ function toRuntimeChatError(input: {
 
 function ensureNotAborted(
   generation: ActiveChatGeneration,
-  operation: string,
 ): Effect.Effect<void, RuntimeValidationError> {
   if (!generation.abortController.signal.aborted) {
     return Effect.void;
@@ -200,7 +202,7 @@ function ensureNotAborted(
 
   return Effect.fail(
     new RuntimeValidationError({
-      message: `${operation} canceled`,
+      message: `${generation} aborted`,
     }),
   );
 }
@@ -396,7 +398,6 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
           modelID: request.modelId,
           signal: generation.abortController.signal,
         });
-        yield* ensureNotAborted(generation, "chat.sendMessages");
 
         const validatedMessages = yield* Effect.tryPromise({
           try: () =>
@@ -423,27 +424,28 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
             }),
         });
 
-        yield* ensureNotAborted(generation, "chat.sendMessages");
+        const preparedCall = yield* input
+          .prepareLanguageModelCall({
+            modelID: request.modelId,
+            origin: request.origin,
+            sessionID,
+            requestID,
+            messages: modelMessages,
+            options: request.options,
+          })
+          .pipe(
+            Effect.catchAllDefect((error) =>
+              Effect.fail(
+                toRuntimeChatError({
+                  error:
+                    error instanceof Error ? error : new Error(String(error)),
+                  operation: "chat.prepareLanguageModelCall",
+                }),
+              ),
+            ),
+          );
 
-        const preparedCall = yield* Effect.tryPromise({
-          try: () =>
-            input.prepareLanguageModelCall({
-              modelID: request.modelId,
-              origin: request.origin,
-              sessionID,
-              requestID,
-              messages: modelMessages,
-              options: request.options,
-            }),
-          catch: (error) =>
-            toRuntimeChatError({
-              error: error instanceof Error ? error : new Error(String(error)),
-              operation: "chat.prepareLanguageModelCall",
-            }),
-        });
-
-        yield* ensureNotAborted(generation, "chat.sendMessages");
-
+        yield* ensureNotAborted(generation);
         const result = yield* Effect.try({
           try: () => {
             const preparedLanguageModel = createPreparedLanguageModel({
@@ -484,9 +486,16 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
       }).pipe(
         Effect.tapError((error) =>
           Effect.sync(() => {
+            const runtimeError = isRuntimeRpcError(error)
+              ? error
+              : toRuntimeChatError({
+                  error:
+                    error instanceof Error ? error : new Error(String(error)),
+                  operation: "chat.sendMessages",
+                });
             finalizeGeneration(generation, generations, {
               _tag: "failure",
-              error,
+              error: runtimeError,
             });
           }),
         ),

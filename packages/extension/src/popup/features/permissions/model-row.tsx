@@ -1,10 +1,10 @@
-import { useAtomSet } from "@effect-atom/atom-react";
 import { Badge } from "@/shared/ui/badge";
 import { Switch } from "@/shared/ui/switch";
 import type { RuntimePermissionDecision } from "@llm-bridge/contracts";
 import { getProviderLabel } from "@/shared/provider-labels";
-import { updateModelPermissionAtom } from "@/app/state/runtime-mutations";
 import { useState } from "react";
+import { useMutationResource } from "@llm-bridge/reactive-core";
+import { updateModelPermissionMutation } from "@/app/state/runtime-mutations";
 
 interface ModelRowProps {
   id: string;
@@ -26,9 +26,7 @@ export function ModelRow({
   disabled = false,
 }: ModelRowProps) {
   const [pending, setPending] = useState(false);
-  const updatePermission = useAtomSet(updateModelPermissionAtom, {
-    mode: "promise",
-  });
+  const updatePermission = useMutationResource(updateModelPermissionMutation);
   const isAllowed = permission === "allowed";
   const controlsDisabled = disabled || pending;
 
@@ -66,7 +64,7 @@ export function ModelRow({
         checked={isAllowed}
         onCheckedChange={(checked) => {
           setPending(true);
-          void updatePermission({
+          void updatePermission.execute({
             modelId: id,
             origin,
             status: checked ? "allowed" : "denied",

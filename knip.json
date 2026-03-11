@@ -12,6 +12,10 @@
       "entry": ["src/**/*.test.ts"],
       "project": ["src/**/*.ts"]
     },
+    "packages/client-react": {
+      "entry": ["src/**/*.test.ts", "src/**/*.tsx"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
     "packages/contracts": {
       "entry": ["src/**/*.test.ts"],
       "project": ["src/**/*.ts"]
@@ -38,6 +42,10 @@
     "packages/runtime-core": {
       "entry": ["src/**/*.test.ts"],
       "project": ["src/**/*.ts"]
+    },
+    "packages/reactive-core": {
+      "entry": ["src/**/*.test.ts", "src/**/*.tsx"],
+      "project": ["src/**/*.{ts,tsx}"]
     },
     "packages/runtime-events": {
       "entry": ["src/**/*.test.ts"],

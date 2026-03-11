@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "bun run --filter @llm-bridge/client build",
+    "predev": "bun run --filter @llm-bridge/client build && bun run --filter @llm-bridge/reactive-core build && bun run --filter @llm-bridge/client-react build",
     "dev": "vite --host 127.0.0.1 --port 4174",
     "typecheck": "tsc --noEmit",
     "build": "vite build",
@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.118",
-    "@llm-bridge/client": "workspace:*",
+    "@llm-bridge/client-react": "workspace:*",
     "ai": "^6.0.112",
     "lucide-react": "^0.577.0",
     "react": "^19.2.4",

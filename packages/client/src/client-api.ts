@@ -1,6 +1,5 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type {
-  BridgePermissionRequest,
   BridgeModelDescriptorResponse,
   RuntimeRpcError,
 } from "@llm-bridge/contracts";
@@ -9,7 +8,10 @@ import * as Effect from "effect/Effect";
 import type { BridgeConnection } from "./connection";
 import { createChatTransport } from "./chat-transport";
 import { currentOrigin } from "./shared";
-import type { BridgeChatTransportOptions } from "./types";
+import type {
+  BridgeChatTransportOptions,
+  BridgePermissionRequest,
+} from "./types";
 
 export function makeBridgeClientApi(input: {
   ensureConnection: Effect.Effect<BridgeConnection, RuntimeRpcError>;

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import * as Effect from "effect/Effect";
 import type { RuntimeEventPayload } from "@/app/events/runtime-events";
 import {
   mergePendingChangedRequestIds,
@@ -58,7 +59,7 @@ describe("permission wait utility", () => {
     const harness = createHarness();
     let checks = 0;
 
-    const result = await waitForPermissionDecisionEventDriven({
+    const result = await Effect.runPromise(waitForPermissionDecisionEventDriven({
       requestId: "req-1",
       timeoutMs: 50,
       isPending: async () => {
@@ -66,7 +67,7 @@ describe("permission wait utility", () => {
         return false;
       },
       subscribe: harness.subscribe,
-    });
+    }));
 
     assert.equal(result, "resolved");
     assert.equal(checks, 1);
@@ -77,12 +78,12 @@ describe("permission wait utility", () => {
     const harness = createHarness();
     let pending = true;
 
-    const wait = waitForPermissionDecisionEventDriven({
+    const wait = Effect.runPromise(waitForPermissionDecisionEventDriven({
       requestId: "req-2",
       timeoutMs: 250,
       isPending: async () => pending,
       subscribe: harness.subscribe,
-    });
+    }));
 
     let settled = false;
     void wait.then(() => {
@@ -106,12 +107,12 @@ describe("permission wait utility", () => {
   it("returns timeout when request stays pending", async () => {
     const harness = createHarness();
 
-    const result = await waitForPermissionDecisionEventDriven({
+    const result = await Effect.runPromise(waitForPermissionDecisionEventDriven({
       requestId: "req-3",
       timeoutMs: 20,
       isPending: async () => true,
       subscribe: harness.subscribe,
-    });
+    }));
 
     assert.equal(result, "timeout");
     assert.equal(harness.getUnsubscribeCalls(), 1);
@@ -121,13 +122,13 @@ describe("permission wait utility", () => {
     const harness = createHarness();
     const controller = new AbortController();
 
-    const wait = waitForPermissionDecisionEventDriven({
+    const wait = Effect.runPromise(waitForPermissionDecisionEventDriven({
       requestId: "req-4",
       timeoutMs: 1_000,
       signal: controller.signal,
       isPending: async () => true,
       subscribe: harness.subscribe,
-    });
+    }));
 
     await sleep(0);
     controller.abort();
@@ -140,7 +141,7 @@ describe("permission wait utility", () => {
     const harness = createHarness();
     let checks = 0;
 
-    const result = await waitForPermissionDecisionEventDriven({
+    const result = await Effect.runPromise(waitForPermissionDecisionEventDriven({
       requestId: "req-5",
       timeoutMs: 250,
       isPending: async () => {
@@ -148,7 +149,7 @@ describe("permission wait utility", () => {
         return checks === 1;
       },
       subscribe: harness.subscribe,
-    });
+    }));
 
     assert.equal(result, "resolved");
     assert.ok(checks >= 2);

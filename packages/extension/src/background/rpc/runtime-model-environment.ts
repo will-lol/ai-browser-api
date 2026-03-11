@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import { fromRuntimeModelCallOptions, toRuntimeGenerateResponse } from "@llm-bridge/bridge-codecs";
 import { encodeSupportedUrls } from "@llm-bridge/contracts";
 import type { RuntimeEnvironmentApi } from "@llm-bridge/runtime-core";
@@ -8,46 +9,39 @@ import {
 } from "@/background/runtime/execution/language-model-runtime";
 import {
   mapLanguageModelStream,
-  tryExtensionPromise,
 } from "@/background/rpc/runtime-environment-shared";
 
 export function makeRuntimeModelExecutionEnvironment(): RuntimeEnvironmentApi["modelExecution"] {
   return {
     acquireModel: (input) =>
-      tryExtensionPromise("model.acquire", () =>
-        getRuntimeModelDescriptor({
+      getRuntimeModelDescriptor({
           modelID: input.modelID,
           origin: input.origin,
           sessionID: input.sessionID,
           requestID: input.requestID,
-        }).then((descriptor) => ({
+        }).pipe(Effect.map((descriptor) => ({
           specificationVersion: "v3",
           provider: descriptor.provider,
           modelId: descriptor.modelId,
           supportedUrls: encodeSupportedUrls(descriptor.supportedUrls),
-        })),
-      ),
+        }))),
     generateModel: (input) =>
-      tryExtensionPromise("model.generate", () =>
-        runLanguageModelGenerate({
+      runLanguageModelGenerate({
           modelID: input.modelID,
           origin: input.origin,
           sessionID: input.sessionID,
           requestID: input.requestID,
           options: fromRuntimeModelCallOptions(input.options),
           signal: input.signal,
-        }).then((result) => toRuntimeGenerateResponse(result)),
-      ),
+        }).pipe(Effect.map((result) => toRuntimeGenerateResponse(result))),
     streamModel: (input) =>
-      tryExtensionPromise("model.stream", () =>
-        runLanguageModelStream({
+      runLanguageModelStream({
           modelID: input.modelID,
           origin: input.origin,
           sessionID: input.sessionID,
           requestID: input.requestID,
           options: fromRuntimeModelCallOptions(input.options),
           signal: input.signal,
-        }).then((stream) => mapLanguageModelStream(stream)),
-      ),
+        }).pipe(Effect.map((stream) => mapLanguageModelStream(stream))),
   };
 }

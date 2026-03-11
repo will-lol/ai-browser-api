@@ -1,4 +1,5 @@
 import type { RuntimeEventPayload } from "@/app/events/runtime-events";
+import * as Effect from "effect/Effect";
 
 export type PermissionDecisionWaitResult = "resolved" | "timeout" | "aborted";
 
@@ -17,73 +18,75 @@ export function mergePendingChangedRequestIds(
   return Array.from(new Set([requestId, ...staleRequestIds]));
 }
 
-export async function waitForPermissionDecisionEventDriven(
+export function waitForPermissionDecisionEventDriven(
   input: PermissionDecisionWaitInput,
-): Promise<PermissionDecisionWaitResult> {
-  if (!(await input.isPending(input.requestId))) {
-    return "resolved";
-  }
-
-  return await new Promise<PermissionDecisionWaitResult>((resolve) => {
-    let settled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    let unsubscribe: (() => void) | undefined;
-
-    const finalize = (result: PermissionDecisionWaitResult) => {
-      if (settled) return;
-      settled = true;
-
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-        timeoutId = undefined;
-      }
-      unsubscribe?.();
-      unsubscribe = undefined;
-      input.signal?.removeEventListener("abort", onAbort);
-      resolve(result);
-    };
-
-    const checkPendingAndFinalize = () => {
-      void input
-        .isPending(input.requestId)
-        .then((pending) => {
-          if (!pending) {
-            finalize("resolved");
-          }
-        })
-        .catch(() => {
-          // Ignore transient read failures and keep waiting until timeout/abort.
-        });
-    };
-
-    const onAbort = () => {
-      finalize("aborted");
-    };
-
-    timeoutId = setTimeout(() => {
-      void input
-        .isPending(input.requestId)
-        .then((pending) => {
-          finalize(pending ? "timeout" : "resolved");
-        })
-        .catch(() => {
-          finalize("timeout");
-        });
-    }, input.timeoutMs);
-
-    input.signal?.addEventListener("abort", onAbort, { once: true });
-    if (input.signal?.aborted) {
-      finalize("aborted");
-      return;
+): Effect.Effect<PermissionDecisionWaitResult> {
+  return Effect.promise(async () => {
+    if (!(await input.isPending(input.requestId))) {
+      return "resolved";
     }
 
-    unsubscribe = input.subscribe((event) => {
-      if (event.type !== "runtime.pending.changed") return;
-      if (!event.payload.requestIds.includes(input.requestId)) return;
+    return await new Promise<PermissionDecisionWaitResult>((resolve) => {
+      let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      let unsubscribe: (() => void) | undefined;
+
+      const finalize = (result: PermissionDecisionWaitResult) => {
+        if (settled) return;
+        settled = true;
+
+        if (timeoutId !== undefined) {
+          clearTimeout(timeoutId);
+          timeoutId = undefined;
+        }
+        unsubscribe?.();
+        unsubscribe = undefined;
+        input.signal?.removeEventListener("abort", onAbort);
+        resolve(result);
+      };
+
+      const checkPendingAndFinalize = () => {
+        void input
+          .isPending(input.requestId)
+          .then((pending) => {
+            if (!pending) {
+              finalize("resolved");
+            }
+          })
+          .catch(() => {
+            // Ignore transient read failures and keep waiting until timeout/abort.
+          });
+      };
+
+      const onAbort = () => {
+        finalize("aborted");
+      };
+
+      timeoutId = setTimeout(() => {
+        void input
+          .isPending(input.requestId)
+          .then((pending) => {
+            finalize(pending ? "timeout" : "resolved");
+          })
+          .catch(() => {
+            finalize("timeout");
+          });
+      }, input.timeoutMs);
+
+      input.signal?.addEventListener("abort", onAbort, { once: true });
+      if (input.signal?.aborted) {
+        finalize("aborted");
+        return;
+      }
+
+      unsubscribe = input.subscribe((event) => {
+        if (event.type !== "runtime.pending.changed") return;
+        if (!event.payload.requestIds.includes(input.requestId)) return;
+        checkPendingAndFinalize();
+      });
+
+      // Re-check after listener registration to avoid missing a fast resolution race.
       checkPendingAndFinalize();
     });
-
-    // Re-check after listener registration to avoid missing a fast resolution race.
-    checkPendingAndFinalize();
   });
 }

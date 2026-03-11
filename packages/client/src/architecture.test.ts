@@ -29,4 +29,22 @@ describe("client architecture", () => {
       }
     }
   });
+
+  it("does not import React or effect-atom in client sources", () => {
+    const forbiddenImports = [
+      `from "react"`,
+      `from 'react'`,
+      `from "@effect-atom/atom-react"`,
+      `from '@effect-atom/atom-react'`,
+      `from "@effect/experimental`,
+      `from '@effect/experimental`,
+    ];
+
+    for (const file of clientFiles) {
+      const source = readFileSync(file, "utf8");
+      for (const marker of forbiddenImports) {
+        assert.equal(source.includes(marker), false, `${file}: ${marker}`);
+      }
+    }
+  });
 });

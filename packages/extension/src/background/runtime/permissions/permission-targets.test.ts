@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import * as Effect from "effect/Effect";
 
 const CONNECTED_MODEL_ID = "openai/gpt-4o-mini";
 const DISCONNECTED_MODEL_ID = "anthropic/claude-sonnet";
@@ -72,7 +73,7 @@ describe("permission target resolution", () => {
     });
 
     await expect(
-      resolveTrustedPermissionTarget(CONNECTED_MODEL_ID),
+      Effect.runPromise(resolveTrustedPermissionTarget(CONNECTED_MODEL_ID)),
     ).resolves.toEqual({
       status: "resolved",
       target: {
@@ -86,7 +87,7 @@ describe("permission target resolution", () => {
 
   it("marks missing models as missing", async () => {
     await expect(
-      resolveTrustedPermissionTarget(MISSING_MODEL_ID),
+      Effect.runPromise(resolveTrustedPermissionTarget(MISSING_MODEL_ID)),
     ).resolves.toEqual({
       status: "missing",
       modelId: MISSING_MODEL_ID,
@@ -108,7 +109,7 @@ describe("permission target resolution", () => {
     });
 
     await expect(
-      resolveTrustedPermissionTarget(DISCONNECTED_MODEL_ID),
+      Effect.runPromise(resolveTrustedPermissionTarget(DISCONNECTED_MODEL_ID)),
     ).resolves.toEqual({
       status: "disconnected",
       modelId: DISCONNECTED_MODEL_ID,
@@ -127,7 +128,7 @@ describe("permission target resolution", () => {
     });
 
     await expect(
-      resolveTrustedPermissionTarget(CONNECTED_MODEL_ID),
+      Effect.runPromise(resolveTrustedPermissionTarget(CONNECTED_MODEL_ID)),
     ).resolves.toEqual({
       status: "missing",
       modelId: CONNECTED_MODEL_ID,

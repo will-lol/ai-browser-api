@@ -1,5 +1,6 @@
 import {
   RuntimeRpcGroup,
+  RuntimeInternalError,
   RuntimeValidationError,
   isRuntimeRpcError,
   type RuntimeRpcError,
@@ -27,20 +28,41 @@ import {
   streamModel,
   generateModel,
 } from "@llm-bridge/runtime-core";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { ChatExecutionService } from "@/background/runtime/execution/chat-execution-service";
-import { wrapExtensionError, wrapTransportError } from "@/background/runtime/core/errors";
+import { wrapTransportError } from "@/background/runtime/core/errors";
 
 function serializeUnknownRuntimeError(error: unknown): RuntimeRpcError {
   if (isRuntimeRpcError(error)) return error;
-  return wrapExtensionError(error, "runtime.rpc");
+  return new RuntimeInternalError({
+    operation: "runtime.rpc",
+    message: error instanceof Error ? error.message : String(error),
+  });
 }
 
-function serializeRpcError<A, E, R>(
+function serializeRuntimeCause(cause: Cause.Cause<unknown>): RuntimeRpcError {
+  const failure = Cause.failureOption(cause);
+  if (Option.isSome(failure)) {
+    return serializeUnknownRuntimeError(failure.value);
+  }
+
+  const defect = Cause.squash(cause);
+  console.error("[runtime-rpc] unexpected defect", {
+    defect,
+    pretty: Cause.pretty(cause),
+  });
+  return serializeUnknownRuntimeError(defect);
+}
+
+export function serializeRpcError<A, E, R>(
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, RuntimeRpcError, R> {
-  return Effect.mapError(effect, serializeUnknownRuntimeError);
+  return Effect.catchAllCause(effect, (cause) =>
+    Effect.fail(serializeRuntimeCause(cause)),
+  );
 }
 
 function serializeRpcStream<A, E, R>(

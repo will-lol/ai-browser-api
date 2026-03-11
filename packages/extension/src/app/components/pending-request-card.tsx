@@ -1,11 +1,11 @@
-import { useAtomSet } from "@effect-atom/atom-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Check, X as XIcon } from "lucide-react";
 import { useState } from "react";
+import { useMutationResource } from "@llm-bridge/reactive-core";
 import type { RuntimePendingRequest } from "@llm-bridge/contracts";
 import { getProviderLabel } from "@/shared/provider-labels";
-import { resolvePermissionDecisionAtom } from "@/app/state/runtime-mutations";
+import { resolvePermissionDecisionMutation } from "@/app/state/runtime-mutations";
 
 interface PendingRequestCardProps {
   request: RuntimePendingRequest;
@@ -91,9 +91,7 @@ function InlinePendingRequestCard({
   actionsDisabled?: boolean;
 }) {
   const [pending, setPending] = useState(false);
-  const resolveDecision = useAtomSet(resolvePermissionDecisionAtom, {
-    mode: "promise",
-  });
+  const resolveDecision = useMutationResource(resolvePermissionDecisionMutation);
   const controlsDisabled = actionsDisabled || pending;
 
   return (
@@ -112,7 +110,7 @@ function InlinePendingRequestCard({
         <Button
           onClick={() => {
             setPending(true);
-            void resolveDecision({
+            void resolveDecision.execute({
               requestId: request.id,
               decision: "allowed",
               origin,
@@ -138,7 +136,7 @@ function InlinePendingRequestCard({
         <Button
           onClick={() => {
             setPending(true);
-            void resolveDecision({
+            void resolveDecision.execute({
               requestId: request.id,
               decision: "denied",
               origin,

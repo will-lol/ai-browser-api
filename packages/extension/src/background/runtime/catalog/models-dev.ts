@@ -1,4 +1,5 @@
 import snapshotData from "@/background/runtime/catalog/models-snapshot.json";
+import * as Effect from "effect/Effect";
 import type { ModelsDevData } from "@/background/runtime/catalog/models-dev-schema";
 
 export type {
@@ -8,6 +9,6 @@ export type {
 
 export const modelsDevData = snapshotData as ModelsDevData;
 
-export async function getModelsDevData() {
-  return modelsDevData;
+export function getModelsDevData() {
+  return Effect.succeed(modelsDevData);
 }

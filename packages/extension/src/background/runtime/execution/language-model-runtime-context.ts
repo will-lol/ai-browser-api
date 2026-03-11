@@ -4,6 +4,7 @@ import type {
 } from "@ai-sdk/provider";
 import type { ModelMessage } from "ai";
 import { fromRuntimeModelCallOptions } from "@llm-bridge/bridge-codecs";
+import * as Effect from "effect/Effect";
 import {
   ModelNotFoundError,
   ProviderNotConnectedError,
@@ -12,8 +13,16 @@ import {
   type RuntimeModelCallOptions,
 } from "@llm-bridge/contracts";
 import type { AuthRecord } from "@/background/runtime/auth/auth-store";
-import { getAuth, removeAuth, setAuth } from "@/background/runtime/auth/auth-store";
-import { getModel, getProvider } from "@/background/runtime/catalog/provider-registry";
+import {
+  getAuth,
+  removeAuth,
+  runSecurityEffect,
+  setAuth,
+} from "@/background/runtime/auth/auth-store";
+import {
+  getModel,
+  getProvider,
+} from "@/background/runtime/catalog/provider-registry";
 import type {
   ProviderModelInfo,
   ProviderRuntimeInfo,
@@ -91,110 +100,48 @@ function toRuntimeModelCallOptionsForChat(
   };
 }
 
-function normalizeCallOptions(
-  options: Partial<RuntimeLanguageModelCallOptions> | undefined,
-  fallback: RuntimeLanguageModelCallOptions,
-): RuntimeLanguageModelCallOptions {
-  const callOptions: RuntimeLanguageModelCallOptions = {
-    ...fallback,
-  };
-
-  if (options?.prompt) {
-    callOptions.prompt = options.prompt;
-  }
-
-  if (typeof options?.maxOutputTokens === "number") {
-    callOptions.maxOutputTokens = options.maxOutputTokens;
-  }
-
-  if (typeof options?.temperature === "number") {
-    callOptions.temperature = options.temperature;
-  }
-  if (typeof options?.topP === "number") {
-    callOptions.topP = options.topP;
-  }
-  if (typeof options?.topK === "number") {
-    callOptions.topK = options.topK;
-  }
-  if (typeof options?.presencePenalty === "number") {
-    callOptions.presencePenalty = options.presencePenalty;
-  }
-  if (typeof options?.frequencyPenalty === "number") {
-    callOptions.frequencyPenalty = options.frequencyPenalty;
-  }
-
-  if (options?.stopSequences) {
-    callOptions.stopSequences = [...options.stopSequences];
-  }
-
-  if (options?.responseFormat !== undefined) {
-    callOptions.responseFormat = options.responseFormat;
-  }
-
-  if (typeof options?.seed === "number") {
-    callOptions.seed = options.seed;
-  }
-
-  if (options?.tools) {
-    callOptions.tools = [...options.tools];
-  }
-
-  if (options?.toolChoice !== undefined) {
-    callOptions.toolChoice = options.toolChoice;
-  }
-
-  if (typeof options?.includeRawChunks === "boolean") {
-    callOptions.includeRawChunks = options.includeRawChunks;
-  }
-
-  if (options?.providerOptions) {
-    callOptions.providerOptions = {
-      ...options.providerOptions,
-    };
-  }
-
-  callOptions.headers = toHeaderRecord(options?.headers);
-
-  return callOptions;
-}
-
-async function resolveModelRuntimeContext(
+function resolveModelRuntimeContext(
   modelID: string,
-): Promise<ModelRuntimeContext> {
-  const parsed = parseProviderModel(modelID);
-  if (!parsed.providerID || !parsed.modelID) {
-    throw new RuntimeValidationError({
-      message: `Invalid model: ${modelID}`,
-    });
-  }
+): Effect.Effect<
+  ModelRuntimeContext,
+  RuntimeValidationError | ModelNotFoundError | ProviderNotConnectedError
+> {
+  return Effect.gen(function* () {
+    const parsed = parseProviderModel(modelID);
+    if (!parsed.providerID || !parsed.modelID) {
+      return yield* new RuntimeValidationError({
+        message: `Invalid model: ${modelID}`,
+      });
+    }
 
-  const [provider, model, auth] = await Promise.all([
-    getProvider(parsed.providerID),
-    getModel(parsed.providerID, parsed.modelID),
-    getAuth(parsed.providerID),
-  ]);
+    const [provider, model, auth] = yield* Effect.all([
+      getProvider(parsed.providerID),
+      getModel(parsed.providerID, parsed.modelID),
+      Effect.promise(() => runSecurityEffect(getAuth(parsed.providerID))),
+    ]);
 
-  if (!provider || !model) {
-    throw new ModelNotFoundError({
-      modelId: modelID,
-      message: `Model not found: ${modelID}`,
-    });
-  }
+    if (!provider || !model) {
+      return yield* new ModelNotFoundError({
+        modelId: modelID,
+        message: `Model not found: ${modelID}`,
+      });
+    }
 
-  if (!auth) {
-    throw new ProviderNotConnectedError({
+    if (!auth) {
+      return yield* new ProviderNotConnectedError({
+        providerID: parsed.providerID,
+        message: `Provider ${parsed.providerID} is not connected`,
+      });
+    }
+
+    return {
       providerID: parsed.providerID,
-      message: `Provider ${parsed.providerID} is not connected`,
-    });
-  }
-
-  return {
-    providerID: parsed.providerID,
-    modelID: parsed.modelID,
-    provider,
-    model,
-    auth,
-  };
+      modelID: parsed.modelID,
+      provider,
+      model,
+      auth,
+    };
+  });
 }
 
 function buildAdapterContext(input: {
@@ -224,11 +171,15 @@ function buildAdapterContext(input: {
     provider: input.runtime.provider,
     model: input.runtime.model,
     authStore: {
-      get: () => getAuth(input.runtime.providerID),
-      set: async (auth) => {
-        await setAuth(input.runtime.providerID, auth);
-      },
-      remove: () => removeAuth(input.runtime.providerID),
+      get: () => runSecurityEffect(getAuth(input.runtime.providerID)),
+      set: (auth) =>
+        runSecurityEffect(setAuth(input.runtime.providerID, auth)).then(
+          () => undefined,
+        ),
+      remove: () =>
+        runSecurityEffect(removeAuth(input.runtime.providerID)).then(
+          () => undefined,
+        ),
     },
     runtime: {
       now: () => Date.now(),
@@ -236,105 +187,114 @@ function buildAdapterContext(input: {
   };
 }
 
-async function prepareCallOptions(input: {
+function prepareCallOptions(input: {
   runtime: ModelRuntimeContext;
   origin: string;
   sessionID: string;
   requestID: string;
   options: RuntimeLanguageModelCallOptions;
 }) {
-  const adapter = resolveAdapterForModel({
-    providerID: input.runtime.providerID,
-    model: input.runtime.model,
-  });
-  if (!adapter) {
-    throw new Error(
-      `No adapter is registered for provider ${input.runtime.providerID} (${input.runtime.model.api.npm})`,
+  return Effect.gen(function* () {
+    const adapter = resolveAdapterForModel({
+      providerID: input.runtime.providerID,
+      model: input.runtime.model,
+    });
+    if (!adapter) {
+      throw new Error(
+        `No adapter is registered for provider ${input.runtime.providerID} (${input.runtime.model.api.npm})`,
+      );
+    }
+
+    const context = buildAdapterContext({
+      runtime: input.runtime,
+      origin: input.origin,
+      sessionID: input.sessionID,
+      requestID: input.requestID,
+    });
+    const languageModel = yield* Effect.promise(() =>
+      adapter.createModel(context),
     );
-  }
+    const callOptions = {
+      ...input.options,
+      headers: toHeaderRecord(input.options.headers),
+    };
 
-  const context = buildAdapterContext({
-    runtime: input.runtime,
-    origin: input.origin,
-    sessionID: input.sessionID,
-    requestID: input.requestID,
+    return {
+      prepared: {
+        callOptions,
+        context,
+        languageModel,
+      } satisfies PreparedCallOptions,
+    };
   });
-  const languageModel = await adapter.createModel(context);
-  const callOptions = normalizeCallOptions(input.options, {
-    ...input.options,
-    headers: toHeaderRecord(input.options.headers),
-  });
-
-  return {
-    prepared: {
-      callOptions,
-      context,
-      languageModel,
-    } satisfies PreparedCallOptions,
-  };
 }
 
-export async function prepareRuntimeLanguageModelCall(input: {
+export function prepareRuntimeLanguageModelCall(input: {
   modelID: string;
   origin: string;
   sessionID: string;
   requestID: string;
   options: RuntimeLanguageModelCallOptions;
-}): Promise<PreparedRuntimeLanguageModelCall> {
-  const runtime = await resolveModelRuntimeContext(input.modelID);
-  const { prepared } = await prepareCallOptions({
-    runtime,
-    origin: input.origin,
-    sessionID: input.sessionID,
-    requestID: input.requestID,
-    options: input.options,
-  });
+}) {
+  return Effect.gen(function* () {
+    const runtime = yield* resolveModelRuntimeContext(input.modelID);
+    const { prepared } = yield* prepareCallOptions({
+      runtime,
+      origin: input.origin,
+      sessionID: input.sessionID,
+      requestID: input.requestID,
+      options: input.options,
+    });
 
-  return {
-    providerID: runtime.providerID,
-    providerModelID: runtime.modelID,
-    languageModel: prepared.languageModel,
-    callOptions: prepared.callOptions,
-  };
+    return {
+      providerID: runtime.providerID,
+      providerModelID: runtime.modelID,
+      languageModel: prepared.languageModel,
+      callOptions: prepared.callOptions,
+    } satisfies PreparedRuntimeLanguageModelCall;
+  });
 }
 
-export async function prepareRuntimeChatModelCall(input: {
+export function prepareRuntimeChatModelCall(input: {
   modelID: string;
   origin: string;
   sessionID: string;
   requestID: string;
   messages: Array<ModelMessage>;
   options?: RuntimeChatCallOptions;
-}): Promise<PreparedRuntimeChatModelCall> {
-  const runtime = await resolveModelRuntimeContext(input.modelID);
-  const adapter = resolveAdapterForModel({
-    providerID: runtime.providerID,
-    model: runtime.model,
-  });
-  if (!adapter) {
-    throw new Error(
-      `No adapter is registered for provider ${runtime.providerID} (${runtime.model.api.npm})`,
+}) {
+  return Effect.gen(function* () {
+    const runtime = yield* resolveModelRuntimeContext(input.modelID);
+    const adapter = resolveAdapterForModel({
+      providerID: runtime.providerID,
+      model: runtime.model,
+    });
+    if (!adapter) {
+      throw new Error(
+        `No adapter is registered for provider ${runtime.providerID} (${runtime.model.api.npm})`,
+      );
+    }
+    const context = buildAdapterContext({
+      runtime,
+      origin: input.origin,
+      sessionID: input.sessionID,
+      requestID: input.requestID,
+    });
+
+    const callOptions = fromRuntimeModelCallOptions(
+      toRuntimeModelCallOptionsForChat(input.options),
     );
-  }
-  const context = buildAdapterContext({
-    runtime,
-    origin: input.origin,
-    sessionID: input.sessionID,
-    requestID: input.requestID,
+
+    const languageModel = yield* Effect.promise(() =>
+      adapter.createModel(context),
+    );
+    const { prompt: _prompt, ...callOptionsWithoutPrompt } = callOptions;
+
+    return {
+      providerID: runtime.providerID,
+      providerModelID: runtime.modelID,
+      languageModel,
+      callOptions: callOptionsWithoutPrompt,
+    } satisfies PreparedRuntimeChatModelCall;
   });
-
-  const fallback = fromRuntimeModelCallOptions(
-    toRuntimeModelCallOptionsForChat(input.options),
-  );
-
-  const callOptions = normalizeCallOptions(fallback, fallback);
-  const languageModel = await adapter.createModel(context);
-  const { prompt: _prompt, ...callOptionsWithoutPrompt } = callOptions;
-
-  return {
-    providerID: runtime.providerID,
-    providerModelID: runtime.modelID,
-    languageModel,
-    callOptions: callOptionsWithoutPrompt,
-  };
 }

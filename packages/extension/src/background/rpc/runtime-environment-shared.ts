@@ -1,35 +1,6 @@
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 import { toRuntimeStreamPart } from "@llm-bridge/bridge-codecs";
-import {
-  isRuntimeRpcError,
-  type RuntimeRpcError,
-  type RuntimeStreamPart,
-} from "@llm-bridge/contracts";
-import * as Effect from "effect/Effect";
-import {
-  wrapExtensionError,
-  wrapStorageError,
-} from "@/background/runtime/core/errors";
-
-const tryPromise = <A>(
-  tryFn: () => Promise<A>,
-  onError: (error: unknown) => RuntimeRpcError,
-) =>
-  Effect.tryPromise({
-    try: tryFn,
-    catch: (error): RuntimeRpcError =>
-      isRuntimeRpcError(error) ? error : onError(error),
-  });
-
-export const tryExtensionPromise = <A>(
-  operation: string,
-  tryFn: () => Promise<A>,
-) => tryPromise(tryFn, (error) => wrapExtensionError(error, operation));
-
-export const tryStoragePromise = <A>(
-  operation: string,
-  tryFn: () => Promise<A>,
-) => tryPromise(tryFn, (error) => wrapStorageError(error, operation));
+import { type RuntimeStreamPart } from "@llm-bridge/contracts";
 
 export function mapLanguageModelStream(
   stream: ReadableStream<LanguageModelV3StreamPart>,

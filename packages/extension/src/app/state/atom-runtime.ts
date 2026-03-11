@@ -1,6 +1,6 @@
-import { Atom } from "@effect-atom/atom-react";
 import * as Context from "effect/Context";
 import * as Layer from "effect/Layer";
+import { createReactiveRuntime } from "@llm-bridge/reactive-core";
 import { getRuntimeAdminRPC } from "@/app/rpc/runtime-rpc-client";
 
 type ExtensionRuntimeAdminRpcClient = ReturnType<typeof getRuntimeAdminRPC>;
@@ -14,6 +14,6 @@ const ExtensionRuntimeAdminClientLive = Layer.sync(
   () => getRuntimeAdminRPC(),
 );
 
-export const extensionAtomRuntime = Atom.runtime(
+export const extensionReactiveRuntime = createReactiveRuntime(
   ExtensionRuntimeAdminClientLive,
 );
