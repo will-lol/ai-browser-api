@@ -6,7 +6,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { Toaster } from "sonner";
-import { ExtensionAtomProvider } from "@/shared/state/extension-atom-provider";
+import { ExtensionAtomProvider } from "@/app/state/extension-atom-provider";
 import { routeTree } from "./routeTree.gen";
 import "@/styles/globals.css";
 

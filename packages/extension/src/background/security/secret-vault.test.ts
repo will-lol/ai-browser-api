@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import * as Effect from "effect/Effect";
-import type { AuthRecord } from "@/background/runtime/auth-types";
+import type { AuthRecord } from "@/background/runtime/auth/auth-types";
 import { makeSecretVault } from "./secret-vault";
 
 async function createSecretVault() {

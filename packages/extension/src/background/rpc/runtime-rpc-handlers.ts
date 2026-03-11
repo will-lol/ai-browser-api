@@ -29,8 +29,8 @@ import {
 } from "@llm-bridge/runtime-core";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
-import { ChatExecutionService } from "@/background/runtime/ai/chat-execution-service";
-import { wrapExtensionError, wrapTransportError } from "@/background/runtime/errors";
+import { ChatExecutionService } from "@/background/runtime/execution/chat-execution-service";
+import { wrapExtensionError, wrapTransportError } from "@/background/runtime/core/errors";
 
 function serializeUnknownRuntimeError(error: unknown): RuntimeRpcError {
   if (isRuntimeRpcError(error)) return error;

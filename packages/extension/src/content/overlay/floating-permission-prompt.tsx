@@ -1,9 +1,9 @@
 import { Result, useAtomValue } from "@effect-atom/atom-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PendingRequestCard } from "@/shared/components/pending-request-card";
+import { PendingRequestCard } from "@/app/components/pending-request-card";
 import { Toaster, toast } from "sonner";
-import { currentOrigin } from "@/shared/api/runtime-admin-api";
-import { floatingPermissionDataResultAtom } from "@/shared/state/runtime-data";
+import { currentOrigin } from "@/app/api/runtime-api";
+import { floatingPermissionDataResultAtom } from "@/app/state/runtime-data";
 
 interface FloatingPermissionPromptProps {
   className?: string;

@@ -10,7 +10,7 @@ import type {
 import {
   makeResettableConnectionLifecycle,
   type ResettableConnectionLifecycle,
-} from "@llm-bridge/runtime-core";
+} from "./resettable-connection-lifecycle";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
@@ -103,12 +103,6 @@ function closeRuntimeConnection<Rpcs extends Rpc.Any>(
     yield* Scope.close(connection.scope, Exit.succeed(undefined)).pipe(
       Effect.catchAll(() => Effect.void),
     );
-
-    try {
-      connection.port.disconnect();
-    } catch {
-      // ignored
-    }
   }).pipe(Effect.catchAll(() => Effect.void));
 }
 

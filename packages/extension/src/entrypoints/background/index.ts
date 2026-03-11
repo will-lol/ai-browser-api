@@ -3,14 +3,14 @@ import * as Layer from "effect/Layer";
 import { startup } from "@llm-bridge/runtime-core";
 import { browser } from "@wxt-dev/browser";
 import { defineBackground } from "wxt/utils/define-background";
-import { ensureProviderCatalog } from "@/background/runtime/provider-registry";
+import { ensureProviderCatalog } from "@/background/runtime/catalog/provider-registry";
 import { sanitizePendingPermissionRequests } from "@/background/runtime/permissions";
 import { runtimeDb } from "@/background/storage/runtime-db";
-import { subscribeRuntimeEvents } from "@/background/events/runtime-events";
-import { getAuthFlowManager } from "@/background/runtime/auth-flow-manager";
+import { subscribeRuntimeEvents } from "@/app/events/runtime-events";
+import { getAuthFlowManager } from "@/background/runtime/auth/auth-flow-manager";
 import { makeRuntimeCoreInfrastructureLayer } from "@/background/rpc/runtime-adapters";
 import { initializeRuntimeSecurityLayer } from "@/background/security/runtime-security";
-import { ChatExecutionServiceLive } from "@/background/runtime/ai/chat-execution-service";
+import { ChatExecutionServiceLive } from "@/background/runtime/execution/chat-execution-service";
 import {
   RuntimeAdminRpcHandlersLive,
   RuntimePublicRpcHandlersLive,
@@ -19,7 +19,7 @@ import { registerRuntimeRpcServer } from "@/background/rpc/runtime-rpc-server";
 import {
   hasEnabledConnectedModel,
   tabUrlOrigin,
-} from "@/background/runtime/toolbar-icon-state";
+} from "@/background/runtime/permissions/toolbar-icon-state";
 
 const BADGE_BG = "#d97706";
 const SOURCE_ICON_PATH = "/icon-32x32.png";

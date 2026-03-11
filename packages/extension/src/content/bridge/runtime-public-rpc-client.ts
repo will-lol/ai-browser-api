@@ -23,7 +23,7 @@ const core = makeRuntimeRpcClientCore({
     }),
 });
 
-export function createRuntimePublicRpcClient(input: {
+function createRuntimePublicRpcClient(input: {
   readonly ensureClient: Effect.Effect<
     RuntimeRpcClientConnection<RuntimeRpc>,
     RuntimeValidationError

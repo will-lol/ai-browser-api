@@ -1,6 +1,6 @@
 import { ArrowLeft } from "lucide-react";
 import { Outlet, createFileRoute, useRouter } from "@tanstack/react-router";
-import { PopupNav } from "@/popup/components/popup-nav";
+import { PopupNav } from "@/popup/layout/popup-nav";
 import { Button } from "@/shared/ui/button";
 
 export const Route = createFileRoute("/providers")({

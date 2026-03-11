@@ -116,13 +116,13 @@ mock.module("@/background/storage/runtime-db-tx", () => ({
   },
 }));
 
-mock.module("@/background/events/runtime-events", () => ({
+mock.module("@/app/events/runtime-events", () => ({
   publishRuntimeEvent: async (event: { type: string; payload: unknown }) => {
     publishedEvents.push(event);
   },
 }));
 
-mock.module("@/background/runtime/util", () => ({
+mock.module("@/background/runtime/core/util", () => ({
   now: () => {
     nowValue += 1;
     return nowValue;

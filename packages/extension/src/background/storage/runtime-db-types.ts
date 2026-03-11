@@ -1,4 +1,4 @@
-import type { RuntimeConfig } from "@/background/runtime/config-store";
+import type { RuntimeConfig } from "@/background/runtime/config/config-store";
 import type {
   PermissionRequest,
   PermissionStatus,
@@ -6,7 +6,7 @@ import type {
 import type {
   ProviderInfo,
   ProviderModelInfo,
-} from "@/background/runtime/provider-registry";
+} from "@/background/runtime/catalog/provider-registry";
 
 export interface RuntimeDbProvider {
   id: string;

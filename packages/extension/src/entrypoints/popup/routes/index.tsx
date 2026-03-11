@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { PopupNav } from "@/popup/components/popup-nav";
-import { SitePermissionsView } from "@/popup/components/site-permissions-view";
+import { SitePermissionsView } from "@/popup/features/permissions/site-permissions-view";
+import { PopupNav } from "@/popup/layout/popup-nav";
 import { useActiveTab } from "@/popup/hooks/use-active-tab";
 
 export const Route = createFileRoute("/")({

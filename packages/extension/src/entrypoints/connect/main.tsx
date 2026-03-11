@@ -1,8 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Toaster } from "sonner";
-import { ConnectProviderWindow } from "@/popup/components/connect-provider-window";
-import { ExtensionAtomProvider } from "@/shared/state/extension-atom-provider";
+import { ConnectProviderWindow } from "@/popup/features/providers/connect-provider-window";
+import { ExtensionAtomProvider } from "@/app/state/extension-atom-provider";
 import "@/styles/globals.css";
 
 const params = new URLSearchParams(window.location.search);

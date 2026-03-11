@@ -1,6 +1,6 @@
-import { authRecordSchema, type AuthRecord } from "@/background/runtime/auth-types";
+import { authRecordSchema, type AuthRecord } from "@/background/runtime/auth/auth-types";
 import type { RuntimeDbAuth } from "@/background/storage/runtime-db-types";
-import { decodeSchemaOrUndefined } from "@/background/runtime/effect-schema";
+import { decodeSchemaOrUndefined } from "@/background/runtime/core/effect-schema";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type { VaultKeyProviderApi } from "./vault-key-provider";

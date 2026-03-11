@@ -1,4 +1,4 @@
-import { ExtensionAtomProvider } from "@/shared/state/extension-atom-provider";
+import { ExtensionAtomProvider } from "@/app/state/extension-atom-provider";
 import { FloatingPermissionPrompt } from "@/content/overlay/floating-permission-prompt";
 
 export function ContentPermissionOverlay() {

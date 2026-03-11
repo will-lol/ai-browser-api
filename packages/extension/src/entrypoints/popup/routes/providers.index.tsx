@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ProvidersView } from "@/popup/components/providers-view";
+import { ProvidersView } from "@/popup/features/providers/providers-view";
 
 export const Route = createFileRoute("/providers/")({
   staticData: {

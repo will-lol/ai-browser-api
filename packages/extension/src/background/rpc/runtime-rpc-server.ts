@@ -88,12 +88,6 @@ function canAccessRuntimeRpcTag(tag: string, allowedTags: ReadonlySet<string>) {
   return allowedTags.has(tag);
 }
 
-export function getRuntimeRpcAllowedTags<Rpcs extends Rpc.Any>(
-  rpcGroup: RpcGroup.RpcGroup<Rpcs>,
-) {
-  return new Set(rpcGroup.requests.keys());
-}
-
 export function authorizeRuntimeRpcConnect(input: {
   role: RuntimeRole;
   sender: RuntimeSender | null | undefined;

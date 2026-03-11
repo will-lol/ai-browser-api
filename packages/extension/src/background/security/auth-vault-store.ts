@@ -1,9 +1,9 @@
-import type { AuthRecord, AuthResult } from "@/background/runtime/auth-types";
+import type { AuthRecord, AuthResult } from "@/background/runtime/auth/auth-types";
 import { runtimeDb } from "@/background/storage/runtime-db";
 import { afterCommit, runTx } from "@/background/storage/runtime-db-tx";
-import { publishRuntimeEvent } from "@/background/events/runtime-events";
+import { publishRuntimeEvent } from "@/app/events/runtime-events";
 import type { SecretVaultApi } from "@/background/security/secret-vault";
-import { now } from "@/background/runtime/util";
+import { now } from "@/background/runtime/core/util";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import { VaultDecryptError, VaultKeyUnavailableError } from "./vault-errors";

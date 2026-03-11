@@ -31,11 +31,10 @@ export default defineConfig(
       "packages/contracts/src/**/*.{ts,tsx,mts,cts}",
       "packages/runtime-core/src/**/*.{ts,tsx,mts,cts}",
       "packages/example-app/src/**/*.{ts,tsx,mts,cts}",
-      "packages/extension/entrypoints/**/*.{ts,tsx,mts,cts}",
-      "packages/extension/components/**/*.{ts,tsx,mts,cts}",
-      "packages/extension/lib/**/*.{ts,tsx,mts,cts}",
-      "packages/extension/hooks/**/*.{ts,tsx,mts,cts}",
+      "packages/extension/src/**/*.{ts,tsx,mts,cts}",
+      "packages/extension/scripts/**/*.ts",
       "packages/extension/wxt.config.ts",
+      "packages/extension/web-ext.config.ts",
     ],
     languageOptions: {
       parserOptions: {
@@ -95,6 +94,164 @@ export default defineConfig(
               ],
               message:
                 "Do not import internal src files from other workspace packages.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      "packages/extension/src/popup/**/*.{js,jsx,ts,tsx}",
+      "packages/extension/src/entrypoints/popup/**/*.{js,jsx,ts,tsx}",
+      "packages/extension/src/entrypoints/connect/**/*.{js,jsx,ts,tsx}",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@llm-bridge/*/src/*",
+                "../client/src/*",
+                "../../client/src/*",
+                "../../../client/src/*",
+                "../../../../client/src/*",
+              ],
+              message:
+                "Do not import internal src files from other workspace packages.",
+            },
+            {
+              group: ["@/background/*", "@/content/*"],
+              message: "Popup surfaces may only depend on app and shared modules.",
+            },
+            {
+              group: ["@/background/storage/*", "@/background/security/*"],
+              message:
+                "Only background modules may access storage and security implementation details.",
+            },
+            {
+              group: ["@llm-bridge/runtime-core"],
+              message:
+                "Popup surfaces must not import runtime-core wiring directly.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      "packages/extension/src/content/**/*.{js,jsx,ts,tsx}",
+      "packages/extension/src/entrypoints/content/**/*.{js,jsx,ts,tsx}",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@llm-bridge/*/src/*",
+                "../client/src/*",
+                "../../client/src/*",
+                "../../../client/src/*",
+                "../../../../client/src/*",
+              ],
+              message:
+                "Do not import internal src files from other workspace packages.",
+            },
+            {
+              group: ["@/background/*", "@/popup/*"],
+              message:
+                "Content surfaces may only depend on app, content, and shared modules.",
+            },
+            {
+              group: ["@/background/storage/*", "@/background/security/*"],
+              message:
+                "Only background modules may access storage and security implementation details.",
+            },
+            {
+              group: ["@llm-bridge/runtime-core"],
+              message:
+                "Content surfaces must not import runtime-core wiring directly.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/extension/src/app/**/*.{js,jsx,ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@llm-bridge/*/src/*",
+                "../client/src/*",
+                "../../client/src/*",
+                "../../../client/src/*",
+                "../../../../client/src/*",
+              ],
+              message:
+                "Do not import internal src files from other workspace packages.",
+            },
+            {
+              group: ["@/background/*", "@/popup/*", "@/content/*"],
+              message:
+                "App modules may only depend on app and shared modules.",
+            },
+            {
+              group: ["@/background/storage/*", "@/background/security/*"],
+              message:
+                "Only background modules may access storage and security implementation details.",
+            },
+            {
+              group: ["@llm-bridge/runtime-core"],
+              message:
+                "App modules must not import runtime-core wiring directly.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["packages/extension/src/shared/**/*.{js,jsx,ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@llm-bridge/*/src/*",
+                "../client/src/*",
+                "../../client/src/*",
+                "../../../client/src/*",
+                "../../../../client/src/*",
+              ],
+              message:
+                "Do not import internal src files from other workspace packages.",
+            },
+            {
+              group: ["@/app/*", "@/background/*", "@/popup/*", "@/content/*"],
+              message:
+                "Shared modules must remain generic and not depend on extension surfaces.",
+            },
+            {
+              group: ["@/background/storage/*", "@/background/security/*"],
+              message:
+                "Only background modules may access storage and security implementation details.",
+            },
+            {
+              group: ["@llm-bridge/runtime-core"],
+              message:
+                "Shared modules must not import runtime-core wiring directly.",
             },
           ],
         },

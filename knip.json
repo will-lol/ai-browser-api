@@ -18,23 +18,20 @@
     },
     "packages/extension": {
       "entry": [
-        "entrypoints/background.ts",
-        "entrypoints/content.tsx",
-        "entrypoints/connect/main.tsx",
-        "entrypoints/popup/main.tsx",
-        "lib/**/*.test.ts",
+        "src/entrypoints/background/index.ts",
+        "src/entrypoints/content/index.tsx",
+        "src/entrypoints/connect/main.tsx",
+        "src/entrypoints/popup/main.tsx",
+        "src/**/*.test.ts",
         "scripts/**/*.ts",
         "web-ext.config.ts",
         "wxt.config.ts"
       ],
-      "ignore": ["entrypoints/popup/routeTree.gen.ts"],
+      "ignore": ["src/entrypoints/popup/routeTree.gen.ts"],
       "project": [
-        "components/**/*.{ts,tsx}",
-        "entrypoints/**/*.{ts,tsx}",
-        "hooks/**/*.{ts,tsx}",
-        "lib/**/*.{ts,tsx}",
+        "src/**/*.{ts,tsx}",
         "scripts/**/*.ts",
-        "styles/**/*.css",
+        "src/styles/**/*.css",
         "*.config.{js,mjs,ts}"
       ]
     },

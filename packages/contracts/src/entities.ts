@@ -93,6 +93,58 @@ export type RuntimeAuthMethod = Schema.Schema.Type<
   typeof RuntimeAuthMethodSchema
 >;
 
+export const RuntimeAuthFieldConditionSchema = Schema.Struct({
+  key: Schema.String,
+  equals: Schema.String,
+});
+export type RuntimeAuthFieldCondition = Schema.Schema.Type<
+  typeof RuntimeAuthFieldConditionSchema
+>;
+
+export const RuntimeAuthFieldOptionSchema = Schema.Struct({
+  label: Schema.String,
+  value: Schema.String,
+  hint: Schema.optional(Schema.String),
+});
+export type RuntimeAuthFieldOption = Schema.Schema.Type<
+  typeof RuntimeAuthFieldOptionSchema
+>;
+
+const RuntimeAuthFieldBaseSchema = {
+  key: Schema.String,
+  label: Schema.String,
+  placeholder: Schema.optional(Schema.String),
+  defaultValue: Schema.optional(Schema.String),
+  required: Schema.optional(Schema.Boolean),
+  description: Schema.optional(Schema.String),
+  condition: Schema.optional(RuntimeAuthFieldConditionSchema),
+} as const;
+
+export const RuntimeAuthFieldSchema = Schema.Union(
+  Schema.Struct({
+    ...RuntimeAuthFieldBaseSchema,
+    type: Schema.Literal("text", "secret"),
+  }),
+  Schema.Struct({
+    ...RuntimeAuthFieldBaseSchema,
+    type: Schema.Literal("select"),
+    options: Schema.Array(RuntimeAuthFieldOptionSchema),
+  }),
+);
+export type RuntimeAuthField = Schema.Schema.Type<
+  typeof RuntimeAuthFieldSchema
+>;
+
+export const RuntimeResolvedAuthMethodSchema = Schema.Struct({
+  id: Schema.String,
+  type: RuntimeAuthMethodTypeSchema,
+  label: Schema.String,
+  fields: Schema.Array(RuntimeAuthFieldSchema),
+});
+export type RuntimeResolvedAuthMethod = Schema.Schema.Type<
+  typeof RuntimeResolvedAuthMethodSchema
+>;
+
 export const RuntimeAuthFlowStatusSchema = Schema.Literal(
   "idle",
   "authorizing",
@@ -119,7 +171,7 @@ export type RuntimeAuthFlowInstruction = Schema.Schema.Type<
 export const RuntimeAuthFlowSnapshotSchema = Schema.Struct({
   providerID: Schema.String,
   status: RuntimeAuthFlowStatusSchema,
-  methods: Schema.Array(RuntimeAuthMethodSchema),
+  methods: Schema.Array(RuntimeResolvedAuthMethodSchema),
   runningMethodID: Schema.optional(Schema.String),
   instruction: Schema.optional(RuntimeAuthFlowInstructionSchema),
   error: Schema.optional(Schema.String),
