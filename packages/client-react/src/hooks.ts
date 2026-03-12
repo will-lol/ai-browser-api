@@ -1,18 +1,24 @@
+import {
+  useChat as useAiChat,
+  type UIMessage,
+} from "@ai-sdk/react";
 import type { BridgeChatTransportOptions } from "@llm-bridge/client";
 import {
   useMutationResource,
   useQueryResourceRefresh,
   useQueryResourceState,
 } from "@llm-bridge/reactive-core";
+import type { ChatTransport } from "ai";
 import { useMemo } from "react";
-import { useStableBridgeChatTransport } from "./chat-transport";
+import { useBridgeChatTransportProxy } from "./chat-transport";
 import { useBridgeResources } from "./runtime";
 import type {
-  BridgeChatTransportState,
   BridgeConnectionState,
   BridgeModelState,
   BridgeModelsState,
   BridgePermissionRequestState,
+  UseChatHelpers,
+  UseChatOptions,
 } from "./types";
 
 function toBridgeConnectionState(
@@ -58,16 +64,26 @@ export function useBridgeModel(modelId: string): BridgeModelState {
   };
 }
 
-export function useBridgeChatTransport(
-  options?: BridgeChatTransportOptions,
-): BridgeChatTransportState {
+export function useChat<UI_MESSAGE extends UIMessage = UIMessage>({
+  transportOptions,
+  ...options
+}: UseChatOptions<UI_MESSAGE> = {}): UseChatHelpers<UI_MESSAGE> {
   const connection = useBridgeConnectionState();
-  const transport = useStableBridgeChatTransport(connection.client, options);
+  const transport = useBridgeChatTransportProxy(
+    connection.client,
+    transportOptions as BridgeChatTransportOptions | undefined,
+  ) as ChatTransport<UI_MESSAGE>;
+  const chat = useAiChat<UI_MESSAGE>({
+    ...options,
+    transport,
+  });
 
   return {
-    ...connection,
-    transport,
-    options,
+    ...chat,
+    isReady: connection.isReady,
+    isLoading: connection.isLoading,
+    hasError: connection.hasError,
+    transportError: connection.error,
   };
 }
 

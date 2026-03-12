@@ -1,21 +1,12 @@
-import { useChat } from "@ai-sdk/react";
-import type { ChatTransport, UIMessage } from "ai";
+import type { UIMessage } from "ai";
 import { Bot, Loader2, RefreshCw, Send, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
-  useBridgeChatTransport,
+  useChat,
   useBridgeModels,
 } from "@llm-bridge/client-react";
 
 const DEFAULT_MODEL_ID = "google/gemini-3.1-pro-preview";
-const TRANSPORT_UNAVAILABLE_ERROR = "Bridge chat transport is not ready yet.";
-
-const unavailableChatTransport: ChatTransport<UIMessage> = {
-  sendMessages: async () => {
-    throw new Error(TRANSPORT_UNAVAILABLE_ERROR);
-  },
-  reconnectToStream: async () => null,
-};
 
 function getMessageText(message: UIMessage) {
   return message.parts
@@ -32,11 +23,15 @@ function getMessageText(message: UIMessage) {
 export function App() {
   const { models, refresh, status, error: modelsError } = useBridgeModels();
   const {
-    transport,
+    messages,
+    sendMessage,
+    clearError,
+    error,
+    status: chatStatus,
     isReady: isChatReady,
     isLoading: isTransportLoading,
-    error: transportError,
-  } = useBridgeChatTransport();
+    transportError,
+  } = useChat();
   const [input, setInput] = useState("");
   const [requestedModelId, setRequestedModelId] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -45,16 +40,6 @@ export function App() {
     models.find((model) => model.id === DEFAULT_MODEL_ID)?.id ??
     models[0]?.id ??
     "";
-
-  const {
-    messages,
-    sendMessage,
-    clearError,
-    error,
-    status: chatStatus,
-  } = useChat({
-    transport: transport ?? unavailableChatTransport,
-  });
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });

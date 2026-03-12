@@ -1,10 +1,14 @@
+import type {
+  UseChatHelpers as AiUseChatHelpers,
+  UseChatOptions as AiUseChatOptions,
+} from "@ai-sdk/react";
 import type { BridgeClientApi, BridgeModelSummary } from "@llm-bridge/client";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type {
   BridgeChatTransportOptions,
   BridgePermissionResult,
 } from "@llm-bridge/client";
-import type { ChatTransport, UIMessage } from "ai";
+import type { ChatInit, UIMessage } from "ai";
 
 export type BridgeConnectionStatus = "loading" | "ready" | "error";
 
@@ -38,10 +42,22 @@ export type BridgeModelState = BridgeQueryState<LanguageModelV3> & {
   refresh: () => Promise<void>;
 };
 
-export type BridgeChatTransportState = BridgeConnectionState & {
-  transport: ChatTransport<UIMessage>;
-  options: BridgeChatTransportOptions | undefined;
+export type UseChatOptions<UI_MESSAGE extends UIMessage = UIMessage> = Omit<
+  ChatInit<UI_MESSAGE>,
+  "transport"
+> & {
+  experimental_throttle?: AiUseChatOptions<UI_MESSAGE>["experimental_throttle"];
+  resume?: AiUseChatOptions<UI_MESSAGE>["resume"];
+  transportOptions?: BridgeChatTransportOptions;
 };
+
+export type UseChatHelpers<UI_MESSAGE extends UIMessage = UIMessage> =
+  AiUseChatHelpers<UI_MESSAGE> & {
+    isReady: boolean;
+    isLoading: boolean;
+    hasError: boolean;
+    transportError: Error | null;
+  };
 
 export type BridgePermissionRequestInput = Parameters<
   BridgeClientApi["requestPermission"]

@@ -52,6 +52,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@ai-sdk/provider": "^3.0.8",
+        "@ai-sdk/react": "^3.0.118",
         "@llm-bridge/client": "workspace:*",
         "@llm-bridge/reactive-core": "workspace:*",
         "ai": "^6.0.112",
@@ -83,7 +84,6 @@
     "packages/example-app": {
       "name": "@llm-bridge/example-app",
       "dependencies": {
-        "@ai-sdk/react": "^3.0.118",
         "@llm-bridge/client-react": "workspace:*",
         "ai": "^6.0.112",
         "lucide-react": "^0.577.0",

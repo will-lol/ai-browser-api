@@ -120,6 +120,7 @@ export function createChatTransport(input: {
   abortChatStream: (chatId: string) => Promise<void>;
   options?: BridgeChatTransportOptions;
 }): ChatTransport<UIMessage> {
+  console.log("createChatTransport");
   return {
     async sendMessages({
       chatId,

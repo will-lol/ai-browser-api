@@ -16,6 +16,7 @@
   "scripts": {
     "build": "tsdown",
     "lint": "eslint .",
+    "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -23,6 +23,7 @@ export function makeBridgeClientApi(input: {
   ) => LanguageModelV3;
   nextModelRequestId: () => string;
 }) {
+  console.log("makeBridgeClientApi");
   const listModels = () =>
     Effect.runPromise(
       input.ensureConnection.pipe(
@@ -72,6 +73,7 @@ export function makeBridgeClientApi(input: {
       options,
     });
 
+  console.log("we've got it");
   return {
     listModels,
     getModel,

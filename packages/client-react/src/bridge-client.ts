@@ -1,6 +1,6 @@
 export { BridgeProvider } from "./runtime";
 export {
-  useBridgeChatTransport,
+  useChat,
   useBridgeClient,
   useBridgeConnectionState,
   useBridgeModel,

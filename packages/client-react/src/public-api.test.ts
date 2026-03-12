@@ -12,8 +12,9 @@ describe("client-react public API", () => {
     const source = readFileSync(clientReactIndexPath, "utf8");
 
     assert.equal(source.includes("BridgeProvider"), true);
+    assert.equal(source.includes("useChat"), true);
     assert.equal(source.includes("useBridgeModels"), true);
-    assert.equal(source.includes("useBridgeChatTransport"), true);
+    assert.equal(source.includes("useBridgeChatTransport"), false);
     assert.equal(source.includes("Atom"), false);
   });
 });

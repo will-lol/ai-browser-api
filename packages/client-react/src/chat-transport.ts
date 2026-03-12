@@ -5,34 +5,64 @@ import type {
 import type { ChatTransport, UIMessage } from "ai";
 import { useRef } from "react";
 
-const unavailableChatTransport: ChatTransport<UIMessage> = {
-  sendMessages: async () => {
-    throw new Error("Bridge chat transport is not ready yet.");
-  },
-  reconnectToStream: async () => null,
-};
+const TRANSPORT_UNAVAILABLE_ERROR = "Bridge chat transport is not ready yet.";
 
-export function useStableBridgeChatTransport(
+function getCurrentTransport(input: {
+  transportRef: {
+    current:
+      | {
+          client: BridgeClientApi | null;
+          options: BridgeChatTransportOptions | undefined;
+          transport: ChatTransport<UIMessage> | null;
+        }
+      | null;
+  };
+}) {
+  const transport = input.transportRef.current?.transport;
+  if (transport == null) {
+    throw new Error(TRANSPORT_UNAVAILABLE_ERROR);
+  }
+
+  return transport;
+}
+
+// AI SDK useChat snapshots the initial transport, so keep one proxy object and
+// forward each call to the latest bridge transport when the client becomes ready.
+export function useBridgeChatTransportProxy(
   client: BridgeClientApi | null,
   options?: BridgeChatTransportOptions,
 ) {
-  const transportRef = useRef<{
+  const currentTransportRef = useRef<{
     client: BridgeClientApi | null;
     options: BridgeChatTransportOptions | undefined;
-    transport: ChatTransport<UIMessage>;
+    transport: ChatTransport<UIMessage> | null;
   } | null>(null);
+  const proxyTransportRef = useRef<ChatTransport<UIMessage> | null>(null);
 
   if (
-    transportRef.current == null ||
-    transportRef.current.client !== client ||
-    transportRef.current.options !== options
+    currentTransportRef.current == null ||
+    currentTransportRef.current.client !== client ||
+    currentTransportRef.current.options !== options
   ) {
-    transportRef.current = {
+    currentTransportRef.current = {
       client,
       options,
-      transport: client?.getChatTransport(options) ?? unavailableChatTransport,
+      transport: client?.getChatTransport(options) ?? null,
     };
   }
 
-  return transportRef.current.transport;
+  if (proxyTransportRef.current == null) {
+    proxyTransportRef.current = {
+      sendMessages: async (input) =>
+        getCurrentTransport({
+          transportRef: currentTransportRef,
+        }).sendMessages(input),
+      reconnectToStream: async (input) =>
+        getCurrentTransport({
+          transportRef: currentTransportRef,
+        }).reconnectToStream(input),
+    };
+  }
+
+  return proxyTransportRef.current;
 }

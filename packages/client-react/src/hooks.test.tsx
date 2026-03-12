@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
-import { useEffect } from "react";
 import TestRenderer, { act } from "react-test-renderer";
+import type {
+  ChatTransport,
+  UIMessage,
+  UIMessageChunk,
+} from "ai";
+import type { BridgeChatTransportOptions } from "@llm-bridge/client";
 import { afterEach, beforeEach, describe, it, mock } from "bun:test";
+import { useEffect } from "react";
 
 type FakeClient = {
   listModels: () => Promise<
@@ -14,7 +20,9 @@ type FakeClient = {
     }>
   >;
   getModel: (modelId: string) => Promise<{ id: string }>;
-  getChatTransport: () => { id: string };
+  getChatTransport: (
+    options?: BridgeChatTransportOptions,
+  ) => ChatTransport<UIMessage>;
   requestPermission: (input: { modelId: string }) => Promise<{ requestId: string }>;
   close: () => Promise<void>;
 };
@@ -24,7 +32,73 @@ let closeCalls = 0;
 let listModelsCalls = 0;
 let getModelCalls = 0;
 let requestPermissionCalls: Array<{ modelId: string }> = [];
-let transport = { id: "transport-1" };
+let getChatTransportCalls: Array<BridgeChatTransportOptions | undefined> = [];
+let sendMessagesCalls: Array<{
+  body: unknown;
+  messages: UIMessage[];
+}> = [];
+let responseText = "Bridge reply";
+let transportSequence = 0;
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+
+  return {
+    promise,
+    resolve,
+    reject,
+  };
+}
+
+function createMessageStream(text: string): ReadableStream<UIMessageChunk> {
+  return new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      controller.enqueue({
+        type: "start",
+        messageId: "assistant-1",
+      });
+      controller.enqueue({
+        type: "text-start",
+        id: "text-1",
+      });
+      controller.enqueue({
+        type: "text-delta",
+        id: "text-1",
+        delta: text,
+      });
+      controller.enqueue({
+        type: "text-end",
+        id: "text-1",
+      });
+      controller.enqueue({
+        type: "finish",
+        finishReason: "stop",
+      });
+      controller.close();
+    },
+  });
+}
+
+function createFakeTransport(): ChatTransport<UIMessage> & { id: string } {
+  transportSequence += 1;
+
+  return {
+    id: `transport-${transportSequence}`,
+    sendMessages: async (input) => {
+      sendMessagesCalls.push({
+        body: input.body,
+        messages: input.messages,
+      });
+      return createMessageStream(responseText);
+    },
+    reconnectToStream: async () => null,
+  };
+}
 
 function createFakeClient(): FakeClient {
   return {
@@ -44,7 +118,10 @@ function createFakeClient(): FakeClient {
       getModelCalls += 1;
       return { id: modelId };
     },
-    getChatTransport: () => transport,
+    getChatTransport: (options?: BridgeChatTransportOptions) => {
+      getChatTransportCalls.push(options);
+      return createFakeTransport();
+    },
     requestPermission: async (input: { modelId: string }) => {
       requestPermissionCalls.push(input);
       return { requestId: "prm_1" };
@@ -55,13 +132,37 @@ function createFakeClient(): FakeClient {
   };
 }
 
+function getMessageText(message: UIMessage | undefined) {
+  if (!message) {
+    return "";
+  }
+
+  return message.parts
+    .filter(
+      (
+        part,
+      ): part is Extract<(typeof message.parts)[number], { type: "text" }> =>
+        part.type === "text",
+    )
+    .map((part) => part.text)
+    .join("");
+}
+
+async function flushMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 beforeEach(() => {
   createClientCalls = 0;
   closeCalls = 0;
   listModelsCalls = 0;
   getModelCalls = 0;
   requestPermissionCalls = [];
-  transport = { id: "transport-1" };
+  getChatTransportCalls = [];
+  sendMessagesCalls = [];
+  responseText = "Bridge reply";
+  transportSequence = 0;
 });
 
 afterEach(() => {
@@ -91,6 +192,7 @@ describe("client-react hooks", () => {
           <Probe />
         </BridgeProvider>,
       );
+      await flushMicrotasks();
     });
 
     assert.equal(createClientCalls, 1);
@@ -119,11 +221,8 @@ describe("client-react hooks", () => {
       const { models } = useBridgeModels();
       const { model } = useBridgeModel("google/gemini-3.1-pro-preview");
 
-      useEffect(() => {
-        latestModels = models;
-        hasModel = model != null;
-      }, [model, models]);
-
+      latestModels = models;
+      hasModel = model != null;
       return null;
     }
 
@@ -133,6 +232,7 @@ describe("client-react hooks", () => {
           <Probe />
         </BridgeProvider>,
       );
+      await flushMicrotasks();
     });
 
     assert.equal(listModelsCalls, 1);
@@ -141,7 +241,166 @@ describe("client-react hooks", () => {
     assert.equal(hasModel, true);
   });
 
-  it("returns a stable chat transport across rerenders", async () => {
+  it("mounts before readiness and sends through the ready transport once available", async () => {
+    const deferredClient = createDeferred<FakeClient>();
+
+    mock.module("@llm-bridge/client", () => ({
+      createBridgeClient: async () => {
+        createClientCalls += 1;
+        return deferredClient.promise;
+      },
+    }));
+
+    const { BridgeProvider, useChat } = await import("./index");
+
+    let latestChat: ReturnType<typeof useChat> | null = null;
+
+    function Probe() {
+      latestChat = useChat();
+      return null;
+    }
+
+    await act(async () => {
+      TestRenderer.create(
+        <BridgeProvider>
+          <Probe />
+        </BridgeProvider>,
+      );
+      await flushMicrotasks();
+    });
+
+    assert.notEqual(latestChat, null);
+    assert.equal(latestChat!.isLoading, true);
+    assert.equal(latestChat!.isReady, false);
+    assert.equal(getChatTransportCalls.length, 0);
+
+    await act(async () => {
+      deferredClient.resolve(createFakeClient());
+      await flushMicrotasks();
+      await flushMicrotasks();
+    });
+
+    assert.equal(latestChat!.isLoading, false);
+    assert.equal(latestChat!.isReady, true);
+    assert.equal(getChatTransportCalls.length, 1);
+
+    await act(async () => {
+      await latestChat!.sendMessage(
+        { text: "hi" },
+        {
+          body: {
+            modelId: "google/gemini-3.1-pro-preview",
+          },
+        },
+      );
+      await flushMicrotasks();
+    });
+
+    assert.equal(sendMessagesCalls.length, 1);
+    assert.equal(latestChat!.status, "ready");
+    assert.equal(latestChat!.error, undefined);
+    assert.equal(latestChat!.messages.length, 2);
+    assert.equal(
+      getMessageText(latestChat!.messages[latestChat!.messages.length - 1]),
+      responseText,
+    );
+  });
+
+  it("reports bridge readiness state alongside the chat helpers", async () => {
+    const deferredClient = createDeferred<FakeClient>();
+
+    mock.module("@llm-bridge/client", () => ({
+      createBridgeClient: async () => {
+        createClientCalls += 1;
+        return deferredClient.promise;
+      },
+    }));
+
+    const { BridgeProvider, useChat } = await import("./index");
+
+    let latestChat: ReturnType<typeof useChat> | null = null;
+
+    function Probe() {
+      latestChat = useChat();
+      return null;
+    }
+
+    await act(async () => {
+      TestRenderer.create(
+        <BridgeProvider>
+          <Probe />
+        </BridgeProvider>,
+      );
+      await flushMicrotasks();
+    });
+
+    assert.notEqual(latestChat, null);
+    assert.equal(latestChat!.isLoading, true);
+    assert.equal(latestChat!.isReady, false);
+    assert.equal(latestChat!.hasError, false);
+    assert.equal(latestChat!.transportError, null);
+
+    await act(async () => {
+      deferredClient.resolve(createFakeClient());
+      await flushMicrotasks();
+      await flushMicrotasks();
+    });
+
+    assert.equal(latestChat!.isLoading, false);
+    assert.equal(latestChat!.isReady, true);
+    assert.equal(latestChat!.hasError, false);
+    assert.equal(latestChat!.transportError, null);
+  });
+
+  it("returns the unavailable error when sending before the bridge is ready", async () => {
+    const deferredClient = createDeferred<FakeClient>();
+
+    mock.module("@llm-bridge/client", () => ({
+      createBridgeClient: async () => {
+        createClientCalls += 1;
+        return deferredClient.promise;
+      },
+    }));
+
+    const { BridgeProvider, useChat } = await import("./index");
+
+    let latestChat: ReturnType<typeof useChat> | null = null;
+
+    function Probe() {
+      latestChat = useChat();
+      return null;
+    }
+
+    await act(async () => {
+      TestRenderer.create(
+        <BridgeProvider>
+          <Probe />
+        </BridgeProvider>,
+      );
+      await flushMicrotasks();
+    });
+
+    await act(async () => {
+      await latestChat!.sendMessage(
+        { text: "hi" },
+        {
+          body: {
+            modelId: "google/gemini-3.1-pro-preview",
+          },
+        },
+      );
+      await flushMicrotasks();
+    });
+
+    assert.equal(sendMessagesCalls.length, 0);
+    assert.equal(latestChat!.status, "error");
+    assert.equal(
+      latestChat!.error?.message,
+      "Bridge chat transport is not ready yet.",
+    );
+  });
+
+  it("passes transportOptions through and preserves chat state across rerenders", async () => {
     mock.module("@llm-bridge/client", () => ({
       createBridgeClient: async () => {
         createClientCalls += 1;
@@ -149,21 +408,17 @@ describe("client-react hooks", () => {
       },
     }));
 
-    const { BridgeProvider, useBridgeChatTransport } = await import("./index");
+    const { BridgeProvider, useChat } = await import("./index");
 
-    let latestTransport: object | null = null;
+    const transportOptions: BridgeChatTransportOptions = {
+      prepareSendMessages: async () => ({}),
+    };
+    let latestChat: ReturnType<typeof useChat> | null = null;
 
     function Probe() {
-      const { transport, isReady } = useBridgeChatTransport();
-
-      useEffect(() => {
-        if (!isReady || "id" in transport === false) {
-          return;
-        }
-
-        latestTransport = transport;
-      }, [isReady, transport]);
-
+      latestChat = useChat({
+        transportOptions,
+      });
       return null;
     }
 
@@ -174,9 +429,22 @@ describe("client-react hooks", () => {
           <Probe />
         </BridgeProvider>,
       );
+      await flushMicrotasks();
     });
 
-    const firstTransport = latestTransport;
+    const firstChatId = latestChat!.id;
+
+    await act(async () => {
+      await latestChat!.sendMessage(
+        { text: "hello" },
+        {
+          body: {
+            modelId: "google/gemini-3.1-pro-preview",
+          },
+        },
+      );
+      await flushMicrotasks();
+    });
 
     await act(async () => {
       renderer!.update(
@@ -184,10 +452,17 @@ describe("client-react hooks", () => {
           <Probe />
         </BridgeProvider>,
       );
+      await flushMicrotasks();
     });
 
-    assert.notEqual(firstTransport, null);
-    assert.equal(latestTransport, firstTransport);
+    assert.equal(getChatTransportCalls.length, 1);
+    assert.equal(getChatTransportCalls[0], transportOptions);
+    assert.equal(latestChat!.id, firstChatId);
+    assert.equal(latestChat!.messages.length, 2);
+    assert.equal(
+      getMessageText(latestChat!.messages[latestChat!.messages.length - 1]),
+      responseText,
+    );
   });
 
   it("requests permission through the public client API only", async () => {
@@ -218,6 +493,7 @@ describe("client-react hooks", () => {
           <Probe />
         </BridgeProvider>,
       );
+      await flushMicrotasks();
     });
 
     assert.deepEqual(requestPermissionCalls, [

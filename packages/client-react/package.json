@@ -15,10 +15,12 @@
   ],
   "scripts": {
     "build": "tsdown",
+    "dev": "tsdown --watch",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/react": "^3.0.118",
     "@ai-sdk/provider": "^3.0.8",
     "@llm-bridge/client": "workspace:*",
     "@llm-bridge/reactive-core": "workspace:*",

@@ -1,6 +1,6 @@
 export {
   BridgeProvider,
-  useBridgeChatTransport,
+  useChat,
   useBridgeClient,
   useBridgeConnectionState,
   useBridgeModel,
@@ -8,7 +8,6 @@ export {
   useBridgePermissionRequest,
 } from "./bridge-client";
 export type {
-  BridgeChatTransportState,
   BridgeConnectionState,
   BridgeConnectionStatus,
   BridgeModelState,
@@ -16,4 +15,6 @@ export type {
   BridgePermissionRequestInput,
   BridgePermissionRequestState,
   BridgeQueryState,
+  UseChatHelpers,
+  UseChatOptions,
 } from "./types";

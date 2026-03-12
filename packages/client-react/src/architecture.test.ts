@@ -29,7 +29,7 @@ describe("client-react architecture", () => {
     }
   });
 
-  it("depends on the public client and reactive core, not contracts or effect-atom", () => {
+  it("depends on the public client, AI SDK React, and reactive core only", () => {
     const packageJson = JSON.parse(readFileSync(clientReactPackagePath, "utf8")) as {
       dependencies?: Record<string, string>;
     };
@@ -40,6 +40,10 @@ describe("client-react architecture", () => {
     );
     assert.equal(
       "@llm-bridge/reactive-core" in (packageJson.dependencies ?? {}),
+      true,
+    );
+    assert.equal(
+      "@ai-sdk/react" in (packageJson.dependencies ?? {}),
       true,
     );
     assert.equal(
