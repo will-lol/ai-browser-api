@@ -11,7 +11,6 @@ import {
   runLanguageModelGenerate,
   runLanguageModelStream,
 } from "@/background/runtime/execution/language-model-runtime";
-import { mapLanguageModelStream } from "@/background/rpc/runtime-environment-shared";
 
 export const ModelExecutionServiceLive = Layer.succeed(
   ModelExecutionService,
@@ -47,6 +46,6 @@ export const ModelExecutionServiceLive = Layer.succeed(
         requestID: input.requestID,
         options: fromRuntimeModelCallOptions(input.options),
         signal: input.signal,
-      }).pipe(Effect.map((stream) => mapLanguageModelStream(stream))),
+      }),
   } satisfies ModelExecutionServiceApi,
 );

@@ -1,5 +1,6 @@
 import {
   RuntimeAdminRpcGroup,
+  RuntimeDefectError,
   RuntimeInternalError,
   RuntimePublicRpcGroup,
   RuntimeValidationError,
@@ -7,11 +8,11 @@ import {
   type RuntimeRpcError,
 } from "@llm-bridge/contracts";
 import {
+  abortChatStream,
   abortModelCall,
   acquireModel,
   cancelProviderAuthFlow,
   createPermissionRequest,
-  ChatExecutionService,
   dismissPermissionRequest,
   disconnectProvider,
   ensureOriginEnabled,
@@ -23,7 +24,9 @@ import {
   listPermissions,
   listProviders,
   openProviderAuthWindow,
+  reconnectChatStream,
   resolvePermissionRequest,
+  sendChatMessages,
   setModelPermission,
   setOriginEnabled,
   startProviderAuthFlow,
@@ -40,7 +43,6 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import { wrapTransportError } from "@/background/runtime/core/errors";
 
 function serializeUnknownRuntimeError(error: unknown): RuntimeRpcError {
   if (isRuntimeRpcError(error)) {
@@ -65,7 +67,9 @@ function serializeRuntimeCause(cause: Cause.Cause<unknown>): RuntimeRpcError {
     pretty: Cause.pretty(cause),
   });
 
-  return serializeUnknownRuntimeError(defect);
+  return new RuntimeDefectError({
+    defect: String(defect),
+  });
 }
 
 export function serializeRpcError<A, E, R>(
@@ -73,38 +77,6 @@ export function serializeRpcError<A, E, R>(
 ): Effect.Effect<A, RuntimeRpcError, R> {
   return Effect.catchAllCause(effect, (cause) =>
     Effect.fail(serializeRuntimeCause(cause)),
-  );
-}
-
-function serializeRpcReadableStream<A, E, R>(
-  effect: Effect.Effect<ReadableStream<A>, E, R>,
-): Stream.Stream<A, RuntimeRpcError, R> {
-  return Stream.unwrap(
-    Effect.map(serializeRpcError(effect), (stream) =>
-      Stream.fromReadableStream(
-        () => stream,
-        (error) =>
-          isRuntimeRpcError(error) ? error : wrapTransportError(error),
-      ),
-    ),
-  );
-}
-
-function serializeRpcTypedStream<A, E, R>(
-  stream: Stream.Stream<A, E, R>,
-): Stream.Stream<A, RuntimeRpcError, R> {
-  return Stream.catchAllCause(stream, (cause) =>
-    Stream.fail(serializeRuntimeCause(cause)),
-  );
-}
-
-function serializeRpcEffectStream<A, E, R, R2>(
-  effect: Effect.Effect<Stream.Stream<A, E, R2>, E, R>,
-): Stream.Stream<A, RuntimeRpcError, R | R2> {
-  return Stream.unwrap(
-    Effect.map(serializeRpcError(effect), (stream) =>
-      serializeRpcTypedStream(stream),
-    ),
   );
 }
 
@@ -119,10 +91,8 @@ function requireOrigin(operation: string, origin: string | undefined) {
   );
 }
 
-const makePublicRuntimeRpcHandlers = Effect.gen(function* () {
-  const chat = yield* ChatExecutionService;
-
-  return RuntimePublicRpcGroup.of({
+const makePublicRuntimeRpcHandlers = Effect.sync(() =>
+  RuntimePublicRpcGroup.of({
     listModels: ({ origin, connectedOnly, providerID }) =>
       serializeRpcError(
         origin
@@ -162,15 +132,13 @@ const makePublicRuntimeRpcHandlers = Effect.gen(function* () {
         }),
       ),
     modelDoStream: ({ origin, requestId, sessionID, modelId, options }) =>
-      serializeRpcReadableStream(
-        streamModel({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-          options,
-        }),
-      ),
+      streamModel({
+        origin,
+        requestID: requestId,
+        sessionID,
+        modelID: modelId,
+        options,
+      }),
     abortModelCall: ({ origin, sessionID, requestId }) =>
       serializeRpcError(
         abortModelCall({
@@ -179,10 +147,9 @@ const makePublicRuntimeRpcHandlers = Effect.gen(function* () {
           requestID: requestId,
         }),
       ),
-    chatSendMessages: (input) => serializeRpcEffectStream(chat.sendMessages(input)),
-    chatReconnectStream: (input) =>
-      serializeRpcEffectStream(chat.reconnectStream(input)),
-    abortChatStream: (input) => serializeRpcError(chat.abortStream(input)),
+    chatSendMessages: (input) => sendChatMessages(input),
+    chatReconnectStream: (input) => reconnectChatStream(input),
+    abortChatStream: (input) => serializeRpcError(abortChatStream(input)),
     createPermissionRequest: (input) =>
       serializeRpcError(
         Effect.gen(function* () {
@@ -190,13 +157,11 @@ const makePublicRuntimeRpcHandlers = Effect.gen(function* () {
           return yield* createPermissionRequest(input);
         }),
       ),
-  });
-});
+  }),
+);
 
-const makeAdminRuntimeRpcHandlers = Effect.gen(function* () {
-  const chat = yield* ChatExecutionService;
-
-  return RuntimeAdminRpcGroup.of({
+const makeAdminRuntimeRpcHandlers = Effect.sync(() =>
+  RuntimeAdminRpcGroup.of({
     listModels: ({ origin, connectedOnly, providerID }) =>
       serializeRpcError(
         origin
@@ -215,8 +180,8 @@ const makeAdminRuntimeRpcHandlers = Effect.gen(function* () {
             }),
       ),
     streamModels: ({ origin, connectedOnly, providerID }) =>
-      serializeRpcTypedStream(
-        Stream.unwrap(
+      Stream.unwrap(
+        serializeRpcError(
           origin
             ? Effect.gen(function* () {
                 yield* ensureOriginEnabled(
@@ -236,10 +201,9 @@ const makeAdminRuntimeRpcHandlers = Effect.gen(function* () {
         ),
       ),
     getOriginState: ({ origin }) => serializeRpcError(getOriginState(origin)),
-    streamOriginState: ({ origin }) =>
-      serializeRpcTypedStream(streamOriginState(origin)),
+    streamOriginState: ({ origin }) => streamOriginState(origin),
     listPending: ({ origin }) => serializeRpcError(listPending(origin)),
-    streamPending: ({ origin }) => serializeRpcTypedStream(streamPending(origin)),
+    streamPending: ({ origin }) => streamPending(origin),
     acquireModel: ({ origin, requestId, sessionID, modelId }) =>
       serializeRpcError(
         acquireModel({
@@ -260,15 +224,13 @@ const makeAdminRuntimeRpcHandlers = Effect.gen(function* () {
         }),
       ),
     modelDoStream: ({ origin, requestId, sessionID, modelId, options }) =>
-      serializeRpcReadableStream(
-        streamModel({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-          options,
-        }),
-      ),
+      streamModel({
+        origin,
+        requestID: requestId,
+        sessionID,
+        modelID: modelId,
+        options,
+      }),
     abortModelCall: ({ origin, sessionID, requestId }) =>
       serializeRpcError(
         abortModelCall({
@@ -277,10 +239,9 @@ const makeAdminRuntimeRpcHandlers = Effect.gen(function* () {
           requestID: requestId,
         }),
       ),
-    chatSendMessages: (input) => serializeRpcEffectStream(chat.sendMessages(input)),
-    chatReconnectStream: (input) =>
-      serializeRpcEffectStream(chat.reconnectStream(input)),
-    abortChatStream: (input) => serializeRpcError(chat.abortStream(input)),
+    chatSendMessages: (input) => sendChatMessages(input),
+    chatReconnectStream: (input) => reconnectChatStream(input),
+    abortChatStream: (input) => serializeRpcError(abortChatStream(input)),
     createPermissionRequest: (input) =>
       serializeRpcError(
         Effect.gen(function* () {
@@ -289,17 +250,16 @@ const makeAdminRuntimeRpcHandlers = Effect.gen(function* () {
         }),
       ),
     listProviders: () => serializeRpcError(listProviders()),
-    streamProviders: () => serializeRpcTypedStream(streamProviders()),
+    streamProviders: () => streamProviders(),
     listConnectedModels: () => serializeRpcError(listConnectedModels()),
     listPermissions: ({ origin }) => serializeRpcError(listPermissions(origin)),
-    streamPermissions: ({ origin }) =>
-      serializeRpcTypedStream(streamPermissions(origin)),
+    streamPermissions: ({ origin }) => streamPermissions(origin),
     openProviderAuthWindow: ({ providerID }) =>
       serializeRpcError(openProviderAuthWindow(providerID)),
     getProviderAuthFlow: ({ providerID }) =>
       serializeRpcError(getProviderAuthFlow(providerID)),
     streamProviderAuthFlow: ({ providerID }) =>
-      serializeRpcTypedStream(streamProviderAuthFlow(providerID)),
+      streamProviderAuthFlow(providerID),
     startProviderAuthFlow: ({ providerID, methodID, values }) =>
       serializeRpcError(
         startProviderAuthFlow({
@@ -332,8 +292,8 @@ const makeAdminRuntimeRpcHandlers = Effect.gen(function* () {
       serializeRpcError(resolvePermissionRequest(input)),
     dismissPermissionRequest: ({ requestId }) =>
       serializeRpcError(dismissPermissionRequest(requestId)),
-  });
-});
+  }),
+);
 
 export const RuntimePublicRpcHandlersLive = RuntimePublicRpcGroup.toLayer(
   makePublicRuntimeRpcHandlers,

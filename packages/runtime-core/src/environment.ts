@@ -139,7 +139,7 @@ export interface AuthFlowServiceApi {
       providerID: string;
       result: RuntimeAuthFlowSnapshot;
     },
-    unknown
+    RuntimeRpcError
   >;
   readonly startProviderAuthFlow: (input: {
     providerID: string;
@@ -195,7 +195,10 @@ export interface ModelExecutionServiceApi {
     modelID: string;
     options: RuntimeModelCallOptions;
     signal?: AbortSignal;
-  }) => AppEffect<ReadableStream<RuntimeStreamPart>>;
+  }) => AppEffect<
+    Stream.Stream<RuntimeStreamPart, RuntimeRpcError>,
+    RuntimeRpcError
+  >;
 }
 
 export class ModelExecutionService extends Context.Tag(

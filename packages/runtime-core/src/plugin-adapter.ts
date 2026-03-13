@@ -1,9 +1,11 @@
 import type {
   RuntimeAuthMethod,
   RuntimeGenerateResponse,
+  RuntimeRpcError,
   RuntimeStreamPart,
 } from "@llm-bridge/contracts";
 import type * as Effect from "effect/Effect";
+import type * as Stream from "effect/Stream";
 
 export interface ProviderAdapterAuthorizeInput {
   providerID: string;
@@ -33,7 +35,10 @@ export interface ProviderModelExecutor {
   ) => Effect.Effect<RuntimeGenerateResponse>;
   doStream: (
     options: Record<string, unknown>,
-  ) => Effect.Effect<ReadableStream<RuntimeStreamPart>>;
+  ) => Effect.Effect<
+    Stream.Stream<RuntimeStreamPart, RuntimeRpcError>,
+    RuntimeRpcError
+  >;
 }
 
 export interface ProviderAdapterHooks {

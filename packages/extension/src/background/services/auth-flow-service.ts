@@ -6,7 +6,9 @@ import {
 } from "@llm-bridge/runtime-core";
 import {
   RuntimeInternalError,
+  type RuntimeRpcError,
   RuntimeValidationError,
+  RuntimeDefectError,
   isRuntimeRpcError,
   type RuntimeAuthFlowInstruction,
   type RuntimeAuthFlowSnapshot,
@@ -294,12 +296,32 @@ export const AuthFlowServiceLive = Layer.scoped(
       options: {
         windowId?: number;
       } = {},
-    ) =>
-      Effect.map(listProviderAuthMethods(providerID), (methods) =>
-        toSnapshotState(providerID, methods, options),
+    ): Effect.Effect<AuthFlowState, RuntimeRpcError> =>
+      listProviderAuthMethods(providerID).pipe(
+        Effect.map((methods) => toSnapshotState(providerID, methods, options)),
+        Effect.mapError((error) =>
+          isRuntimeRpcError(error)
+            ? error
+            : new RuntimeInternalError({
+                operation: "streamProviderAuthFlow",
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to load provider auth methods",
+              }),
+        ),
+        Effect.catchAllDefect((defect) =>
+          Effect.fail(
+            new RuntimeDefectError({
+              defect: String(defect),
+            }),
+          ),
+        ),
       );
 
-    const resolveProviderAuthFlow = (providerID: string) =>
+    const resolveProviderAuthFlow = (
+      providerID: string,
+    ): Effect.Effect<AuthFlowStateSnapshot, RuntimeRpcError> =>
       Effect.gen(function* () {
         const current = flows.get(providerID);
         if (current) {
@@ -316,7 +338,9 @@ export const AuthFlowServiceLive = Layer.scoped(
         };
       });
 
-    const ensureFlow = (providerID: string) =>
+    const ensureFlow = (
+      providerID: string,
+    ): Effect.Effect<AuthFlowState, RuntimeRpcError> =>
       Effect.gen(function* () {
         const current = flows.get(providerID);
         if (current && !isTerminalStatus(current.status)) {
@@ -476,7 +500,9 @@ export const AuthFlowServiceLive = Layer.scoped(
           };
         }),
       getProviderAuthFlow: (providerID: string) => resolveProviderAuthFlow(providerID),
-      streamProviderAuthFlow: (providerID: string) =>
+      streamProviderAuthFlow: (
+        providerID: string,
+      ): Stream.Stream<AuthFlowStateSnapshot, RuntimeRpcError> =>
         Stream.unwrap(
           Effect.gen(function* () {
             const initial = yield* resolveProviderAuthFlow(providerID);

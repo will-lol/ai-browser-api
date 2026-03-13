@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import { APICallError } from "@ai-sdk/provider";
 import { RuntimeUpstreamServiceError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 
 const getAuthMock = mock((_providerID?: string) => ({
   type: "api" as const,
@@ -78,7 +79,7 @@ const doGenerateMock = mock(async () => {
   });
 });
 
-const doStreamMock = mock(async () => {
+const doStreamMock = mock(async (): Promise<{ stream: ReadableStream<unknown> }> => {
   throw new APICallError({
     message: "Overloaded",
     url: "https://api.openai.com/v1/responses",
@@ -292,6 +293,68 @@ describe("language-model-runtime error normalization", () => {
         },
         retryable: true,
         message: "Overloaded",
+      } satisfies Partial<RuntimeUpstreamServiceError>);
+    }
+  });
+
+  it("wraps provider-style stream read failures inside the runtime stream", async () => {
+    doStreamMock.mockImplementationOnce(async () => ({
+      stream: new ReadableStream({
+        start(controller) {
+          controller.enqueue({
+            type: "text-start",
+            id: "text-1",
+          });
+          controller.error(
+            new APICallError({
+              message: "Stream read failed",
+              url: "https://api.openai.com/v1/responses",
+              requestBodyValues: {},
+              statusCode: 502,
+              responseHeaders: {
+                "retry-after": "3",
+              },
+              isRetryable: true,
+            }),
+          );
+        },
+      }),
+    }));
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.flatMap(
+          runLanguageModelStream({
+            modelID: "openai/gpt-4o-mini",
+            origin: "https://example.test",
+            sessionID: "session-1",
+            requestID: "request-3",
+            options: {
+              prompt: [
+                {
+                  role: "user",
+                  content: [{ type: "text", text: "hello" }],
+                },
+              ],
+            },
+          }),
+          (stream) => Stream.runCollect(stream),
+        ),
+      ),
+    );
+
+    expect("left" in result).toBe(true);
+    if ("left" in result) {
+      expect(result.left).toMatchObject({
+        _tag: "RuntimeUpstreamServiceError",
+        providerID: "openai",
+        operation: "stream",
+        statusCode: 502,
+        responseHeaders: {
+          "retry-after": "3",
+        },
+        retryable: true,
+        message: "Stream read failed",
       } satisfies Partial<RuntimeUpstreamServiceError>);
     }
   });

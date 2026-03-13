@@ -1,12 +1,18 @@
 import { APICallError } from "@ai-sdk/provider";
 import { RetryError } from "ai";
+import { toRuntimeStreamPart } from "@llm-bridge/bridge-codecs";
+import { isRuntimeRpcError } from "@llm-bridge/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import {
   prepareRuntimeLanguageModelCall,
   type RuntimeLanguageModelCallOptions,
 } from "./language-model-runtime-context";
-import { wrapProviderError } from "@/background/runtime/core/errors";
+import {
+  wrapExtensionError,
+  wrapProviderError,
+} from "@/background/runtime/core/errors";
 
 function logRuntimeModelDebug(event: string, details?: unknown) {
   console.log(`[language-model-runtime] ${event}`, details);
@@ -42,6 +48,25 @@ function wrapProviderStyleFailure<A>(
         : Effect.die(error),
     ),
   );
+}
+
+function toRuntimeStreamError(input: {
+  error: unknown;
+  operation: string;
+  providerID: string;
+}) {
+  if (isRuntimeRpcError(input.error)) {
+    return input.error;
+  }
+
+  if (
+    input.error instanceof Error &&
+    (APICallError.isInstance(input.error) || RetryError.isInstance(input.error))
+  ) {
+    return wrapProviderError(input.error, input.providerID, input.operation);
+  }
+
+  return wrapExtensionError(input.error, input.operation);
 }
 
 export function getRuntimeModelDescriptor(input: {
@@ -173,7 +198,17 @@ export function runLanguageModelStream(input: {
       providerModelID: preparedCall.providerModelID,
       ...input,
     });
-    return result.stream;
+    return Stream.fromReadableStream(
+      () => result.stream,
+      (error) =>
+        toRuntimeStreamError({
+          error,
+          providerID: preparedCall.providerID,
+          operation: "stream",
+        }),
+    ).pipe(
+      Stream.map((part) => toRuntimeStreamPart(part)),
+    );
   }).pipe(
     Effect.catchAllCause((cause) => {
       logRuntimeModelError(

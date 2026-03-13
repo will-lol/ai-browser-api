@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
-  RuntimeInternalError,
+  RuntimeDefectError,
   RuntimeValidationError,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
@@ -30,7 +30,7 @@ describe("serializeRpcError", () => {
     }
   });
 
-  it("converts defects into RuntimeInternalError at the rpc boundary", async () => {
+  it("converts defects into RuntimeDefectError at the rpc boundary", async () => {
     const result = await Effect.runPromise(
       Effect.either(
         serializeRpcError(
@@ -44,9 +44,8 @@ describe("serializeRpcError", () => {
     expect("left" in result).toBe(true);
     if ("left" in result) {
       expect(result.left).toEqual(
-        new RuntimeInternalError({
-          operation: "runtime.rpc",
-          message: "boom",
+        new RuntimeDefectError({
+          defect: "Error: boom",
         }),
       );
     }

@@ -1,10 +1,15 @@
-import type {
-  RuntimeGenerateResponse,
-  RuntimeModelCallOptions,
-  RuntimeModelDescriptor,
-  RuntimeStreamPart,
+import {
+  RuntimeDefectError,
+  RuntimeInternalError,
+  isRuntimeRpcError,
+  type RuntimeGenerateResponse,
+  type RuntimeModelCallOptions,
+  type RuntimeModelDescriptor,
+  type RuntimeRpcError,
+  type RuntimeStreamPart,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Stream from "effect/Stream";
 import {
   CatalogService,
@@ -13,29 +18,20 @@ import {
 } from "./environment";
 import { ensureModelAccess } from "./permissions";
 
-function withStreamCleanup<T>(
-  stream: ReadableStream<T>,
-  onFinalize: () => void,
-): ReadableStream<T> {
-  const reader = stream.getReader();
+function toRuntimeStreamError(error: unknown): RuntimeRpcError {
+  if (isRuntimeRpcError(error)) {
+    return error;
+  }
 
-  return new ReadableStream<T>({
-    async pull(controller) {
-      const chunk = await reader.read();
-      if (chunk.done) {
-        onFinalize();
-        controller.close();
-        return;
-      }
-      controller.enqueue(chunk.value);
-    },
-    async cancel() {
-      try {
-        await reader.cancel();
-      } finally {
-        onFinalize();
-      }
-    },
+  return new RuntimeInternalError({
+    operation: "model.streamModel",
+    message: error instanceof Error ? error.message : String(error),
+  });
+}
+
+function toRuntimeStreamDefect(defect: unknown): RuntimeDefectError {
+  return new RuntimeDefectError({
+    defect: String(defect),
   });
 }
 
@@ -160,27 +156,42 @@ export function streamModel(input: {
   sessionID: string;
   modelID: string;
   options: RuntimeModelCallOptions;
-}): AppEffect<ReadableStream<RuntimeStreamPart>> {
-  return Effect.gen(function* () {
-    const service = yield* ModelExecutionService;
-    const { key, controller } = yield* registerController(input);
+}) {
+  return Stream.unwrap(
+    Effect.gen(function* () {
+      const service = yield* ModelExecutionService;
+      const { key, controller } = yield* registerController(input);
+      const cleanup = unregisterController(key);
 
-    yield* ensureModelAccess({
-      origin: input.origin,
-      modelID: input.modelID,
-      signal: controller.signal,
-    });
+      const acquireStream = Effect.gen(function* () {
+        yield* ensureModelAccess({
+          origin: input.origin,
+          modelID: input.modelID,
+          signal: controller.signal,
+        });
 
-    const stream = yield* service.streamModel({
-      ...input,
-      signal: controller.signal,
-    });
+        return yield* service.streamModel({
+          ...input,
+          signal: controller.signal,
+        });
+      }).pipe(
+        Effect.mapError(toRuntimeStreamError),
+        Effect.catchAllDefect((defect) =>
+          Effect.fail(toRuntimeStreamDefect(defect)),
+        ),
+      );
 
-    return withStreamCleanup(stream, () => {
-      controllers.delete(key);
-      pendingAbortKeys.delete(key);
-    });
-  });
+      const exit = yield* Effect.exit(acquireStream);
+      if (Exit.isFailure(exit)) {
+        yield* cleanup;
+        return yield* Effect.failCause(exit.cause);
+      }
+
+      return exit.value.pipe(
+        Stream.ensuring(cleanup),
+      );
+    }),
+  );
 }
 
 export function abortModelCall(input: {
