@@ -1,32 +1,29 @@
-import * as Effect from "effect/Effect";
 import {
   combineQueryStates,
-  createQueryResource,
+  createStreamResource,
   useQueryResourceState,
 } from "@llm-bridge/reactive-core";
+import * as Stream from "effect/Stream";
 import {
-  fetchModels,
-  fetchOriginState,
-  fetchPendingRequests,
-  fetchPermissions,
-  fetchProviderAuthFlow,
-  fetchProviders,
+  streamModels,
+  streamOriginState,
+  streamPendingRequests,
+  streamPermissions,
+  streamProviderAuthFlow,
+  streamProviders,
 } from "@/app/api/runtime-api";
 import { extensionReactiveRuntime } from "@/app/state/atom-runtime";
-import { runtimeReactivityKeys } from "@/app/state/runtime-reactivity";
 
-const providersResource = createQueryResource(extensionReactiveRuntime, {
-  key: runtimeReactivityKeys.providers,
-  load: fetchProviders(),
+const providersResource = createStreamResource(extensionReactiveRuntime, {
+  load: streamProviders(),
 });
 
 function buildModelsResource(input?: {
   connectedOnly?: boolean;
   providerID?: string;
 }) {
-  return createQueryResource(extensionReactiveRuntime, {
-    key: runtimeReactivityKeys.models,
-    load: fetchModels({
+  return createStreamResource(extensionReactiveRuntime, {
+    load: streamModels({
       connectedOnly: input?.connectedOnly,
       providerID: input?.providerID,
     }),
@@ -34,32 +31,28 @@ function buildModelsResource(input?: {
 }
 
 function buildProviderAuthFlowResource(providerID: string) {
-  return createQueryResource(extensionReactiveRuntime, {
-    key: runtimeReactivityKeys.authFlow(providerID),
-    load: fetchProviderAuthFlow({
+  return createStreamResource(extensionReactiveRuntime, {
+    load: streamProviderAuthFlow({
       providerID,
-    }).pipe(Effect.map((response) => response.result)),
+    }).pipe(Stream.map((response) => response)),
   });
 }
 
 function buildOriginStateResource(origin: string) {
-  return createQueryResource(extensionReactiveRuntime, {
-    key: runtimeReactivityKeys.origin(origin),
-    load: fetchOriginState(origin),
+  return createStreamResource(extensionReactiveRuntime, {
+    load: streamOriginState(origin),
   });
 }
 
 function buildPermissionsResource(origin: string) {
-  return createQueryResource(extensionReactiveRuntime, {
-    key: runtimeReactivityKeys.permissions(origin),
-    load: fetchPermissions(origin),
+  return createStreamResource(extensionReactiveRuntime, {
+    load: streamPermissions(origin),
   });
 }
 
 function buildPendingRequestsResource(origin: string) {
-  return createQueryResource(extensionReactiveRuntime, {
-    key: runtimeReactivityKeys.pending(origin),
-    load: fetchPendingRequests(origin),
+  return createStreamResource(extensionReactiveRuntime, {
+    load: streamPendingRequests(origin),
   });
 }
 

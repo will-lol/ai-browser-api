@@ -1,7 +1,6 @@
 import type { AuthRecord, AuthResult } from "@/background/runtime/auth/auth-types";
 import { runtimeDb } from "@/background/storage/runtime-db";
-import { afterCommit, runTx } from "@/background/storage/runtime-db-tx";
-import { publishRuntimeEvent } from "@/app/events/runtime-events";
+import { runTx } from "@/background/storage/runtime-db-tx";
 import type { SecretVaultApi } from "@/background/security/secret-vault";
 import { now } from "@/background/runtime/core/util";
 import * as Context from "effect/Context";
@@ -50,19 +49,6 @@ function buildAuthRecord(
     createdAt,
     updatedAt,
   };
-}
-
-function emitAuthChanged(providerID: string) {
-  return Promise.all([
-    publishRuntimeEvent({
-      type: "runtime.auth.changed",
-      payload: { providerID },
-    }),
-    publishRuntimeEvent({
-      type: "runtime.providers.changed",
-      payload: { providerIDs: [providerID] },
-    }),
-  ]).then(() => undefined);
 }
 
 export function makeAuthVaultStore(vault: SecretVaultApi) {
@@ -160,10 +146,6 @@ export function makeAuthVaultStore(vault: SecretVaultApi) {
                   updatedAt: auth.updatedAt,
                 });
               }
-
-              afterCommit(async () => {
-                await emitAuthChanged(providerID);
-              });
             });
           },
           catch: () =>
@@ -189,10 +171,6 @@ export function makeAuthVaultStore(vault: SecretVaultApi) {
                 updatedAt: now(),
               });
             }
-
-            afterCommit(async () => {
-              await emitAuthChanged(providerID);
-            });
           });
         },
         catch: () =>

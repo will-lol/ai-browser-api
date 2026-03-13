@@ -40,12 +40,6 @@ const vaultKeyRows = new Map<
   }
 >();
 
-const publishedEvents: Array<{
-  type: string;
-  payload: unknown;
-}> = [];
-
-let afterCommitEffects: Array<() => unknown | Promise<unknown>> = [];
 let nowValue = 100;
 
 mock.module("@/background/storage/runtime-db", () => ({
@@ -100,26 +94,7 @@ mock.module("@/background/storage/runtime-db", () => ({
 }));
 
 mock.module("@/background/storage/runtime-db-tx", () => ({
-  afterCommit: (effect: () => unknown | Promise<unknown>) => {
-    afterCommitEffects.push(effect);
-  },
-  runTx: async (_tables: unknown[], fn: () => Promise<unknown>) => {
-    const result = await fn();
-    const effects = afterCommitEffects;
-    afterCommitEffects = [];
-
-    for (const effect of effects) {
-      await effect();
-    }
-
-    return result;
-  },
-}));
-
-mock.module("@/app/events/runtime-events", () => ({
-  publishRuntimeEvent: async (event: { type: string; payload: unknown }) => {
-    publishedEvents.push(event);
-  },
+  runTx: async (_tables: unknown[], fn: () => Promise<unknown>) => fn(),
 }));
 
 mock.module("@/background/runtime/core/util", () => ({
@@ -169,8 +144,6 @@ beforeEach(() => {
   authRows.clear();
   providerRows.clear();
   vaultKeyRows.clear();
-  publishedEvents.length = 0;
-  afterCommitEffects = [];
   nowValue = 100;
 });
 
@@ -214,10 +187,6 @@ describe("AuthVaultStore", () => {
     const loaded = await Effect.runPromise(store.getAuth("openai"));
     expect(loaded).toEqual(stored);
     expect(providerRows.get("openai")?.connected).toBe(true);
-    expect(publishedEvents.map((event) => event.type)).toEqual([
-      "runtime.auth.changed",
-      "runtime.providers.changed",
-    ]);
   });
 
   it("removes auth and marks the provider disconnected", async () => {
@@ -233,16 +202,11 @@ describe("AuthVaultStore", () => {
         methodType: "oauth",
       }),
     );
-    publishedEvents.length = 0;
 
     await Effect.runPromise(store.removeAuth("gitlab"));
 
     expect(authRows.has("gitlab")).toBe(false);
     expect(providerRows.get("gitlab")?.connected).toBe(false);
-    expect(publishedEvents.map((event) => event.type)).toEqual([
-      "runtime.auth.changed",
-      "runtime.providers.changed",
-    ]);
   });
 
   it("treats corrupt auth rows as missing and only warns once", async () => {

@@ -1,4 +1,5 @@
 import { getRuntimeAdminRPC } from "@/app/rpc/runtime-rpc-client";
+import * as Stream from "effect/Stream";
 import type {
   RuntimePermissionDecision,
   RuntimeResolvedAuthMethod,
@@ -17,6 +18,11 @@ export function fetchProviders() {
   return runtime.listProviders({});
 }
 
+export function streamProviders() {
+  const runtime = getRuntimeAdminRPC();
+  return runtime.streamProviders({});
+}
+
 export function fetchModels(input?: {
   connectedOnly?: boolean;
   providerID?: string;
@@ -28,9 +34,25 @@ export function fetchModels(input?: {
   });
 }
 
+export function streamModels(input?: {
+  connectedOnly?: boolean;
+  providerID?: string;
+}) {
+  const runtime = getRuntimeAdminRPC();
+  return runtime.streamModels({
+    connectedOnly: input?.connectedOnly,
+    providerID: input?.providerID,
+  });
+}
+
 export function fetchOriginState(origin = currentOrigin()) {
   const runtime = getRuntimeAdminRPC();
   return runtime.getOriginState({ origin });
+}
+
+export function streamOriginState(origin = currentOrigin()) {
+  const runtime = getRuntimeAdminRPC();
+  return runtime.streamOriginState({ origin });
 }
 
 export function fetchPermissions(origin = currentOrigin()) {
@@ -38,9 +60,19 @@ export function fetchPermissions(origin = currentOrigin()) {
   return runtime.listPermissions({ origin });
 }
 
+export function streamPermissions(origin = currentOrigin()) {
+  const runtime = getRuntimeAdminRPC();
+  return runtime.streamPermissions({ origin });
+}
+
 export function fetchPendingRequests(origin = currentOrigin()) {
   const runtime = getRuntimeAdminRPC();
   return runtime.listPending({ origin });
+}
+
+export function streamPendingRequests(origin = currentOrigin()) {
+  const runtime = getRuntimeAdminRPC();
+  return runtime.streamPending({ origin });
 }
 
 export function openRuntimeProviderAuthWindow(input: { providerID: string }) {
@@ -55,6 +87,15 @@ export function fetchProviderAuthFlow(input: { providerID: string }) {
   return runtime.getProviderAuthFlow({
     providerID: input.providerID,
   });
+}
+
+export function streamProviderAuthFlow(input: { providerID: string }) {
+  const runtime = getRuntimeAdminRPC();
+  return runtime
+    .streamProviderAuthFlow({
+      providerID: input.providerID,
+    })
+    .pipe(Stream.map((response) => response.result));
 }
 
 export function startRuntimeProviderAuthFlow(input: {

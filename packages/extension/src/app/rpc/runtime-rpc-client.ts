@@ -1,7 +1,7 @@
 import {
-  type RuntimeRpc,
+  type RuntimeAdminRpc,
   RUNTIME_ADMIN_RPC_PORT_NAME,
-  RuntimeRpcGroup,
+  RuntimeAdminRpcGroup,
   RuntimeValidationError,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
@@ -16,7 +16,7 @@ const CONNECTION_INVALIDATED_MESSAGE =
 
 const core = makeRuntimeRpcClientCore({
   portName: RUNTIME_ADMIN_RPC_PORT_NAME,
-  rpcGroup: RuntimeRpcGroup,
+  rpcGroup: RuntimeAdminRpcGroup,
   invalidatedError: () =>
     new RuntimeValidationError({
       message: CONNECTION_INVALIDATED_MESSAGE,
@@ -25,14 +25,14 @@ const core = makeRuntimeRpcClientCore({
 
 function createRuntimeAdminRpcClient(input: {
   readonly ensureClient: Effect.Effect<
-    RuntimeRpcClientConnection<RuntimeRpc>,
+    RuntimeRpcClientConnection<RuntimeAdminRpc>,
     RuntimeValidationError
   >;
 }) {
   return {
     listModels: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["listModels"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["listModels"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -40,7 +40,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     getOriginState: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["getOriginState"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["getOriginState"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -48,7 +48,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     listPending: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["listPending"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["listPending"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -56,7 +56,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     acquireModel: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["acquireModel"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["acquireModel"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -64,7 +64,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     modelDoGenerate: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["modelDoGenerate"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["modelDoGenerate"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -72,7 +72,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     modelDoStream: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["modelDoStream"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["modelDoStream"]
       >[0],
     ) =>
       Stream.unwrap(
@@ -82,7 +82,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     abortModelCall: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["abortModelCall"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["abortModelCall"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -90,7 +90,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     chatSendMessages: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["chatSendMessages"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["chatSendMessages"]
       >[0],
     ) =>
       Stream.unwrap(
@@ -100,7 +100,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     chatReconnectStream: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["chatReconnectStream"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["chatReconnectStream"]
       >[0],
     ) =>
       Stream.unwrap(
@@ -110,7 +110,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     abortChatStream: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["abortChatStream"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["abortChatStream"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -118,7 +118,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     listProviders: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["listProviders"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["listProviders"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -126,7 +126,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     listConnectedModels: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["listConnectedModels"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["listConnectedModels"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -134,7 +134,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     listPermissions: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["listPermissions"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["listPermissions"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -142,7 +142,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     openProviderAuthWindow: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["openProviderAuthWindow"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["openProviderAuthWindow"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -150,7 +150,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     getProviderAuthFlow: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["getProviderAuthFlow"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["getProviderAuthFlow"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -158,7 +158,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     startProviderAuthFlow: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["startProviderAuthFlow"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["startProviderAuthFlow"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -166,7 +166,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     cancelProviderAuthFlow: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["cancelProviderAuthFlow"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["cancelProviderAuthFlow"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -174,7 +174,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     disconnectProvider: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["disconnectProvider"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["disconnectProvider"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -182,7 +182,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     createPermissionRequest: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["createPermissionRequest"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["createPermissionRequest"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -190,7 +190,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     setOriginEnabled: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["setOriginEnabled"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["setOriginEnabled"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -198,7 +198,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     setModelPermission: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["setModelPermission"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["setModelPermission"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -206,7 +206,7 @@ function createRuntimeAdminRpcClient(input: {
       ),
     resolvePermissionRequest: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["resolvePermissionRequest"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["resolvePermissionRequest"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -214,11 +214,71 @@ function createRuntimeAdminRpcClient(input: {
       ),
     dismissPermissionRequest: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["dismissPermissionRequest"]
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["dismissPermissionRequest"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
         client.dismissPermissionRequest(payload),
+      ),
+    streamProviders: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["streamProviders"]
+      >[0],
+    ) =>
+      Stream.unwrap(
+        Effect.map(input.ensureClient, (client) =>
+          client.streamProviders(payload),
+        ),
+      ),
+    streamModels: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["streamModels"]
+      >[0],
+    ) =>
+      Stream.unwrap(
+        Effect.map(input.ensureClient, (client) =>
+          client.streamModels(payload),
+        ),
+      ),
+    streamOriginState: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["streamOriginState"]
+      >[0],
+    ) =>
+      Stream.unwrap(
+        Effect.map(input.ensureClient, (client) =>
+          client.streamOriginState(payload),
+        ),
+      ),
+    streamPermissions: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["streamPermissions"]
+      >[0],
+    ) =>
+      Stream.unwrap(
+        Effect.map(input.ensureClient, (client) =>
+          client.streamPermissions(payload),
+        ),
+      ),
+    streamPending: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["streamPending"]
+      >[0],
+    ) =>
+      Stream.unwrap(
+        Effect.map(input.ensureClient, (client) =>
+          client.streamPending(payload),
+        ),
+      ),
+    streamProviderAuthFlow: (
+      payload: Parameters<
+        RuntimeRpcClientConnection<RuntimeAdminRpc>["streamProviderAuthFlow"]
+      >[0],
+    ) =>
+      Stream.unwrap(
+        Effect.map(input.ensureClient, (client) =>
+          client.streamProviderAuthFlow(payload),
+        ),
       ),
   };
 }

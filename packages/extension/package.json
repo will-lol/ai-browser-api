@@ -36,7 +36,6 @@
     "@llm-bridge/contracts": "workspace:*",
     "@llm-bridge/reactive-core": "workspace:*",
     "@llm-bridge/runtime-core": "workspace:*",
-    "@llm-bridge/runtime-events": "workspace:*",
     "@tanstack/react-router": "^1.132.24",
     "@wxt-dev/browser": "^0.1.37",
     "ai": "^6.0.105",

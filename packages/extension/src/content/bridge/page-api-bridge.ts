@@ -2,7 +2,6 @@ import {
   PAGE_BRIDGE_INIT_MESSAGE,
   PAGE_BRIDGE_READY_EVENT,
   PageBridgeRpcGroup,
-  RuntimeAuthorizationError,
   RuntimeDefectError,
   isPageBridgePortControlMessage,
   type PageBridgePortControlMessage,
@@ -14,19 +13,11 @@ import type {
 } from "@effect/rpc/RpcMessage";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Mailbox from "effect/Mailbox";
 import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import { getRuntimePublicRPC } from "@/content/bridge/runtime-public-rpc-client";
-
-function unauthorized(operation: string) {
-  return Effect.fail(
-    new RuntimeAuthorizationError({
-      operation,
-      message: `${operation} is not available from page bridge clients`,
-    }),
-  );
-}
 
 function mapRuntimeEffect<A, E, R>(effect: Effect.Effect<A, E, R>) {
   return Effect.catchAllDefect(effect, (defect) =>
@@ -122,19 +113,6 @@ function createPageBridgeHandlers() {
           });
         }),
       ),
-
-    listProviders: () => unauthorized("listProviders"),
-    listConnectedModels: () => unauthorized("listConnectedModels"),
-    listPermissions: () => unauthorized("listPermissions"),
-    openProviderAuthWindow: () => unauthorized("openProviderAuthWindow"),
-    getProviderAuthFlow: () => unauthorized("getProviderAuthFlow"),
-    startProviderAuthFlow: () => unauthorized("startProviderAuthFlow"),
-    cancelProviderAuthFlow: () => unauthorized("cancelProviderAuthFlow"),
-    disconnectProvider: () => unauthorized("disconnectProvider"),
-    setOriginEnabled: () => unauthorized("setOriginEnabled"),
-    setModelPermission: () => unauthorized("setModelPermission"),
-    resolvePermissionRequest: () => unauthorized("resolvePermissionRequest"),
-    dismissPermissionRequest: () => unauthorized("dismissPermissionRequest"),
   });
 }
 
@@ -255,14 +233,15 @@ async function attachServerToPort(
   );
 
   await Effect.runPromise(
-    RpcServer.make(PageBridgeRpcGroup, {
-      disableTracing: true,
-      concurrency: "unbounded",
-    }).pipe(
-      Effect.provide(handlersLayer),
-      Effect.provideService(RpcServer.Protocol, protocol),
-      Effect.forkScoped,
-      Scope.extend(scope),
+    Layer.buildWithScope(
+      RpcServer.layer(PageBridgeRpcGroup, {
+        disableTracing: true,
+        concurrency: "unbounded",
+      }).pipe(
+        Layer.provide(handlersLayer),
+        Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
+      ),
+      scope,
     ),
   );
 

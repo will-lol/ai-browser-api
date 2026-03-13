@@ -5,25 +5,34 @@ import type {
   RuntimeStartProviderAuthFlowResponse,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
-import { RuntimeEnvironment, type AppEffect } from "./environment";
+import * as Stream from "effect/Stream";
+import { AuthFlowService, CatalogService, type AppEffect } from "./environment";
 
 export function startup(): AppEffect<void> {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.catalog.ensureCatalog(),
+  return Effect.flatMap(CatalogService, (service) =>
+    service.ensureCatalog(),
   );
 }
 
 export function openProviderAuthWindow(
   providerID: string,
 ): AppEffect<RuntimeOpenProviderAuthWindowResponse> {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.auth.openProviderAuthWindow(providerID),
+  return Effect.flatMap(AuthFlowService, (service) =>
+    service.openProviderAuthWindow(providerID),
   );
 }
 
 export function getProviderAuthFlow(providerID: string) {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.auth.getProviderAuthFlow(providerID),
+  return Effect.flatMap(AuthFlowService, (service) =>
+    service.getProviderAuthFlow(providerID),
+  );
+}
+
+export function streamProviderAuthFlow(providerID: string) {
+  return Stream.unwrap(
+    Effect.map(AuthFlowService, (service) =>
+      service.streamProviderAuthFlow(providerID),
+    ),
   );
 }
 
@@ -32,14 +41,8 @@ export function startProviderAuthFlow(input: {
   methodID: string;
   values?: Record<string, string>;
 }): AppEffect<RuntimeStartProviderAuthFlowResponse> {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.auth
-      .startProviderAuthFlow(input)
-      .pipe(
-        Effect.tap(() =>
-          env.catalog.refreshCatalogForProvider(input.providerID),
-        ),
-      ),
+  return Effect.flatMap(AuthFlowService, (service) =>
+    service.startProviderAuthFlow(input),
   );
 }
 
@@ -47,19 +50,15 @@ export function cancelProviderAuthFlow(input: {
   providerID: string;
   reason?: string;
 }): AppEffect<RuntimeCancelProviderAuthFlowResponse> {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.auth.cancelProviderAuthFlow(input),
+  return Effect.flatMap(AuthFlowService, (service) =>
+    service.cancelProviderAuthFlow(input),
   );
 }
 
 export function disconnectProvider(
   providerID: string,
 ): AppEffect<RuntimeDisconnectProviderResponse> {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.auth
-      .disconnectProvider(providerID)
-      .pipe(
-        Effect.tap(() => env.catalog.refreshCatalogForProvider(providerID)),
-      ),
+  return Effect.flatMap(AuthFlowService, (service) =>
+    service.disconnectProvider(providerID),
   );
 }

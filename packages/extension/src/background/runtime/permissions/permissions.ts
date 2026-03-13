@@ -6,20 +6,10 @@ import * as Effect from "effect/Effect";
 import {
   MAX_PENDING_REQUESTS,
   MAX_PENDING_REQUESTS_PER_ORIGIN,
-  PENDING_REQUEST_TIMEOUT_MS,
 } from "@/background/runtime/core/constants";
 import { runtimeDb } from "@/background/storage/runtime-db";
 import { runtimePermissionKey } from "@/background/storage/runtime-db-types";
-import { afterCommit, runTx } from "@/background/storage/runtime-db-tx";
-import {
-  publishRuntimeEvent,
-  subscribeRuntimeEvents,
-} from "@/app/events/runtime-events";
-import {
-  waitForPermissionDecisionEventDriven,
-  type PermissionDecisionWaitResult,
-} from "@/background/runtime/permissions/permission-wait";
-import { resolveTrustedPermissionTargets } from "@/background/runtime/permissions/permission-targets";
+import { runTx } from "@/background/storage/runtime-db-tx";
 import { getModelCapabilities, now, randomId } from "@/background/runtime/core/util";
 
 export type PermissionStatus = "allowed" | "denied" | "pending";
@@ -36,7 +26,7 @@ export interface PermissionRequest {
   status: "pending" | "resolved";
 }
 
-type CreatePermissionRequestResult =
+export type CreatePermissionRequestResult =
   | {
       status: "alreadyAllowed";
     }
@@ -44,12 +34,6 @@ type CreatePermissionRequestResult =
       status: "requested";
       request: PermissionRequest;
     };
-
-function isPermissionRequestPending(requestId: string) {
-  return Effect.promise(() => runtimeDb.pendingRequests.get(requestId)).pipe(
-    Effect.map((pending) => pending?.status === "pending"),
-  );
-}
 
 export function listPermissions(origin: string) {
   return Effect.promise(() =>
@@ -99,13 +83,6 @@ export function setOriginEnabled(origin: string, enabled: boolean) {
         enabled,
         updatedAt: now(),
       });
-
-      afterCommit(async () => {
-        await publishRuntimeEvent({
-          type: "runtime.origin.changed",
-          payload: { origin },
-        });
-      });
     }),
   );
 }
@@ -131,16 +108,6 @@ export function setModelPermission(
         capabilities:
           capabilities ?? existing?.capabilities ?? getModelCapabilities(modelId),
         updatedAt,
-      });
-
-      afterCommit(async () => {
-        await publishRuntimeEvent({
-          type: "runtime.permissions.changed",
-          payload: {
-            origin,
-            modelIds: [modelId],
-          },
-        });
       });
     }),
   );
@@ -171,8 +138,6 @@ export function createPermissionRequest(input: {
   capabilities?: string[];
 }) {
   return Effect.promise(async () => {
-    await Effect.runPromise(sanitizePendingPermissionRequests());
-
     const permission = await Effect.runPromise(
       getModelPermission(input.origin, input.modelId),
     );
@@ -251,23 +216,6 @@ export function createPermissionRequest(input: {
 
       await runtimeDb.pendingRequests.put(request);
 
-      afterCommit(async () => {
-        await publishRuntimeEvent({
-          type: "runtime.pending.changed",
-          payload: {
-            origin: input.origin,
-            requestIds: [request.id],
-          },
-        });
-        await publishRuntimeEvent({
-          type: "runtime.permissions.changed",
-          payload: {
-            origin: input.origin,
-            modelIds: [input.modelId],
-          },
-        });
-      });
-
       result = {
         status: "requested",
         request,
@@ -304,23 +252,6 @@ export function dismissPermissionRequest(requestId: string) {
       });
 
       await runtimeDb.pendingRequests.delete(requestId);
-
-      afterCommit(async () => {
-        await publishRuntimeEvent({
-          type: "runtime.pending.changed",
-          payload: {
-            origin: match.origin,
-            requestIds: [requestId],
-          },
-        });
-        await publishRuntimeEvent({
-          type: "runtime.permissions.changed",
-          payload: {
-            origin: match.origin,
-            modelIds: [match.modelId],
-          },
-        });
-      });
     }),
   );
 }
@@ -344,23 +275,6 @@ export function resolvePermissionRequest(
       });
 
       await runtimeDb.pendingRequests.delete(requestId);
-
-      afterCommit(async () => {
-        await publishRuntimeEvent({
-          type: "runtime.pending.changed",
-          payload: {
-            origin: match.origin,
-            requestIds: [requestId],
-          },
-        });
-        await publishRuntimeEvent({
-          type: "runtime.permissions.changed",
-          payload: {
-            origin: match.origin,
-            modelIds: [match.modelId],
-          },
-        });
-      });
     }),
   );
 }
@@ -379,83 +293,6 @@ export function listPendingRequests(origin?: string) {
   );
 }
 
-export function sanitizePendingPermissionRequests() {
-  return Effect.gen(function* () {
-    const rows = yield* listPendingRequests();
-    if (rows.length === 0) {
-      return [];
-    }
-
-    const trustedTargets = yield* resolveTrustedPermissionTargets(
-      rows.map((row) => row.modelId),
-    );
-    const staleRows = rows.filter((row) => !trustedTargets.has(row.modelId));
-
-    if (staleRows.length === 0) {
-      return [];
-    }
-
-    const pendingChanged = new Map<string, string[]>();
-    const permissionChanged = new Map<string, Set<string>>();
-    yield* Effect.promise(() =>
-      runTx([runtimeDb.pendingRequests, runtimeDb.permissions], async () => {
-        for (const row of staleRows) {
-          const permission = await runtimeDb.permissions.get(
-            runtimePermissionKey(row.origin, row.modelId),
-          );
-          if (permission?.status === "pending") {
-            await runtimeDb.permissions.delete(permission.id);
-          }
-          await runtimeDb.pendingRequests.delete(row.id);
-
-          const requestIds = pendingChanged.get(row.origin) ?? [];
-          requestIds.push(row.id);
-          pendingChanged.set(row.origin, requestIds);
-
-          const modelIds = permissionChanged.get(row.origin) ?? new Set<string>();
-          modelIds.add(row.modelId);
-          permissionChanged.set(row.origin, modelIds);
-        }
-
-        afterCommit(async () => {
-          for (const [origin, requestIds] of pendingChanged) {
-            await publishRuntimeEvent({
-              type: "runtime.pending.changed",
-              payload: {
-                origin,
-                requestIds,
-              },
-            });
-          }
-
-          for (const [origin, modelIds] of permissionChanged) {
-            await publishRuntimeEvent({
-              type: "runtime.permissions.changed",
-              payload: {
-                origin,
-                modelIds: Array.from(modelIds),
-              },
-            });
-          }
-        });
-      }),
-    );
-
-    return staleRows.map((row) => row.id);
-  });
-}
-
-export function waitForPermissionDecision(
-  requestId: string,
-  timeoutMs = PENDING_REQUEST_TIMEOUT_MS,
-  signal?: AbortSignal,
-): Effect.Effect<PermissionDecisionWaitResult> {
-  return waitForPermissionDecisionEventDriven({
-    requestId,
-    timeoutMs,
-    signal,
-    isPending: (nextRequestId) =>
-      Effect.runPromise(isPermissionRequestPending(nextRequestId)),
-    subscribe: subscribeRuntimeEvents,
-  });
+export function getPendingRequest(requestId: string) {
+  return Effect.promise(() => runtimeDb.pendingRequests.get(requestId));
 }

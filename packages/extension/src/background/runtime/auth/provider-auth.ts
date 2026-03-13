@@ -3,7 +3,6 @@ import * as Effect from "effect/Effect";
 import {
   getAuth,
   removeAuth,
-  runSecurityEffect,
   setAuth,
 } from "@/background/runtime/auth/auth-store";
 import {
@@ -20,6 +19,7 @@ import { wrapAuthPluginError } from "@/background/runtime/core/errors";
 import { getModelsDevData } from "@/background/runtime/catalog/models-dev";
 import { parseOAuthCallbackUrl } from "@/background/runtime/auth/oauth-util";
 import { getProvider } from "@/background/runtime/catalog/provider-registry";
+import { provideRuntimeSecurity } from "@/background/security/runtime-security";
 import type { ProviderRuntimeInfo } from "@/background/runtime/catalog/provider-registry";
 
 type AuthContextResolved = {
@@ -72,8 +72,7 @@ function resolveAuthContext(
       });
     }
     const auth =
-      options.auth ??
-      (yield* Effect.promise(() => runSecurityEffect(getAuth(providerID))));
+      options.auth ?? (yield* getAuth(providerID));
     return {
       providerID,
       provider,
@@ -88,7 +87,7 @@ function persistAuth(
     result: AuthResult;
   },
 ) {
-  return Effect.promise(() => runSecurityEffect(setAuth(providerID, input.result)));
+  return setAuth(providerID, input.result);
 }
 
 export function listProviderAuthMethods(
@@ -98,11 +97,11 @@ export function listProviderAuthMethods(
     auth?: AuthRecord;
   } = {},
 ) {
-  return Effect.gen(function* () {
+  return provideRuntimeSecurity(Effect.gen(function* () {
     const ctx = yield* resolveAuthContext(providerID, options);
     const methods = yield* listResolvedAuthMethods(ctx);
     return methods.map((item) => item.method);
-  });
+  }));
 }
 
 export function startProviderAuth(input: {
@@ -114,7 +113,7 @@ export function startProviderAuth(input: {
     instruction: RuntimeAuthFlowInstruction,
   ) => void | Promise<void>;
 }) {
-  return Effect.gen(function* () {
+  return provideRuntimeSecurity(Effect.gen(function* () {
     const ctx = yield* resolveAuthContext(input.providerID);
     const methods = yield* listResolvedAuthMethods(ctx);
     const resolved = methods.find((item) => item.method.id === input.methodID);
@@ -187,9 +186,9 @@ export function startProviderAuth(input: {
       methodID: resolved.method.id,
       connected: true,
     };
-  });
+  }));
 }
 
 export function disconnectProvider(providerID: string) {
-  return Effect.promise(() => runSecurityEffect(removeAuth(providerID)));
+  return provideRuntimeSecurity(removeAuth(providerID));
 }

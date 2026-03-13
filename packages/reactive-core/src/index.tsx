@@ -25,3 +25,7 @@ export {
   type MutationResource,
   type ReactiveMutationState,
 } from "./mutation-resource";
+export {
+  createStreamResource,
+  type StreamResource,
+} from "./stream-resource";

@@ -41,16 +41,6 @@ const trustedTargetsById = new Map<
     capabilities: string[];
   }
 >();
-const publishedEvents: Array<{
-  type: string;
-  payload: {
-    origin: string;
-    requestIds?: string[];
-    modelIds?: string[];
-  };
-}> = [];
-
-let afterCommitEffects: Array<() => unknown | Promise<unknown>> = [];
 let idSequence = 0;
 let nowValue = 100;
 
@@ -138,34 +128,7 @@ mock.module("@/background/storage/runtime-db-types", () => ({
 }));
 
 mock.module("@/background/storage/runtime-db-tx", () => ({
-  afterCommit: (effect: () => unknown | Promise<unknown>) => {
-    afterCommitEffects.push(effect);
-  },
-  runTx: async (_tables: unknown[], fn: () => Promise<unknown>) => {
-    const result = await fn();
-    const effects = afterCommitEffects;
-    afterCommitEffects = [];
-
-    for (const effect of effects) {
-      await effect();
-    }
-
-    return result;
-  },
-}));
-
-mock.module("@/app/events/runtime-events", () => ({
-  publishRuntimeEvent: async (event: {
-    type: string;
-    payload: {
-      origin: string;
-      requestIds?: string[];
-      modelIds?: string[];
-    };
-  }) => {
-    publishedEvents.push(event);
-  },
-  subscribeRuntimeEvents: mock(() => () => undefined),
+  runTx: async (_tables: unknown[], fn: () => Promise<unknown>) => fn(),
 }));
 
 mock.module("@/background/runtime/permissions/permission-targets", () => ({
@@ -178,10 +141,6 @@ mock.module("@/background/runtime/permissions/permission-targets", () => ({
         }),
       ),
     ),
-}));
-
-mock.module("@/background/runtime/permissions/permission-wait", () => ({
-  waitForPermissionDecisionEventDriven: mock(async () => "resolved"),
 }));
 
 mock.module("@/background/runtime/core/util", () => ({
@@ -248,8 +207,6 @@ beforeEach(() => {
   permissionRows.clear();
   originRows.clear();
   trustedTargetsById.clear();
-  publishedEvents.length = 0;
-  afterCommitEffects = [];
   idSequence = 0;
   nowValue = 100;
 });
@@ -285,7 +242,6 @@ describe("createPermissionRequest", () => {
       request: pendingRows[0],
     });
     expect(pendingRows).toHaveLength(1);
-    expect(publishedEvents).toEqual([]);
   });
 
   it("rejects requests that exceed the per-origin cap", async () => {
@@ -385,7 +341,7 @@ describe("createPermissionRequest", () => {
     ]);
   });
 
-  it("sanitizes stale requests before checking caps", async () => {
+  it("retains older pending requests when checking the global cap", async () => {
     setTrustedTarget("openai/model-1", "openai");
     setTrustedTarget("openai/model-2", "openai");
     setTrustedTarget("openai/model-4", "openai");
@@ -424,51 +380,22 @@ describe("createPermissionRequest", () => {
     });
     addPendingPermission("https://three.test", "openai/model-3");
 
-    const result = await Effect.runPromise(createPermissionRequest({
-      origin: "https://four.test",
-      modelId: "openai/model-4",
-      modelName: "Model 4",
-      provider: "openai",
-    }));
+    await expect(
+      Effect.runPromise(createPermissionRequest({
+        origin: "https://four.test",
+        modelId: "openai/model-4",
+        modelName: "Model 4",
+        provider: "openai",
+      })),
+    ).rejects.toThrow(/Too many pending permission requests$/);
 
-    expect(result.status).toBe("requested");
     expect(pendingRows.map((row) => row.id)).toEqual([
       "existing_1",
       "existing_2",
-      "prm_1",
+      "prm_stale",
     ]);
     expect(permissionRows.has("https://three.test::openai/model-3")).toBe(
-      false,
+      true,
     );
-    expect(publishedEvents).toEqual([
-      {
-        type: "runtime.pending.changed",
-        payload: {
-          origin: "https://three.test",
-          requestIds: ["prm_stale"],
-        },
-      },
-      {
-        type: "runtime.permissions.changed",
-        payload: {
-          origin: "https://three.test",
-          modelIds: ["openai/model-3"],
-        },
-      },
-      {
-        type: "runtime.pending.changed",
-        payload: {
-          origin: "https://four.test",
-          requestIds: ["prm_1"],
-        },
-      },
-      {
-        type: "runtime.permissions.changed",
-        payload: {
-          origin: "https://four.test",
-          modelIds: ["openai/model-4"],
-        },
-      },
-    ]);
   });
 });

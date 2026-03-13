@@ -1,25 +1,21 @@
-import {
-  RuntimeEnvironment,
-  type RuntimeEnvironmentApi,
-} from "@llm-bridge/runtime-core";
 import * as Layer from "effect/Layer";
-import { makeRuntimeAuthEnvironment } from "@/background/rpc/runtime-auth-environment";
-import { makeRuntimeCatalogEnvironment } from "@/background/rpc/runtime-catalog-environment";
-import { makeRuntimeMetaEnvironment } from "@/background/rpc/runtime-meta-environment";
-import { makeRuntimeModelExecutionEnvironment } from "@/background/rpc/runtime-model-environment";
-import { makeRuntimePermissionsEnvironment } from "@/background/rpc/runtime-permissions-environment";
-import { makeRuntimeQueryEnvironment } from "@/background/rpc/runtime-query-environment";
+import { ChatExecutionServiceLive } from "@/background/runtime/execution/chat-execution-service";
+import { AuthFlowServiceLive } from "@/background/services/auth-flow-service";
+import { CatalogServiceLive } from "@/background/services/catalog-service";
+import { MetaServiceLive } from "@/background/services/meta-service";
+import { ModelExecutionServiceLive } from "@/background/services/model-execution-service";
+import { PermissionsServiceLive } from "@/background/services/permissions-service";
 
 export function makeRuntimeCoreInfrastructureLayer() {
-  const query = makeRuntimeQueryEnvironment();
-  const runtimeEnvironment = {
-    ...query,
-    auth: makeRuntimeAuthEnvironment(),
-    permissions: makeRuntimePermissionsEnvironment(),
-    meta: makeRuntimeMetaEnvironment(),
-    modelExecution: makeRuntimeModelExecutionEnvironment(),
-    catalog: makeRuntimeCatalogEnvironment(),
-  } satisfies RuntimeEnvironmentApi;
+  const baseLayer = Layer.mergeAll(
+    CatalogServiceLive,
+    PermissionsServiceLive,
+    MetaServiceLive,
+    ModelExecutionServiceLive,
+    ChatExecutionServiceLive,
+  );
 
-  return Layer.succeed(RuntimeEnvironment, runtimeEnvironment);
+  const authFlowLayer = AuthFlowServiceLive.pipe(Layer.provide(baseLayer));
+
+  return Layer.merge(baseLayer, authFlowLayer);
 }

@@ -12,15 +12,18 @@ import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
 import * as Mailbox from "effect/Mailbox";
 import * as Option from "effect/Option";
+import * as Layer_ from "effect/Layer";
 import {
+  RuntimeAdminRpcGroup,
   RUNTIME_ADMIN_RPC_PORT_NAME,
+  RuntimeAdminRpc,
   RUNTIME_PUBLIC_RPC_PORT_NAME,
   RuntimeAdminAllowedTags,
   RuntimeAuthorizationError,
+  RuntimePublicRpcGroup,
+  RuntimePublicRpc,
   RuntimePublicAllowedTags,
-  RuntimeRpcGroup,
   RuntimeValidationError,
-  type RuntimeRpc,
   type RuntimeRpcError,
 } from "@llm-bridge/contracts";
 
@@ -371,12 +374,12 @@ function protocolForRole<Rpcs extends Rpc.Any>(
 
 export async function registerRuntimeRpcServer<PE, AE>(input: {
   publicLayer: Layer.Layer<
-    Rpc.ToHandler<RuntimeRpc> | Rpc.Middleware<RuntimeRpc>,
+    Rpc.ToHandler<RuntimePublicRpc> | Rpc.Middleware<RuntimePublicRpc>,
     PE,
     never
   >;
   adminLayer: Layer.Layer<
-    Rpc.ToHandler<RuntimeRpc> | Rpc.Middleware<RuntimeRpc>,
+    Rpc.ToHandler<RuntimeAdminRpc> | Rpc.Middleware<RuntimeAdminRpc>,
     AE,
     never
   >;
@@ -390,7 +393,7 @@ export async function registerRuntimeRpcServer<PE, AE>(input: {
       role: "public",
       portName: RUNTIME_PUBLIC_RPC_PORT_NAME,
       policy,
-      rpcGroup: RuntimeRpcGroup,
+      rpcGroup: RuntimePublicRpcGroup,
       allowedTags: RuntimePublicAllowedTags,
     }).pipe(Scope.extend(scope)),
   );
@@ -400,32 +403,57 @@ export async function registerRuntimeRpcServer<PE, AE>(input: {
       role: "admin",
       portName: RUNTIME_ADMIN_RPC_PORT_NAME,
       policy,
-      rpcGroup: RuntimeRpcGroup,
+      rpcGroup: RuntimeAdminRpcGroup,
       allowedTags: RuntimeAdminAllowedTags,
     }).pipe(Scope.extend(scope)),
   );
 
   await Effect.runPromise(
-    RpcServer.make(RuntimeRpcGroup, {
-      disableTracing: true,
-    }).pipe(
-      Effect.provide(input.publicLayer),
-      Effect.provideService(RpcServer.Protocol, publicProtocol),
-      Effect.forkScoped,
-      Scope.extend(scope),
+    Layer_.buildWithScope(
+      RpcServer.layer(RuntimePublicRpcGroup, {
+        disableTracing: true,
+      }).pipe(
+        Layer_.provide(input.publicLayer),
+        Layer_.provide(Layer_.succeed(RpcServer.Protocol, publicProtocol)),
+      ),
+      scope,
     ),
   );
 
   await Effect.runPromise(
-    RpcServer.make(RuntimeRpcGroup, {
-      disableTracing: true,
-    }).pipe(
-      Effect.provide(input.adminLayer),
-      Effect.provideService(RpcServer.Protocol, adminProtocol),
-      Effect.forkScoped,
-      Scope.extend(scope),
+    Layer_.buildWithScope(
+      RpcServer.layer(RuntimeAdminRpcGroup, {
+        disableTracing: true,
+      }).pipe(
+        Layer_.provide(input.adminLayer),
+        Layer_.provide(Layer_.succeed(RpcServer.Protocol, adminProtocol)),
+      ),
+      scope,
     ),
   );
 
   return () => Effect.runPromise(Scope.close(scope, Exit.succeed(undefined)));
+}
+
+export function makeRuntimeRpcServerLayer<PE, AE>(input: {
+  publicLayer: Layer.Layer<
+    Rpc.ToHandler<RuntimePublicRpc> | Rpc.Middleware<RuntimePublicRpc>,
+    PE,
+    never
+  >;
+  adminLayer: Layer.Layer<
+    Rpc.ToHandler<RuntimeAdminRpc> | Rpc.Middleware<RuntimeAdminRpc>,
+    AE,
+    never
+  >;
+}) {
+  return Layer_.scopedDiscard(
+    Effect.acquireRelease(
+      Effect.promise(() => registerRuntimeRpcServer(input)),
+      (dispose) =>
+        Effect.promise(() => dispose()).pipe(
+          Effect.catchAll(() => Effect.void),
+        ),
+    ),
+  );
 }

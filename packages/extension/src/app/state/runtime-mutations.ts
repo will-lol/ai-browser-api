@@ -10,7 +10,6 @@ import {
   type PermissionDecision,
 } from "@/app/api/runtime-api";
 import { extensionReactiveRuntime } from "@/app/state/atom-runtime";
-import { runtimeReactivityKeys } from "@/app/state/runtime-reactivity";
 
 export const openProviderAuthWindowMutation = createMutationResource(
   extensionReactiveRuntime,
@@ -29,11 +28,6 @@ export const disconnectProviderMutation = createMutationResource(
       disconnectRuntimeProvider({
         providerID,
       }),
-    invalidate: ({ providerID }) => [
-      runtimeReactivityKeys.providers,
-      runtimeReactivityKeys.models,
-      runtimeReactivityKeys.authFlow(providerID),
-    ],
   },
 );
 
@@ -54,11 +48,6 @@ export const startProviderAuthFlowMutation = createMutationResource(
         methodID,
         values,
       }),
-    invalidate: ({ providerID }) => [
-      runtimeReactivityKeys.authFlow(providerID),
-      runtimeReactivityKeys.providers,
-      runtimeReactivityKeys.models,
-    ],
   },
 );
 
@@ -76,11 +65,6 @@ export const cancelProviderAuthFlowMutation = createMutationResource(
         providerID,
         reason,
       }),
-    invalidate: ({ providerID }) => [
-      runtimeReactivityKeys.authFlow(providerID),
-      runtimeReactivityKeys.providers,
-      runtimeReactivityKeys.models,
-    ],
   },
 );
 
@@ -98,11 +82,6 @@ export const setOriginEnabledMutation = createMutationResource(
         enabled,
         origin,
       }),
-    invalidate: ({ origin }) => [
-      runtimeReactivityKeys.origin(origin),
-      runtimeReactivityKeys.permissions(origin),
-      runtimeReactivityKeys.pending(origin),
-    ],
   },
 );
 
@@ -123,10 +102,6 @@ export const updateModelPermissionMutation = createMutationResource(
         origin,
         status,
       }),
-    invalidate: ({ origin }) => [
-      runtimeReactivityKeys.permissions(origin),
-      runtimeReactivityKeys.pending(origin),
-    ],
   },
 );
 
@@ -145,9 +120,5 @@ export const resolvePermissionDecisionMutation = createMutationResource(
         requestId,
         decision,
       }),
-    invalidate: ({ origin }) => [
-      runtimeReactivityKeys.permissions(origin),
-      runtimeReactivityKeys.pending(origin),
-    ],
   },
 );

@@ -1,7 +1,7 @@
 import {
-  type RuntimeRpc,
+  type RuntimePublicRpc,
   RUNTIME_PUBLIC_RPC_PORT_NAME,
-  RuntimeRpcGroup,
+  RuntimePublicRpcGroup,
   RuntimeValidationError,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
@@ -16,7 +16,7 @@ const CONNECTION_INVALIDATED_MESSAGE =
 
 const core = makeRuntimeRpcClientCore({
   portName: RUNTIME_PUBLIC_RPC_PORT_NAME,
-  rpcGroup: RuntimeRpcGroup,
+  rpcGroup: RuntimePublicRpcGroup,
   invalidatedError: () =>
     new RuntimeValidationError({
       message: CONNECTION_INVALIDATED_MESSAGE,
@@ -25,14 +25,14 @@ const core = makeRuntimeRpcClientCore({
 
 function createRuntimePublicRpcClient(input: {
   readonly ensureClient: Effect.Effect<
-    RuntimeRpcClientConnection<RuntimeRpc>,
+    RuntimeRpcClientConnection<RuntimePublicRpc>,
     RuntimeValidationError
   >;
 }) {
   return {
     listModels: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["listModels"]
+        RuntimeRpcClientConnection<RuntimePublicRpc>["listModels"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -40,7 +40,7 @@ function createRuntimePublicRpcClient(input: {
       ),
     getOriginState: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["getOriginState"]
+        RuntimeRpcClientConnection<RuntimePublicRpc>["getOriginState"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -48,7 +48,7 @@ function createRuntimePublicRpcClient(input: {
       ),
     listPending: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["listPending"]
+        RuntimeRpcClientConnection<RuntimePublicRpc>["listPending"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -56,7 +56,7 @@ function createRuntimePublicRpcClient(input: {
       ),
     acquireModel: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["acquireModel"]
+        RuntimeRpcClientConnection<RuntimePublicRpc>["acquireModel"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -64,7 +64,7 @@ function createRuntimePublicRpcClient(input: {
       ),
     modelDoGenerate: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["modelDoGenerate"]
+        RuntimeRpcClientConnection<RuntimePublicRpc>["modelDoGenerate"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -72,7 +72,7 @@ function createRuntimePublicRpcClient(input: {
       ),
     modelDoStream: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["modelDoStream"]
+        RuntimeRpcClientConnection<RuntimePublicRpc>["modelDoStream"]
       >[0],
     ) =>
       Stream.unwrap(
@@ -82,7 +82,7 @@ function createRuntimePublicRpcClient(input: {
       ),
     abortModelCall: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["abortModelCall"]
+        RuntimeRpcClientConnection<RuntimePublicRpc>["abortModelCall"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -90,7 +90,7 @@ function createRuntimePublicRpcClient(input: {
       ),
     chatSendMessages: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["chatSendMessages"]
+        RuntimeRpcClientConnection<RuntimePublicRpc>["chatSendMessages"]
       >[0],
     ) =>
       Stream.unwrap(
@@ -100,7 +100,7 @@ function createRuntimePublicRpcClient(input: {
       ),
     chatReconnectStream: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["chatReconnectStream"]
+        RuntimeRpcClientConnection<RuntimePublicRpc>["chatReconnectStream"]
       >[0],
     ) =>
       Stream.unwrap(
@@ -110,7 +110,7 @@ function createRuntimePublicRpcClient(input: {
       ),
     abortChatStream: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["abortChatStream"]
+        RuntimeRpcClientConnection<RuntimePublicRpc>["abortChatStream"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>
@@ -118,7 +118,7 @@ function createRuntimePublicRpcClient(input: {
       ),
     createPermissionRequest: (
       payload: Parameters<
-        RuntimeRpcClientConnection<RuntimeRpc>["createPermissionRequest"]
+        RuntimeRpcClientConnection<RuntimePublicRpc>["createPermissionRequest"]
       >[0],
     ) =>
       Effect.flatMap(input.ensureClient, (client) =>

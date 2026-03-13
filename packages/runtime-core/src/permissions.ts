@@ -9,30 +9,57 @@ import {
   type RuntimeUpdatePermissionResponse,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
-import { RuntimeEnvironment, type AppEffect } from "./environment";
+import * as Stream from "effect/Stream";
+import {
+  MetaService,
+  PermissionsService,
+  type AppEffect,
+} from "./environment";
 
 export function getOriginState(origin: string) {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.permissions.getOriginState(origin),
+  return Effect.flatMap(PermissionsService, (service) =>
+    service.getOriginState(origin),
   );
 }
 
 export function listPermissions(origin: string) {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.permissions.listPermissions(origin),
+  return Effect.flatMap(PermissionsService, (service) =>
+    service.listPermissions(origin),
   );
 }
 
 export function listPending(origin: string) {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.pending.listPending(origin),
+  return Effect.flatMap(PermissionsService, (service) =>
+    service.listPending(origin),
+  );
+}
+
+export function streamOriginState(origin: string) {
+  return Stream.unwrap(
+    Effect.map(PermissionsService, (service) =>
+      service.streamOriginState(origin),
+    ),
+  );
+}
+
+export function streamPermissions(origin: string) {
+  return Stream.unwrap(
+    Effect.map(PermissionsService, (service) =>
+      service.streamPermissions(origin),
+    ),
+  );
+}
+
+export function streamPending(origin: string) {
+  return Stream.unwrap(
+    Effect.map(PermissionsService, (service) => service.streamPending(origin)),
   );
 }
 
 export function ensureOriginEnabled(origin: string): AppEffect<void> {
   return Effect.gen(function* () {
-    const env = yield* RuntimeEnvironment;
-    const state = yield* env.permissions.getOriginState(origin);
+    const service = yield* PermissionsService;
+    const state = yield* service.getOriginState(origin);
     if (state.enabled) {
       return;
     }
@@ -48,8 +75,9 @@ export function ensureModelAccess(input: {
   signal?: AbortSignal;
 }): AppEffect<void> {
   return Effect.gen(function* () {
-    const env = yield* RuntimeEnvironment;
-    const permission = yield* env.permissions.getModelPermission(
+    const permissions = yield* PermissionsService;
+    const meta = yield* MetaService;
+    const permission = yield* permissions.getModelPermission(
       input.origin,
       input.modelID,
     );
@@ -57,8 +85,8 @@ export function ensureModelAccess(input: {
       return;
     }
 
-    const target = yield* env.meta.resolvePermissionTarget(input.modelID);
-    const result = yield* env.permissions.createPermissionRequest({
+    const target = yield* meta.resolvePermissionTarget(input.modelID);
+    const result = yield* permissions.createPermissionRequest({
       origin: input.origin,
       modelId: target.modelId,
       provider: target.provider,
@@ -70,7 +98,7 @@ export function ensureModelAccess(input: {
       return;
     }
 
-    const waitResult = yield* env.permissions.waitForPermissionDecision(
+    const waitResult = yield* permissions.waitForPermissionDecision(
       result.request.id,
       undefined,
       input.signal,
@@ -87,7 +115,7 @@ export function ensureModelAccess(input: {
       });
     }
 
-    const updated = yield* env.permissions.getModelPermission(
+    const updated = yield* permissions.getModelPermission(
       input.origin,
       input.modelID,
     );
@@ -105,8 +133,8 @@ export function setOriginEnabled(
   origin: string,
   enabled: boolean,
 ): AppEffect<RuntimeSetOriginEnabledResponse> {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.permissions.setOriginEnabled(origin, enabled),
+  return Effect.flatMap(PermissionsService, (service) =>
+    service.setOriginEnabled(origin, enabled),
   );
 }
 
@@ -116,8 +144,8 @@ export function setModelPermission(input: {
   status: "allowed" | "denied";
   capabilities?: ReadonlyArray<string>;
 }): AppEffect<RuntimeUpdatePermissionResponse> {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.permissions.setModelPermission(input),
+  return Effect.flatMap(PermissionsService, (service) =>
+    service.setModelPermission(input),
   );
 }
 
@@ -126,9 +154,10 @@ export function createPermissionRequest(input: {
   modelId: string;
 }): AppEffect<RuntimeCreatePermissionRequestResponse> {
   return Effect.gen(function* () {
-    const env = yield* RuntimeEnvironment;
-    const target = yield* env.meta.resolvePermissionTarget(input.modelId);
-    return yield* env.permissions.createPermissionRequest({
+    const permissions = yield* PermissionsService;
+    const meta = yield* MetaService;
+    const target = yield* meta.resolvePermissionTarget(input.modelId);
+    return yield* permissions.createPermissionRequest({
       origin: input.origin,
       modelId: target.modelId,
       modelName: target.modelName,
@@ -142,15 +171,15 @@ export function resolvePermissionRequest(input: {
   requestId: string;
   decision: "allowed" | "denied";
 }): AppEffect<RuntimeResolvePermissionRequestResponse> {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.permissions.resolvePermissionRequest(input),
+  return Effect.flatMap(PermissionsService, (service) =>
+    service.resolvePermissionRequest(input),
   );
 }
 
 export function dismissPermissionRequest(
   requestId: string,
 ): AppEffect<RuntimeDismissPermissionRequestResponse> {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.permissions.dismissPermissionRequest(requestId),
+  return Effect.flatMap(PermissionsService, (service) =>
+    service.dismissPermissionRequest(requestId),
   );
 }

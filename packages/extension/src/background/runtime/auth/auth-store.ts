@@ -2,7 +2,6 @@ import { RuntimeInternalError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import type { AuthResult } from "@/background/runtime/auth/auth-types";
 import { AuthVaultStore } from "@/background/security/auth-vault-store";
-import { runSecurityEffect } from "@/background/security/runtime-security";
 
 export type {
   AuthMethodType,
@@ -50,5 +49,3 @@ export function removeAuth(providerID: string) {
     ),
   );
 }
-
-export { runSecurityEffect };

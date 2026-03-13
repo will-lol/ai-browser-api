@@ -5,6 +5,7 @@ import type {
 import type { ModelMessage } from "ai";
 import { fromRuntimeModelCallOptions } from "@llm-bridge/bridge-codecs";
 import * as Effect from "effect/Effect";
+import * as Runtime from "effect/Runtime";
 import {
   ModelNotFoundError,
   ProviderNotConnectedError,
@@ -16,7 +17,6 @@ import type { AuthRecord } from "@/background/runtime/auth/auth-store";
 import {
   getAuth,
   removeAuth,
-  runSecurityEffect,
   setAuth,
 } from "@/background/runtime/auth/auth-store";
 import {
@@ -30,6 +30,8 @@ import type {
 import { isObject, parseProviderModel } from "@/background/runtime/core/util";
 import { resolveAdapterForModel } from "@/background/runtime/providers/adapters";
 import type { RuntimeAdapterContext } from "@/background/runtime/providers/adapters/types";
+import { AuthVaultStore } from "@/background/security/auth-vault-store";
+import { provideRuntimeSecurity } from "@/background/security/runtime-security";
 
 export type RuntimeLanguageModelCallOptions = Omit<
   LanguageModelV3CallOptions,
@@ -100,12 +102,7 @@ function toRuntimeModelCallOptionsForChat(
   };
 }
 
-function resolveModelRuntimeContext(
-  modelID: string,
-): Effect.Effect<
-  ModelRuntimeContext,
-  RuntimeValidationError | ModelNotFoundError | ProviderNotConnectedError
-> {
+function resolveModelRuntimeContext(modelID: string) {
   return Effect.gen(function* () {
     const parsed = parseProviderModel(modelID);
     if (!parsed.providerID || !parsed.modelID) {
@@ -117,7 +114,7 @@ function resolveModelRuntimeContext(
     const [provider, model, auth] = yield* Effect.all([
       getProvider(parsed.providerID),
       getModel(parsed.providerID, parsed.modelID),
-      Effect.promise(() => runSecurityEffect(getAuth(parsed.providerID))),
+      getAuth(parsed.providerID),
     ]);
 
     if (!provider || !model) {
@@ -149,6 +146,7 @@ function buildAdapterContext(input: {
   origin: string;
   sessionID: string;
   requestID: string;
+  runEffect: <A, E>(effect: Effect.Effect<A, E, AuthVaultStore>) => Promise<A>;
 }): RuntimeAdapterContext {
   const adapter = resolveAdapterForModel({
     providerID: input.runtime.providerID,
@@ -171,15 +169,11 @@ function buildAdapterContext(input: {
     provider: input.runtime.provider,
     model: input.runtime.model,
     authStore: {
-      get: () => runSecurityEffect(getAuth(input.runtime.providerID)),
+      get: () => input.runEffect(getAuth(input.runtime.providerID)),
       set: (auth) =>
-        runSecurityEffect(setAuth(input.runtime.providerID, auth)).then(
-          () => undefined,
-        ),
+        input.runEffect(setAuth(input.runtime.providerID, auth)).then(() => undefined),
       remove: () =>
-        runSecurityEffect(removeAuth(input.runtime.providerID)).then(
-          () => undefined,
-        ),
+        input.runEffect(removeAuth(input.runtime.providerID)).then(() => undefined),
     },
     runtime: {
       now: () => Date.now(),
@@ -195,6 +189,8 @@ function prepareCallOptions(input: {
   options: RuntimeLanguageModelCallOptions;
 }) {
   return Effect.gen(function* () {
+    const runtime = yield* Effect.runtime<AuthVaultStore>();
+    const runEffect = Runtime.runPromise(runtime);
     const adapter = resolveAdapterForModel({
       providerID: input.runtime.providerID,
       model: input.runtime.model,
@@ -210,6 +206,7 @@ function prepareCallOptions(input: {
       origin: input.origin,
       sessionID: input.sessionID,
       requestID: input.requestID,
+      runEffect,
     });
     const languageModel = yield* Effect.promise(() =>
       adapter.createModel(context),
@@ -236,7 +233,7 @@ export function prepareRuntimeLanguageModelCall(input: {
   requestID: string;
   options: RuntimeLanguageModelCallOptions;
 }) {
-  return Effect.gen(function* () {
+  return provideRuntimeSecurity(Effect.gen(function* () {
     const runtime = yield* resolveModelRuntimeContext(input.modelID);
     const { prepared } = yield* prepareCallOptions({
       runtime,
@@ -252,7 +249,7 @@ export function prepareRuntimeLanguageModelCall(input: {
       languageModel: prepared.languageModel,
       callOptions: prepared.callOptions,
     } satisfies PreparedRuntimeLanguageModelCall;
-  });
+  }));
 }
 
 export function prepareRuntimeChatModelCall(input: {
@@ -263,8 +260,10 @@ export function prepareRuntimeChatModelCall(input: {
   messages: Array<ModelMessage>;
   options?: RuntimeChatCallOptions;
 }) {
-  return Effect.gen(function* () {
+  return provideRuntimeSecurity(Effect.gen(function* () {
     const runtime = yield* resolveModelRuntimeContext(input.modelID);
+    const adapterRuntime = yield* Effect.runtime<AuthVaultStore>();
+    const runEffect = Runtime.runPromise(adapterRuntime);
     const adapter = resolveAdapterForModel({
       providerID: runtime.providerID,
       model: runtime.model,
@@ -279,6 +278,7 @@ export function prepareRuntimeChatModelCall(input: {
       origin: input.origin,
       sessionID: input.sessionID,
       requestID: input.requestID,
+      runEffect,
     });
 
     const callOptions = fromRuntimeModelCallOptions(
@@ -296,5 +296,5 @@ export function prepareRuntimeChatModelCall(input: {
       languageModel,
       callOptions: callOptionsWithoutPrompt,
     } satisfies PreparedRuntimeChatModelCall;
-  });
+  }));
 }

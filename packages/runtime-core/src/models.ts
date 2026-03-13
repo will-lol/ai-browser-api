@@ -5,7 +5,12 @@ import type {
   RuntimeStreamPart,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
-import { RuntimeEnvironment, type AppEffect } from "./environment";
+import * as Stream from "effect/Stream";
+import {
+  CatalogService,
+  ModelExecutionService,
+  type AppEffect,
+} from "./environment";
 import { ensureModelAccess } from "./permissions";
 
 function withStreamCleanup<T>(
@@ -75,8 +80,8 @@ function unregisterController(key: string) {
 }
 
 export function listProviders() {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.providers.listProviders(),
+  return Effect.flatMap(CatalogService, (service) =>
+    service.listProviders(),
   );
 }
 
@@ -84,8 +89,23 @@ export function listModels(input: {
   connectedOnly?: boolean;
   providerID?: string;
 }) {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.models.listModels(input),
+  return Effect.flatMap(CatalogService, (service) =>
+    service.listModels(input),
+  );
+}
+
+export function streamProviders() {
+  return Stream.unwrap(
+    Effect.map(CatalogService, (service) => service.streamProviders()),
+  );
+}
+
+export function streamModels(input: {
+  connectedOnly?: boolean;
+  providerID?: string;
+}) {
+  return Stream.unwrap(
+    Effect.map(CatalogService, (service) => service.streamModels(input)),
   );
 }
 
@@ -101,8 +121,8 @@ export function acquireModel(input: {
   sessionID: string;
   modelID: string;
 }): AppEffect<RuntimeModelDescriptor> {
-  return Effect.flatMap(RuntimeEnvironment, (env) =>
-    env.modelExecution.acquireModel(input),
+  return Effect.flatMap(ModelExecutionService, (service) =>
+    service.acquireModel(input),
   );
 }
 
@@ -114,7 +134,7 @@ export function generateModel(input: {
   options: RuntimeModelCallOptions;
 }): AppEffect<RuntimeGenerateResponse> {
   return Effect.gen(function* () {
-    const env = yield* RuntimeEnvironment;
+    const service = yield* ModelExecutionService;
     const { key, controller } = yield* registerController(input);
 
     try {
@@ -124,7 +144,7 @@ export function generateModel(input: {
         signal: controller.signal,
       });
 
-      return yield* env.modelExecution.generateModel({
+      return yield* service.generateModel({
         ...input,
         signal: controller.signal,
       });
@@ -142,7 +162,7 @@ export function streamModel(input: {
   options: RuntimeModelCallOptions;
 }): AppEffect<ReadableStream<RuntimeStreamPart>> {
   return Effect.gen(function* () {
-    const env = yield* RuntimeEnvironment;
+    const service = yield* ModelExecutionService;
     const { key, controller } = yield* registerController(input);
 
     yield* ensureModelAccess({
@@ -151,7 +171,7 @@ export function streamModel(input: {
       signal: controller.signal,
     });
 
-    const stream = yield* env.modelExecution.streamModel({
+    const stream = yield* service.streamModel({
       ...input,
       signal: controller.signal,
     });

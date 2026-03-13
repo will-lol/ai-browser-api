@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import type { AuthRecord } from "@/background/runtime/auth/auth-store";
-import { listAuth, runSecurityEffect } from "@/background/runtime/auth/auth-store";
+import { listAuth } from "@/background/runtime/auth/auth-store";
 import { getRuntimeConfig } from "@/background/runtime/config/config-store";
 import type { RuntimeProviderConfig } from "@/background/runtime/config/config-store";
 import { getModelCapabilities, mergeRecord } from "@/background/runtime/core/util";
@@ -274,6 +274,6 @@ export function buildProviderFromSource(input: {
 export function loadProviderCatalogInputs() {
   return Effect.all([
     Effect.promise(() => getRuntimeConfig()),
-    Effect.promise(() => runSecurityEffect(listAuth())),
+    listAuth(),
   ]);
 }

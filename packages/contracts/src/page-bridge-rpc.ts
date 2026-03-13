@@ -1,6 +1,6 @@
 export {
-  RuntimeRpcGroup as PageBridgeRpcGroup,
-  type RuntimeRpc as PageBridgeRpc,
+  RuntimePublicRpcGroup as PageBridgeRpcGroup,
+  type RuntimePublicRpc as PageBridgeRpc,
 } from "./runtime-rpc";
 
 export const PAGE_BRIDGE_READY_EVENT = "llm-bridge-ready";

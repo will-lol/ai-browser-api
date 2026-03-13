@@ -1,8 +1,8 @@
-import { publishRuntimeEvent } from "@/app/events/runtime-events";
 import * as Effect from "effect/Effect";
 import { getModelsDevData } from "@/background/runtime/catalog/models-dev";
 import { runtimeDb } from "@/background/storage/runtime-db";
-import { afterCommit, runTx } from "@/background/storage/runtime-db-tx";
+import { runTx } from "@/background/storage/runtime-db-tx";
+import { provideRuntimeSecurity } from "@/background/security/runtime-security";
 import {
   buildProviderFromSource,
   loadProviderCatalogInputs,
@@ -19,7 +19,8 @@ function isCatalogInitialized() {
 }
 
 export function refreshProviderCatalog() {
-  return Effect.gen(function* () {
+  return provideRuntimeSecurity(
+    Effect.gen(function* () {
     const [modelsDev, [config, authMap]] = yield* Effect.all([
       getModelsDevData(),
       loadProviderCatalogInputs(),
@@ -76,30 +77,17 @@ export function refreshProviderCatalog() {
           value: true,
           updatedAt,
         });
-
-        afterCommit(async () => {
-          await publishRuntimeEvent({
-            type: "runtime.catalog.refreshed",
-            payload: { updatedAt },
-          });
-          await publishRuntimeEvent({
-            type: "runtime.providers.changed",
-            payload: { providerIDs: providerRows.map((row) => row.id) },
-          });
-          await publishRuntimeEvent({
-            type: "runtime.models.changed",
-            payload: { providerIDs: providerRows.map((row) => row.id) },
-          });
-        });
       }),
     );
 
     return updatedAt;
-  });
+    }),
+  );
 }
 
 export function refreshProviderCatalogForProvider(providerID: string) {
-  return Effect.gen(function* () {
+  return provideRuntimeSecurity(
+    Effect.gen(function* () {
     const [modelsDev, [config, authMap]] = yield* Effect.all([
       getModelsDevData(),
       loadProviderCatalogInputs(),
@@ -148,20 +136,10 @@ export function refreshProviderCatalogForProvider(providerID: string) {
           value: true,
           updatedAt,
         });
-
-        afterCommit(async () => {
-          await publishRuntimeEvent({
-            type: "runtime.providers.changed",
-            payload: { providerIDs: [providerID] },
-          });
-          await publishRuntimeEvent({
-            type: "runtime.models.changed",
-            payload: { providerIDs: [providerID] },
-          });
-        });
       }),
     );
-  });
+    }),
+  );
 }
 
 export function ensureProviderCatalog() {

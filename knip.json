@@ -46,10 +46,6 @@
     "packages/reactive-core": {
       "entry": ["src/**/*.test.ts", "src/**/*.tsx"],
       "project": ["src/**/*.{ts,tsx}"]
-    },
-    "packages/runtime-events": {
-      "entry": ["src/**/*.test.ts"],
-      "project": ["src/**/*.ts"]
     }
   }
 }
