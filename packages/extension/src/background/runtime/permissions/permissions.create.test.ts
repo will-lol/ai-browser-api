@@ -128,7 +128,7 @@ mock.module("@/background/storage/runtime-db-types", () => ({
 }));
 
 mock.module("@/background/storage/runtime-db-tx", () => ({
-  runTx: async (_tables: unknown[], fn: () => Promise<unknown>) => fn(),
+  runTx: (_tables: unknown[], fn: () => Effect.Effect<unknown>) => fn(),
 }));
 
 mock.module("@/background/runtime/permissions/permission-targets", () => ({

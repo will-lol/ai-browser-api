@@ -133,52 +133,78 @@ export function makeAuthVaultStore(vault: SecretVaultApi) {
           record: auth,
         });
 
-        yield* Effect.tryPromise({
-          try: async () => {
-            await runTx([runtimeDb.auth, runtimeDb.providers], async () => {
-              await runtimeDb.auth.put(sealed);
+        yield* runTx([runtimeDb.auth, runtimeDb.providers], () =>
+          Effect.gen(function* () {
+            yield* Effect.tryPromise({
+              try: () => runtimeDb.auth.put(sealed),
+              catch: (error) => error,
+            });
 
-              const provider = await runtimeDb.providers.get(providerID);
-              if (provider) {
-                await runtimeDb.providers.put({
+            const provider = yield* Effect.tryPromise({
+              try: () => runtimeDb.providers.get(providerID),
+              catch: (error) => error,
+            });
+
+            if (!provider) {
+              return;
+            }
+
+            yield* Effect.tryPromise({
+              try: () =>
+                runtimeDb.providers.put({
                   ...provider,
                   connected: true,
                   updatedAt: auth.updatedAt,
-                });
-              }
+                }),
+              catch: (error) => error,
             });
-          },
-          catch: () =>
+          }),
+        ).pipe(
+          Effect.mapError(() =>
             new VaultKeyUnavailableError({
               operation: "setAuth",
               message: `Failed to persist auth for provider ${providerID}.`,
             }),
-        });
+          ),
+        );
 
         return auth;
       }),
     removeAuth: (providerID: string) =>
-      Effect.tryPromise({
-        try: async () => {
-          await runTx([runtimeDb.auth, runtimeDb.providers], async () => {
-            await runtimeDb.auth.delete(providerID);
+      runTx([runtimeDb.auth, runtimeDb.providers], () =>
+        Effect.gen(function* () {
+          yield* Effect.tryPromise({
+            try: () => runtimeDb.auth.delete(providerID),
+            catch: (error) => error,
+          });
 
-            const provider = await runtimeDb.providers.get(providerID);
-            if (provider) {
-              await runtimeDb.providers.put({
+          const provider = yield* Effect.tryPromise({
+            try: () => runtimeDb.providers.get(providerID),
+            catch: (error) => error,
+          });
+
+          if (!provider) {
+            return;
+          }
+
+          yield* Effect.tryPromise({
+            try: () =>
+              runtimeDb.providers.put({
                 ...provider,
                 connected: false,
                 updatedAt: now(),
-              });
-            }
+              }),
+            catch: (error) => error,
           });
-        },
-        catch: () =>
+        }),
+      ).pipe(
+        Effect.mapError(() =>
           new VaultKeyUnavailableError({
             operation: "removeAuth",
             message: `Failed to remove auth for provider ${providerID}.`,
           }),
-      }),
+        ),
+      ),
   };
 }
 

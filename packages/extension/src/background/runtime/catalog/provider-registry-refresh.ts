@@ -60,22 +60,38 @@ export function refreshProviderCatalog() {
       modelRows.push(...rows.modelRows);
     }
 
-    yield* Effect.promise(() =>
-      runTx([runtimeDb.providers, runtimeDb.models, runtimeDb.meta], async () => {
-        await runtimeDb.providers.clear();
-        await runtimeDb.models.clear();
+    yield* runTx([runtimeDb.providers, runtimeDb.models, runtimeDb.meta], () =>
+      Effect.gen(function* () {
+        yield* Effect.tryPromise({
+          try: () => runtimeDb.providers.clear(),
+          catch: (error) => error,
+        });
+        yield* Effect.tryPromise({
+          try: () => runtimeDb.models.clear(),
+          catch: (error) => error,
+        });
 
         if (providerRows.length > 0) {
-          await runtimeDb.providers.bulkPut(providerRows);
+          yield* Effect.tryPromise({
+            try: () => runtimeDb.providers.bulkPut(providerRows),
+            catch: (error) => error,
+          });
         }
         if (modelRows.length > 0) {
-          await runtimeDb.models.bulkPut(modelRows);
+          yield* Effect.tryPromise({
+            try: () => runtimeDb.models.bulkPut(modelRows),
+            catch: (error) => error,
+          });
         }
 
-        await runtimeDb.meta.put({
-          key: CATALOG_INITIALIZED_KEY,
-          value: true,
-          updatedAt,
+        yield* Effect.tryPromise({
+          try: () =>
+            runtimeDb.meta.put({
+              key: CATALOG_INITIALIZED_KEY,
+              value: true,
+              updatedAt,
+            }),
+          catch: (error) => error,
         });
       }),
     );
@@ -117,24 +133,40 @@ export function refreshProviderCatalogForProvider(providerID: string) {
         })
       : undefined;
 
-    yield* Effect.promise(() =>
-      runTx([runtimeDb.providers, runtimeDb.models, runtimeDb.meta], async () => {
-        await runtimeDb.models.where("providerID").equals(providerID).delete();
+    yield* runTx([runtimeDb.providers, runtimeDb.models, runtimeDb.meta], () =>
+      Effect.gen(function* () {
+        yield* Effect.tryPromise({
+          try: () => runtimeDb.models.where("providerID").equals(providerID).delete(),
+          catch: (error) => error,
+        });
 
         if (!provider) {
-          await runtimeDb.providers.delete(providerID);
+          yield* Effect.tryPromise({
+            try: () => runtimeDb.providers.delete(providerID),
+            catch: (error) => error,
+          });
         } else {
           const { providerRow, modelRows } = providerToRows(provider, updatedAt);
-          await runtimeDb.providers.put(providerRow);
+          yield* Effect.tryPromise({
+            try: () => runtimeDb.providers.put(providerRow),
+            catch: (error) => error,
+          });
           if (modelRows.length > 0) {
-            await runtimeDb.models.bulkPut(modelRows);
+            yield* Effect.tryPromise({
+              try: () => runtimeDb.models.bulkPut(modelRows),
+              catch: (error) => error,
+            });
           }
         }
 
-        await runtimeDb.meta.put({
-          key: CATALOG_INITIALIZED_KEY,
-          value: true,
-          updatedAt,
+        yield* Effect.tryPromise({
+          try: () =>
+            runtimeDb.meta.put({
+              key: CATALOG_INITIALIZED_KEY,
+              value: true,
+              updatedAt,
+            }),
+          catch: (error) => error,
         });
       }),
     );

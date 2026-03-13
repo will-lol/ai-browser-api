@@ -10,7 +10,9 @@ import {
   ModelNotFoundError,
   ProviderNotConnectedError,
   RuntimeInternalError,
+  type RuntimeRpcError,
   RuntimeValidationError,
+  isRuntimeRpcError,
   type RuntimeChatCallOptions,
   type RuntimeModelCallOptions,
 } from "@llm-bridge/contracts";
@@ -66,6 +68,20 @@ export type PreparedRuntimeChatModelCall = {
   languageModel: LanguageModelV3;
   callOptions: Omit<RuntimeLanguageModelCallOptions, "prompt">;
 };
+
+function toRuntimePreparationError(
+  operation: string,
+  error: unknown,
+): RuntimeRpcError {
+  if (isRuntimeRpcError(error)) {
+    return error;
+  }
+
+  return new RuntimeInternalError({
+    operation,
+    message: `Unexpected error while preparing ${operation}.`,
+  });
+}
 
 function toHeaderRecord(value: unknown) {
   if (!isObject(value)) return {};
@@ -227,7 +243,7 @@ export function prepareRuntimeLanguageModelCall(input: {
   sessionID: string;
   requestID: string;
   options: RuntimeLanguageModelCallOptions;
-}) {
+}): Effect.Effect<PreparedRuntimeLanguageModelCall, RuntimeRpcError> {
   return provideRuntimeSecurity(Effect.gen(function* () {
     const runtime = yield* resolveModelRuntimeContext(input.modelID);
     const { prepared } = yield* prepareCallOptions({
@@ -244,7 +260,13 @@ export function prepareRuntimeLanguageModelCall(input: {
       languageModel: prepared.languageModel,
       callOptions: prepared.callOptions,
     } satisfies PreparedRuntimeLanguageModelCall;
-  }));
+  })).pipe(
+    Effect.catchAll((error) =>
+      Effect.fail(
+        toRuntimePreparationError("model.prepareRuntimeLanguageModelCall", error),
+      ),
+    ),
+  );
 }
 
 export function prepareRuntimeChatModelCall(input: {
@@ -254,7 +276,7 @@ export function prepareRuntimeChatModelCall(input: {
   requestID: string;
   messages: Array<ModelMessage>;
   options?: RuntimeChatCallOptions;
-}) {
+}): Effect.Effect<PreparedRuntimeChatModelCall, RuntimeRpcError> {
   return provideRuntimeSecurity(Effect.gen(function* () {
     const runtime = yield* resolveModelRuntimeContext(input.modelID);
     const securityContext = yield* Effect.context<AuthVaultStore>();
@@ -289,5 +311,11 @@ export function prepareRuntimeChatModelCall(input: {
       languageModel,
       callOptions: callOptionsWithoutPrompt,
     } satisfies PreparedRuntimeChatModelCall;
-  }));
+  })).pipe(
+    Effect.catchAll((error) =>
+      Effect.fail(
+        toRuntimePreparationError("chat.prepareRuntimeChatModelCall", error),
+      ),
+    ),
+  );
 }
