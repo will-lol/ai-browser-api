@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import * as Effect from "effect/Effect";
 import {
   resolveGeminiProjectContext,
   resolveGoogleExecutionState,
@@ -78,7 +79,7 @@ describe("resolveGeminiProjectContext", () => {
     let loadCalls = 0;
     let onboardCalls = 0;
 
-    const result = await resolveGeminiProjectContext(
+    const result = await Effect.runPromise(resolveGeminiProjectContext(
       "access-token",
       {
         projectId: "configured-project",
@@ -94,7 +95,7 @@ describe("resolveGeminiProjectContext", () => {
           return undefined;
         },
       },
-    );
+    ));
 
     assert.deepEqual(result, {
       projectId: "configured-project",
@@ -107,7 +108,7 @@ describe("resolveGeminiProjectContext", () => {
   it("discovers managed project from loadCodeAssist", async () => {
     let onboardCalls = 0;
 
-    const result = await resolveGeminiProjectContext(
+    const result = await Effect.runPromise(resolveGeminiProjectContext(
       "access-token",
       {},
       {
@@ -119,7 +120,7 @@ describe("resolveGeminiProjectContext", () => {
           return undefined;
         },
       },
-    );
+    ));
 
     assert.deepEqual(result, {
       projectId: "managed-project-123",
@@ -132,7 +133,7 @@ describe("resolveGeminiProjectContext", () => {
     let onboardTier: string | undefined;
     let onboardProjectId: string | undefined;
 
-    const result = await resolveGeminiProjectContext(
+    const result = await Effect.runPromise(resolveGeminiProjectContext(
       "access-token",
       {},
       {
@@ -145,7 +146,7 @@ describe("resolveGeminiProjectContext", () => {
           return "managed-project-456";
         },
       },
-    );
+    ));
 
     assert.equal(onboardTier, "free-tier");
     assert.equal(onboardProjectId, undefined);
@@ -158,7 +159,7 @@ describe("resolveGeminiProjectContext", () => {
   it("fails with actionable error when project cannot be resolved", async () => {
     await assert.rejects(
       () =>
-        resolveGeminiProjectContext(
+        Effect.runPromise(resolveGeminiProjectContext(
           "access-token",
           {},
           {
@@ -173,7 +174,7 @@ describe("resolveGeminiProjectContext", () => {
             }),
             onboardCodeAssist: async () => undefined,
           },
-        ),
+        )),
       /Google Gemini requires a Google Cloud project/,
     );
   });
@@ -182,7 +183,7 @@ describe("resolveGeminiProjectContext", () => {
 describe("resolveGoogleExecutionState", () => {
   it("returns oauth execution headers including Authorization", async () => {
     const setAuthCalls: unknown[] = [];
-    const output = await resolveGoogleExecutionState({
+    const output = await Effect.runPromise(resolveGoogleExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -198,13 +199,13 @@ describe("resolveGoogleExecutionState", () => {
         },
       },
       authStore: {
-        get: async () => undefined,
-        set: async (auth) => {
+        get: () => Effect.succeed(undefined),
+        set: (auth) => Effect.sync(() => {
           setAuthCalls.push(auth);
-        },
-        remove: async () => undefined,
+        }),
+        remove: () => Effect.void,
       },
-    });
+    }));
 
     assert.equal(output.kind, "oauth");
     assert.equal(output.apiKey, "oauth-access");
@@ -214,7 +215,7 @@ describe("resolveGoogleExecutionState", () => {
   });
 
   it("provides headers that let code-assist request rewriting proceed", async () => {
-    const execution = await resolveGoogleExecutionState({
+    const execution = await Effect.runPromise(resolveGoogleExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -230,11 +231,11 @@ describe("resolveGoogleExecutionState", () => {
         },
       },
       authStore: {
-        get: async () => undefined,
-        set: async () => undefined,
-        remove: async () => undefined,
+        get: () => Effect.succeed(undefined),
+        set: () => Effect.void,
+        remove: () => Effect.void,
       },
-    });
+    }));
 
     const rewritten = await rewriteGeminiCodeAssistRequest(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",

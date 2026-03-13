@@ -119,57 +119,56 @@ function createPageBridgeHandlers() {
 type PageBridgeSession = {
   readonly id: number;
   readonly port: MessagePort;
-  readonly cleanup: (reason: string) => Promise<void>;
+  readonly cleanup: (reason: string) => Effect.Effect<void>;
 };
 
-async function attachServerToPort(
+function attachServerToPort(
   sessionId: number,
   port: MessagePort,
   sessions: Map<MessagePort, PageBridgeSession>,
 ) {
-  const scope = await Effect.runPromise(Scope.make());
-  let disposed = false;
-  let onMessage:
-    | ((
-        event: MessageEvent<FromClientEncoded | PageBridgePortControlMessage>,
-      ) => void)
-    | null = null;
-  let onMessageError: ((event: MessageEvent<unknown>) => void) | null = null;
+  return Effect.gen(function* () {
+    const scope = yield* Scope.make();
+    let disposed = false;
+    let onMessage:
+      | ((
+          event: MessageEvent<FromClientEncoded | PageBridgePortControlMessage>,
+        ) => void)
+      | null = null;
+    let onMessageError: ((event: MessageEvent<unknown>) => void) | null = null;
 
-  const cleanup = async (_reason: string) => {
-    if (disposed) return;
-    disposed = true;
+    const cleanup = (_reason: string) =>
+      Effect.gen(function* () {
+        if (disposed) return;
+        disposed = true;
 
-    if (onMessage) {
-      port.removeEventListener("message", onMessage);
-    }
+        if (onMessage) {
+          port.removeEventListener("message", onMessage);
+        }
 
-    if (onMessageError) {
-      port.removeEventListener("messageerror", onMessageError);
-    }
+        if (onMessageError) {
+          port.removeEventListener("messageerror", onMessageError);
+        }
 
-    const existing = sessions.get(port);
-    if (existing?.id === sessionId) {
-      sessions.delete(port);
-    }
+        const existing = sessions.get(port);
+        if (existing?.id === sessionId) {
+          sessions.delete(port);
+        }
 
-    await Effect.runPromise(Scope.close(scope, Exit.succeed(undefined))).catch(
-      () => undefined,
+        yield* Scope.close(scope, Exit.void);
+
+        try {
+          port.close();
+        } catch {
+          // ignored
+        }
+      });
+
+    const handlersLayer = PageBridgeRpcGroup.toLayer(
+      Effect.succeed(createPageBridgeHandlers()),
     );
 
-    try {
-      port.close();
-    } catch {
-      // ignored
-    }
-  };
-
-  const handlersLayer = PageBridgeRpcGroup.toLayer(
-    Effect.succeed(createPageBridgeHandlers()),
-  );
-
-  const protocol = await Effect.runPromise(
-    RpcServer.Protocol.make((writeRequest) =>
+    const protocol = yield* RpcServer.Protocol.make((writeRequest) =>
       Effect.gen(function* () {
         const disconnects = yield* Mailbox.make<number>();
         const clientIds = new Set<number>([0]);
@@ -179,7 +178,9 @@ async function attachServerToPort(
         ) => {
           if (isPageBridgePortControlMessage(event.data)) {
             if (event.data.type === "disconnect") {
-              void cleanup("control-disconnect");
+              void Effect.runPromise(cleanup("control-disconnect")).catch(
+                () => undefined,
+              );
             }
 
             return;
@@ -192,7 +193,9 @@ async function attachServerToPort(
 
         onMessageError = (_event: MessageEvent<unknown>) => {
           void Effect.runPromise(disconnects.offer(0)).catch(() => undefined);
-          void cleanup("messageerror");
+          void Effect.runPromise(cleanup("messageerror")).catch(
+            () => undefined,
+          );
         };
 
         port.addEventListener("message", onMessage);
@@ -218,7 +221,9 @@ async function attachServerToPort(
               try {
                 port.postMessage(message);
               } catch (_error) {
-                void cleanup("postMessage-failed");
+                void Effect.runPromise(cleanup("postMessage-failed")).catch(
+                  () => undefined,
+                );
               }
             }),
           end: (_clientId: number) => Effect.void,
@@ -229,11 +234,9 @@ async function attachServerToPort(
           supportsSpanPropagation: true,
         } as const;
       }),
-    ).pipe(Scope.extend(scope)),
-  );
+    ).pipe(Scope.extend(scope));
 
-  await Effect.runPromise(
-    Layer.buildWithScope(
+    yield* Layer.buildWithScope(
       RpcServer.layer(PageBridgeRpcGroup, {
         disableTracing: true,
         concurrency: "unbounded",
@@ -242,21 +245,25 @@ async function attachServerToPort(
         Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
       ),
       scope,
-    ),
-  );
+    );
 
-  return cleanup;
+    return cleanup;
+  });
 }
 
 export function setupPageApiBridge() {
   const sessions = new Map<MessagePort, PageBridgeSession>();
   let nextSessionId = 0;
 
-  const cleanupAllSessions = async (reason: string) => {
-    const activeSessions = [...sessions.values()];
-
-    await Promise.all(activeSessions.map((session) => session.cleanup(reason)));
-  };
+  const cleanupAllSessions = (reason: string) =>
+    Effect.forEach(
+      [...sessions.values()],
+      (session) => session.cleanup(reason),
+      {
+        concurrency: "unbounded",
+        discard: true,
+      },
+    );
 
   const onMessage = async (event: MessageEvent) => {
     // `event.source` is only used as a local filter; authorization is enforced in background RPC.
@@ -276,7 +283,9 @@ export function setupPageApiBridge() {
     const sessionId = ++nextSessionId;
 
     try {
-      const cleanup = await attachServerToPort(sessionId, port, sessions);
+      const cleanup = await Effect.runPromise(
+        attachServerToPort(sessionId, port, sessions),
+      );
       sessions.set(port, {
         id: sessionId,
         port,
@@ -291,7 +300,9 @@ export function setupPageApiBridge() {
   window.addEventListener(
     "pagehide",
     () => {
-      void cleanupAllSessions("pagehide");
+      void Effect.runPromise(cleanupAllSessions("pagehide")).catch(
+        () => undefined,
+      );
     },
     { once: true },
   );

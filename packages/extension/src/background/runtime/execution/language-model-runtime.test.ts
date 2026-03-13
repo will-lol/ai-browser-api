@@ -3,12 +3,12 @@ import { APICallError } from "@ai-sdk/provider";
 import { RuntimeUpstreamServiceError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 
-const getAuthMock = mock(async (_providerID?: string) => ({
+const getAuthMock = mock((_providerID?: string) => ({
   type: "api" as const,
   key: "token-1",
 }));
-const setAuthMock = mock(async (_providerID?: string, _value?: unknown) => undefined);
-const removeAuthMock = mock(async (_providerID?: string) => undefined);
+const setAuthMock = mock((_providerID?: string, _value?: unknown) => undefined);
+const removeAuthMock = mock((_providerID?: string) => undefined);
 
 const getProviderMock = mock(async () => ({
   id: "openai",
@@ -92,7 +92,7 @@ const doStreamMock = mock(async () => {
 });
 
 const adapter = {
-  createModel: mock(async () => ({
+  createModel: mock(() => Effect.succeed({
     provider: "openai",
     modelId: "gpt-4o-mini",
     specificationVersion: "v3",
@@ -102,11 +102,11 @@ const adapter = {
 };
 
 mock.module("@/background/runtime/auth/auth-store", () => ({
-  getAuth: () => Effect.promise(() => getAuthMock()),
+  getAuth: () => Effect.sync(() => getAuthMock()),
   setAuth: (providerID: string, value: unknown) =>
-    Effect.promise(() => setAuthMock(providerID, value)),
+    Effect.sync(() => setAuthMock(providerID, value)),
   removeAuth: (providerID: string) =>
-    Effect.promise(() => removeAuthMock(providerID)),
+    Effect.sync(() => removeAuthMock(providerID)),
   runSecurityEffect: <A>(effect: Effect.Effect<A>) => Effect.runPromise(effect),
 }));
 

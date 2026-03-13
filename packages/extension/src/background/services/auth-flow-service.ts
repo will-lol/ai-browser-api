@@ -452,15 +452,16 @@ export const AuthFlowServiceLive = Layer.scoped(
               methodID: selected.id,
               values: input.values ?? {},
               signal: flow.controller.signal,
-              onInstruction: async (instruction) => {
-                const latest = flows.get(input.providerID);
-                if (!latest || latest !== flow || latest.status !== "authorizing") {
-                  return;
-                }
+              onInstruction: (instruction) =>
+                Effect.gen(function* () {
+                  const latest = flows.get(input.providerID);
+                  if (!latest || latest !== flow || latest.status !== "authorizing") {
+                    return;
+                  }
 
-                latest.instruction = instruction;
-                await Effect.runPromise(setFlow(latest)).catch(() => undefined);
-              },
+                  latest.instruction = instruction;
+                  yield* setFlow(latest);
+                }),
             }),
           );
           flow.task = task;

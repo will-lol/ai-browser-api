@@ -7,6 +7,7 @@ import {
   it,
   mock,
 } from "bun:test";
+import * as Effect from "effect/Effect";
 import { resolveOpenAIExecutionState } from "@/background/runtime/providers/adapters/openai";
 import type { RuntimeAdapterContext } from "@/background/runtime/providers/adapters/types";
 
@@ -85,7 +86,7 @@ function createContext(): Omit<RuntimeAdapterContext, "auth" | "authStore"> {
 describe("resolveOpenAIExecutionState", () => {
   const originalFetch = globalThis.fetch;
   const originalWarn = console.warn;
-  const setAuthMock = mock(async (_auth: unknown) => undefined);
+  const setAuthMock = mock((_auth: unknown) => undefined);
 
   afterAll(() => {
     globalThis.fetch = originalFetch;
@@ -119,7 +120,7 @@ describe("resolveOpenAIExecutionState", () => {
         ),
     ) as unknown as typeof fetch;
 
-    const output = await resolveOpenAIExecutionState({
+    const output = await Effect.runPromise(resolveOpenAIExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -134,11 +135,11 @@ describe("resolveOpenAIExecutionState", () => {
         updatedAt: Date.now() - 10_000,
       },
       authStore: {
-        get: async () => undefined,
-        set: setAuthMock,
-        remove: async () => undefined,
+        get: () => Effect.succeed(undefined),
+        set: (auth) => Effect.sync(() => setAuthMock(auth)),
+        remove: () => Effect.void,
       },
-    });
+    }));
 
     expect(output.apiKey).toBe("refreshed-access");
     const headers = output.headers as Record<string, string | undefined>;
@@ -168,7 +169,7 @@ describe("resolveOpenAIExecutionState", () => {
         ),
     ) as unknown as typeof fetch;
 
-    const output = await resolveOpenAIExecutionState({
+    const output = await Effect.runPromise(resolveOpenAIExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -183,11 +184,11 @@ describe("resolveOpenAIExecutionState", () => {
         updatedAt: Date.now() - 10_000,
       },
       authStore: {
-        get: async () => undefined,
-        set: setAuthMock,
-        remove: async () => undefined,
+        get: () => Effect.succeed(undefined),
+        set: (auth) => Effect.sync(() => setAuthMock(auth)),
+        remove: () => Effect.void,
       },
-    });
+    }));
 
     const headers = output.headers as Record<string, string | undefined>;
     expect(headers["chatgpt-account-id"]).toBe("acct-existing");
@@ -214,7 +215,7 @@ describe("resolveOpenAIExecutionState", () => {
         ),
     ) as unknown as typeof fetch;
 
-    const output = await resolveOpenAIExecutionState({
+    const output = await Effect.runPromise(resolveOpenAIExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -227,11 +228,11 @@ describe("resolveOpenAIExecutionState", () => {
         updatedAt: Date.now() - 10_000,
       },
       authStore: {
-        get: async () => undefined,
-        set: setAuthMock,
-        remove: async () => undefined,
+        get: () => Effect.succeed(undefined),
+        set: (auth) => Effect.sync(() => setAuthMock(auth)),
+        remove: () => Effect.void,
       },
-    });
+    }));
 
     const headers = output.headers as Record<string, string | undefined>;
     expect(headers["chatgpt-account-id"]).toBeUndefined();
@@ -250,7 +251,7 @@ describe("resolveOpenAIExecutionState", () => {
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const output = await resolveOpenAIExecutionState({
+    const output = await Effect.runPromise(resolveOpenAIExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -265,11 +266,11 @@ describe("resolveOpenAIExecutionState", () => {
         updatedAt: Date.now() - 10_000,
       },
       authStore: {
-        get: async () => undefined,
-        set: setAuthMock,
-        remove: async () => undefined,
+        get: () => Effect.succeed(undefined),
+        set: (auth) => Effect.sync(() => setAuthMock(auth)),
+        remove: () => Effect.void,
       },
-    });
+    }));
 
     expect(output.apiKey).toBe("current-access");
     const headers = output.headers as Record<string, string | undefined>;

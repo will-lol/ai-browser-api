@@ -1,6 +1,15 @@
 import { browser } from "@wxt-dev/browser";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import {
+  RuntimeAuthProviderError,
+  type RuntimeRpcError,
+  RuntimeUpstreamServiceError,
+  RuntimeValidationError,
+  isRuntimeRpcError,
+} from "@llm-bridge/contracts";
 import { parseOptionalMetadataObject } from "./auth-metadata";
 import {
   createGeminiCodeAssistFetch,
@@ -13,6 +22,7 @@ import { defineAuthSchema } from "./schema";
 import { mergeModelHeaders } from "./factory-language-model";
 import type {
   AIAdapter,
+  AnyAuthMethodDefinition,
   AdapterAuthorizeContext,
   RuntimeAdapterContext,
 } from "./types";
@@ -41,6 +51,7 @@ const ONBOARD_MAX_ATTEMPTS = 10;
 const ONBOARD_POLL_DELAY_MS = 3_000;
 const GEMINI_PROJECT_REQUIRED_MESSAGE =
   "Google Gemini requires a Google Cloud project. Enable the Gemini for Google Cloud API on a project you control, then reconnect and set projectId in the Google OAuth form if needed.";
+const GOOGLE_PROVIDER_ID = "google";
 
 type LoadCodeAssistPayload = {
   cloudaicompanionProject?: unknown;
@@ -161,6 +172,49 @@ function getGeminiClientSecret() {
     throw new Error("Gemini OAuth client secret is missing.");
   }
   return GEMINI_CLIENT_SECRET;
+}
+
+function googleAuthProviderError(input: {
+  operation: string;
+  message: string;
+  retryable?: boolean;
+}) {
+  return new RuntimeAuthProviderError({
+    providerID: GOOGLE_PROVIDER_ID,
+    operation: input.operation,
+    retryable: input.retryable ?? false,
+    message: input.message,
+  });
+}
+
+function googleUpstreamError(input: {
+  operation: string;
+  statusCode: number;
+  detail?: string;
+}) {
+  return new RuntimeUpstreamServiceError({
+    providerID: GOOGLE_PROVIDER_ID,
+    operation: input.operation,
+    statusCode: input.statusCode,
+    retryable:
+      input.statusCode >= 500 ||
+      input.statusCode === 429 ||
+      input.statusCode === 408,
+    message: input.detail
+      ? `Google authentication request failed: ${input.detail.slice(0, 300)}`
+      : "Google authentication request failed.",
+  });
+}
+
+function toGoogleError(operation: string, error: unknown) {
+  if (isRuntimeRpcError(error)) {
+    return error;
+  }
+
+  return googleAuthProviderError({
+    operation,
+    message: error instanceof Error ? error.message : String(error),
+  });
 }
 
 function toErrorMessage(error: unknown) {
@@ -319,100 +373,152 @@ function normalizeGoogleAuth(
   };
 }
 
-async function waitForGeminiOAuthCallback(signal?: AbortSignal) {
-  return waitForOAuthCallback({
-    signal,
-    urlPattern: GEMINI_REDIRECT_URL_PATTERN,
-    matchesUrl: (url) => url.startsWith(GEMINI_REDIRECT_URI),
-    timeoutMs: GEMINI_CALLBACK_TIMEOUT_MS,
-    unsupportedErrorMessage:
-      "Gemini OAuth callback interception is unavailable: webRequest is not supported in this browser.",
-    timeoutErrorMessage:
-      "Timed out waiting for Gemini OAuth callback on http://localhost:8085/oauth2callback.",
-    registerListenerErrorPrefix:
-      "Failed to register Gemini OAuth callback listener",
+function waitForGeminiOAuthCallback(signal?: AbortSignal) {
+  return Effect.tryPromise({
+    try: () =>
+      waitForOAuthCallback({
+        signal,
+        urlPattern: GEMINI_REDIRECT_URL_PATTERN,
+        matchesUrl: (url) => url.startsWith(GEMINI_REDIRECT_URI),
+        timeoutMs: GEMINI_CALLBACK_TIMEOUT_MS,
+        unsupportedErrorMessage:
+          "Gemini OAuth callback interception is unavailable: webRequest is not supported in this browser.",
+        timeoutErrorMessage:
+          "Timed out waiting for Gemini OAuth callback on http://localhost:8085/oauth2callback.",
+        registerListenerErrorPrefix:
+          "Failed to register Gemini OAuth callback listener",
+      }),
+    catch: (error) => toGoogleError("oauth.waitForCallback", error),
   });
 }
 
-async function exchangeAuthorizationCode(
+function exchangeAuthorizationCode(
   code: string,
   verifier: string,
   redirectUri: string,
   clientSecret: string,
 ) {
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      client_id: GEMINI_CLIENT_ID,
-      client_secret: clientSecret,
-      code,
-      grant_type: "authorization_code",
-      redirect_uri: redirectUri,
-      code_verifier: verifier,
-    }),
+  return Effect.gen(function* () {
+    const response = yield* Effect.tryPromise({
+      try: () =>
+        fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            client_id: GEMINI_CLIENT_ID,
+            client_secret: clientSecret,
+            code,
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri,
+            code_verifier: verifier,
+          }),
+        }),
+      catch: (error) => toGoogleError("oauth.exchangeAuthorizationCode", error),
+    });
+
+    if (!response.ok) {
+      const detail = yield* Effect.tryPromise({
+        try: () => response.text().catch(() => ""),
+        catch: (error) =>
+          toGoogleError("oauth.exchangeAuthorizationCode.detail", error),
+      }).pipe(Effect.catchAll(() => Effect.succeed("")));
+      return yield* Effect.fail(
+        googleUpstreamError({
+          operation: "oauth.exchangeAuthorizationCode",
+          statusCode: response.status,
+          detail,
+        }),
+      );
+    }
+
+    const payload = yield* Effect.tryPromise({
+      try: () => response.json().catch(() => undefined),
+      catch: (error) => toGoogleError("oauth.exchangeAuthorizationCode", error),
+    });
+    const result = decodeSchemaOrUndefined(googleTokenResponseSchema, payload);
+    if (!result) {
+      return yield* Effect.fail(
+        googleAuthProviderError({
+          operation: "oauth.exchangeAuthorizationCode.parse",
+          message: "Gemini OAuth exchange returned an invalid response.",
+        }),
+      );
+    }
+
+    return result;
   });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(
-      `Gemini OAuth exchange failed (${response.status}): ${detail.slice(0, 300)}`,
-    );
-  }
-
-  const payload = await response.json().catch(() => undefined);
-  const result = decodeSchemaOrUndefined(googleTokenResponseSchema, payload);
-  if (!result) {
-    throw new Error("Gemini OAuth exchange returned an invalid response.");
-  }
-
-  return result;
 }
 
-async function refreshAccessToken(refreshToken: string, clientSecret: string) {
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: GEMINI_CLIENT_ID,
-      client_secret: clientSecret,
-    }),
+function refreshAccessToken(refreshToken: string, clientSecret: string) {
+  return Effect.gen(function* () {
+    const response = yield* Effect.tryPromise({
+      try: () =>
+        fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            refresh_token: refreshToken,
+            client_id: GEMINI_CLIENT_ID,
+            client_secret: clientSecret,
+          }),
+        }),
+      catch: (error) => toGoogleError("oauth.refreshAccessToken", error),
+    });
+
+    if (!response.ok) {
+      const detail = yield* Effect.tryPromise({
+        try: () => response.text().catch(() => ""),
+        catch: (error) => toGoogleError("oauth.refreshAccessToken.detail", error),
+      }).pipe(Effect.catchAll(() => Effect.succeed("")));
+      return yield* Effect.fail(
+        googleUpstreamError({
+          operation: "oauth.refreshAccessToken",
+          statusCode: response.status,
+          detail,
+        }),
+      );
+    }
+
+    const payload = yield* Effect.tryPromise({
+      try: () => response.json().catch(() => undefined),
+      catch: (error) => toGoogleError("oauth.refreshAccessToken", error),
+    });
+    const result = decodeSchemaOrUndefined(googleTokenResponseSchema, payload);
+    if (!result) {
+      return yield* Effect.fail(
+        googleAuthProviderError({
+          operation: "oauth.refreshAccessToken.parse",
+          message: "Gemini token refresh returned an invalid response.",
+        }),
+      );
+    }
+
+    return result;
   });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(
-      `Gemini token refresh failed (${response.status}): ${detail.slice(0, 300)}`,
-    );
-  }
-
-  const payload = await response.json().catch(() => undefined);
-  const result = decodeSchemaOrUndefined(googleTokenResponseSchema, payload);
-  if (!result) {
-    throw new Error("Gemini token refresh returned an invalid response.");
-  }
-
-  return result;
 }
 
-async function resolveUserEmail(accessToken: string) {
-  const response = await fetch(
-    "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+function resolveUserEmail(accessToken: string) {
+  return Effect.tryPromise({
+    try: async () => {
+      const response = await fetch(
+        "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        },
+      );
+      if (!response.ok) return undefined;
+      const payload = await response.json().catch(() => undefined);
+      return decodeSchemaOrUndefined(googleUserInfoSchema, payload)?.email;
     },
-  );
-  if (!response.ok) return undefined;
-  const payload = await response.json().catch(() => undefined);
-  return decodeSchemaOrUndefined(googleUserInfoSchema, payload)?.email;
+    catch: (error) => toGoogleError("oauth.resolveUserEmail", error),
+  }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
 }
 
 async function loadCodeAssist(
@@ -539,79 +645,100 @@ async function onboardCodeAssist(
   }
 }
 
-export async function resolveGeminiProjectContext(
+export function resolveGeminiProjectContext(
   accessToken: string,
   metadata?: Record<string, string>,
   deps: GeminiProjectContextDeps = {
     loadCodeAssist,
     onboardCodeAssist,
   },
-): Promise<GeminiProjectContextResult> {
-  const configuredProjectId = readMetadataValue(metadata?.projectId);
-  const managedProjectId = readMetadataValue(metadata?.managedProjectId);
+): Effect.Effect<GeminiProjectContextResult, RuntimeRpcError> {
+  return Effect.gen(function* () {
+    const configuredProjectId = readMetadataValue(metadata?.projectId);
+    const managedProjectId = readMetadataValue(metadata?.managedProjectId);
 
-  if (configuredProjectId) {
-    return {
-      projectId: configuredProjectId,
-      managedProjectId,
-    };
-  }
+    if (configuredProjectId) {
+      return {
+        projectId: configuredProjectId,
+        managedProjectId,
+      };
+    }
 
-  if (managedProjectId) {
-    return {
-      projectId: managedProjectId,
-      managedProjectId,
-    };
-  }
+    if (managedProjectId) {
+      return {
+        projectId: managedProjectId,
+        managedProjectId,
+      };
+    }
 
-  const loaded = await deps.loadCodeAssist(accessToken, configuredProjectId);
-  if (!loaded) {
-    throw new Error(GEMINI_PROJECT_REQUIRED_MESSAGE);
-  }
+    const loaded = yield* Effect.tryPromise({
+      try: () => deps.loadCodeAssist(accessToken, configuredProjectId),
+      catch: (error) => toGoogleError("codeAssist.load", error),
+    });
+    if (!loaded) {
+      return yield* Effect.fail(
+        new RuntimeValidationError({
+          message: GEMINI_PROJECT_REQUIRED_MESSAGE,
+        }),
+      );
+    }
 
-  const discoveredProjectId = normalizeProjectId(
-    loaded.cloudaicompanionProject,
-  );
-  if (discoveredProjectId) {
-    return {
-      projectId: discoveredProjectId,
-      managedProjectId: discoveredProjectId,
-    };
-  }
+    const discoveredProjectId = normalizeProjectId(
+      loaded.cloudaicompanionProject,
+    );
+    if (discoveredProjectId) {
+      return {
+        projectId: discoveredProjectId,
+        managedProjectId: discoveredProjectId,
+      };
+    }
 
-  const currentTierId = readMetadataValue(loaded.currentTier?.id);
-  if (currentTierId) {
-    throw new Error(buildProjectResolutionError(loaded.ineligibleTiers));
-  }
+    const currentTierId = readMetadataValue(loaded.currentTier?.id);
+    if (currentTierId) {
+      return yield* Effect.fail(
+        new RuntimeValidationError({
+          message: buildProjectResolutionError(loaded.ineligibleTiers),
+        }),
+      );
+    }
 
-  const tier = pickAllowedTier(loaded.allowedTiers);
-  const tierId = readMetadataValue(tier.id) ?? LEGACY_TIER_ID;
+    const tier = pickAllowedTier(loaded.allowedTiers);
+    const tierId = readMetadataValue(tier.id) ?? LEGACY_TIER_ID;
 
-  if (tierId !== FREE_TIER_ID && !configuredProjectId) {
-    throw new Error(buildProjectResolutionError(loaded.ineligibleTiers));
-  }
+    if (tierId !== FREE_TIER_ID && !configuredProjectId) {
+      return yield* Effect.fail(
+        new RuntimeValidationError({
+          message: buildProjectResolutionError(loaded.ineligibleTiers),
+        }),
+      );
+    }
 
-  const onboardedProjectId = await deps.onboardCodeAssist(
-    accessToken,
-    tierId,
-    configuredProjectId,
-  );
+    const onboardedProjectId = yield* Effect.tryPromise({
+      try: () =>
+        deps.onboardCodeAssist(accessToken, tierId, configuredProjectId),
+      catch: (error) => toGoogleError("codeAssist.onboard", error),
+    });
 
-  if (onboardedProjectId) {
-    return {
-      projectId: onboardedProjectId,
-      managedProjectId: onboardedProjectId,
-    };
-  }
+    if (onboardedProjectId) {
+      return {
+        projectId: onboardedProjectId,
+        managedProjectId: onboardedProjectId,
+      };
+    }
 
-  if (configuredProjectId) {
-    return {
-      projectId: configuredProjectId,
-      managedProjectId: configuredProjectId,
-    };
-  }
+    if (configuredProjectId) {
+      return {
+        projectId: configuredProjectId,
+        managedProjectId: configuredProjectId,
+      };
+    }
 
-  throw new Error(buildProjectResolutionError(loaded.ineligibleTiers));
+    return yield* Effect.fail(
+      new RuntimeValidationError({
+        message: buildProjectResolutionError(loaded.ineligibleTiers),
+      }),
+    );
+  });
 }
 
 function isGeminiOAuth(
@@ -620,203 +747,232 @@ function isGeminiOAuth(
   return auth?.type === "oauth" && auth.methodType === "oauth";
 }
 
-async function authorizeGeminiOAuth(
+function authorizeGeminiOAuth(
   input: AdapterAuthorizeContext<{ projectId?: string }>,
 ) {
-  const clientSecret = getGeminiClientSecret();
-  const redirectUri = GEMINI_REDIRECT_URI;
-  const pkce = await generatePKCE();
-  const state = generateState();
-
-  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  url.searchParams.set("client_id", GEMINI_CLIENT_ID);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("scope", GEMINI_SCOPES.join(" "));
-  url.searchParams.set("code_challenge", pkce.challenge);
-  url.searchParams.set("code_challenge_method", "S256");
-  url.searchParams.set("state", state);
-  url.searchParams.set("access_type", "offline");
-  url.searchParams.set("prompt", "consent");
-  url.hash = "llm-bridge";
-
-  let authTabId: number | undefined;
-  try {
-    const tab = await browser.tabs.create({
-      url: url.toString(),
-      active: true,
+  return Effect.gen(function* () {
+    const clientSecret = yield* Effect.try({
+      try: () => getGeminiClientSecret(),
+      catch: (error) => toGoogleError("oauth.clientSecret", error),
     });
-    authTabId = tab.id;
-  } catch (error) {
-    throw new Error(
-      `Failed to open Google OAuth tab: ${toErrorMessage(error)}`,
-      {
-        cause: error,
-      },
-    );
-  }
+    const redirectUri = GEMINI_REDIRECT_URI;
+    const pkce = yield* Effect.tryPromise({
+      try: () => generatePKCE(),
+      catch: (error) => toGoogleError("oauth.generatePKCE", error),
+    });
+    const state = generateState();
 
-  let callbackUrl: string;
-  try {
-    callbackUrl = await waitForGeminiOAuthCallback(input.signal);
-  } finally {
-    if (typeof authTabId === "number") {
-      await browser.tabs.remove(authTabId).catch(() => {
-        // Ignore tab close failures if user already closed it.
+    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    url.searchParams.set("client_id", GEMINI_CLIENT_ID);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("redirect_uri", redirectUri);
+    url.searchParams.set("scope", GEMINI_SCOPES.join(" "));
+    url.searchParams.set("code_challenge", pkce.challenge);
+    url.searchParams.set("code_challenge_method", "S256");
+    url.searchParams.set("state", state);
+    url.searchParams.set("access_type", "offline");
+    url.searchParams.set("prompt", "consent");
+    url.hash = "llm-bridge";
+
+    const tab = yield* Effect.tryPromise({
+      try: () =>
+        browser.tabs.create({
+          url: url.toString(),
+          active: true,
+        }),
+      catch: (error) =>
+        googleAuthProviderError({
+          operation: "oauth.openTab",
+          message: `Failed to open Google OAuth tab: ${toErrorMessage(error)}`,
+        }),
+    });
+    const authTabId = tab.id;
+
+    const callbackUrl = yield* Effect.ensuring(
+      waitForGeminiOAuthCallback(input.signal),
+      typeof authTabId === "number"
+        ? Effect.ignore(
+            Effect.tryPromise({
+              try: () => browser.tabs.remove(authTabId),
+              catch: (error) => error,
+            }),
+          )
+        : Effect.void,
+    );
+
+    const parsed = input.oauth.parseCallback(callbackUrl);
+    if (parsed.error) {
+      return yield* Effect.fail(
+        googleAuthProviderError({
+          operation: "oauth.authorize",
+          message: `Google OAuth failed: ${parsed.errorDescription ?? parsed.error}`,
+        }),
+      );
+    }
+    if (!parsed.code) {
+      return yield* new RuntimeValidationError({
+        message: "Missing Google authorization code",
       });
     }
-  }
+    if (parsed.state && parsed.state !== state) {
+      return yield* new RuntimeValidationError({
+        message: "OAuth state mismatch",
+      });
+    }
 
-  const parsed = input.oauth.parseCallback(callbackUrl);
-  if (parsed.error) {
-    throw new Error(
-      `Google OAuth failed: ${parsed.errorDescription ?? parsed.error}`,
+    const tokens = yield* exchangeAuthorizationCode(
+      parsed.code,
+      pkce.verifier,
+      redirectUri,
+      clientSecret,
     );
-  }
-  if (!parsed.code) throw new Error("Missing Google authorization code");
-  if (parsed.state && parsed.state !== state) {
-    throw new Error("OAuth state mismatch");
-  }
+    if (!tokens.refresh_token) {
+      return yield* Effect.fail(
+        googleAuthProviderError({
+          operation: "oauth.authorize",
+          message: "Missing refresh token in Google OAuth response",
+        }),
+      );
+    }
 
-  const tokens = await exchangeAuthorizationCode(
-    parsed.code,
-    pkce.verifier,
-    redirectUri,
-    clientSecret,
-  );
-  if (!tokens.refresh_token) {
-    throw new Error("Missing refresh token in Google OAuth response");
-  }
-
-  const projectId = input.values.projectId?.trim() || undefined;
-  const email = await resolveUserEmail(tokens.access_token);
-  return {
-    type: "oauth" as const,
-    methodID: "oauth" as const,
-    methodType: "oauth" as const,
-    access: tokens.access_token,
-    refresh: tokens.refresh_token,
-    expiresAt: Date.now() + tokens.expires_in * 1000,
-    metadata: buildPersistedMetadata({
-      email,
-      projectId,
-    }),
-  };
+    const projectId = input.values.projectId?.trim() || undefined;
+    const email = yield* resolveUserEmail(tokens.access_token);
+    return {
+      type: "oauth" as const,
+      methodID: "oauth" as const,
+      methodType: "oauth" as const,
+      access: tokens.access_token,
+      refresh: tokens.refresh_token,
+      expiresAt: Date.now() + tokens.expires_in * 1000,
+      metadata: buildPersistedMetadata({
+        email,
+        projectId,
+      }),
+    };
+  });
 }
 
-export async function resolveGoogleExecutionState(
+export function resolveGoogleExecutionState(
   context: RuntimeAdapterContext,
-): Promise<GoogleExecutionState> {
-  const auth = normalizeGoogleAuth(context.auth);
+){
+  return Effect.gen(function* () {
+    const auth = normalizeGoogleAuth(context.auth);
 
-  if (!auth) {
-    return {
-      kind: "api",
-      apiKey: undefined,
-      baseURL: context.model.api.url,
-      headers: {},
-    };
-  }
+    if (!auth) {
+      return {
+        kind: "api",
+        apiKey: undefined,
+        baseURL: context.model.api.url,
+        headers: {},
+      } satisfies GoogleExecutionState;
+    }
 
-  if (auth.type === "api" || !isGeminiOAuth(auth)) {
-    return {
-      kind: "api",
-      apiKey: auth.type === "api" ? auth.key : undefined,
-      baseURL: context.model.api.url,
-      headers: {},
-    };
-  }
+    if (auth.type === "api" || !isGeminiOAuth(auth)) {
+      return {
+        kind: "api",
+        apiKey: auth.type === "api" ? auth.key : undefined,
+        baseURL: context.model.api.url,
+        headers: {},
+      } satisfies GoogleExecutionState;
+    }
 
-  let access = auth.access;
-  let refresh = auth.refresh;
-  let expiresAt = auth.expiresAt;
+    let access = auth.access;
+    let refresh = auth.refresh;
+    let expiresAt = auth.expiresAt;
 
-  if (refresh && (!expiresAt || expiresAt <= context.runtime.now() + 60_000)) {
-    const refreshed = await refreshAccessToken(
-      refresh,
-      getGeminiClientSecret(),
-    );
-    access = refreshed.access_token;
-    refresh = refreshed.refresh_token ?? refresh;
-    expiresAt = context.runtime.now() + refreshed.expires_in * 1000;
-  }
+    if (refresh && (!expiresAt || expiresAt <= context.runtime.now() + 60_000)) {
+      const clientSecret = yield* Effect.try({
+        try: () => getGeminiClientSecret(),
+        catch: (error) => toGoogleError("oauth.clientSecret", error),
+      });
+      const refreshed = yield* refreshAccessToken(refresh, clientSecret);
+      access = refreshed.access_token;
+      refresh = refreshed.refresh_token ?? refresh;
+      expiresAt = context.runtime.now() + refreshed.expires_in * 1000;
+    }
 
-  if (!access) {
-    const errorMessage =
-      "Gemini OAuth access token is unavailable. Reconnect Google OAuth and retry.";
-    return {
-      kind: "oauth",
-      apiKey: undefined,
-      baseURL: context.model.api.url,
-      headers: {
-        ...GEMINI_CODE_ASSIST_HEADERS,
-      },
-      projectResolutionError: errorMessage,
-    };
-  }
+    if (!access) {
+      const errorMessage =
+        "Gemini OAuth access token is unavailable. Reconnect Google OAuth and retry.";
+      return {
+        kind: "oauth",
+        apiKey: undefined,
+        baseURL: context.model.api.url,
+        headers: {
+          ...GEMINI_CODE_ASSIST_HEADERS,
+        },
+        projectResolutionError: errorMessage,
+      } satisfies GoogleExecutionState;
+    }
 
-  const metadata = auth.metadata ?? {};
-  const projectId = readMetadataValue(metadata.projectId);
-  const email = readMetadataValue(metadata.email);
-  let managedProjectId = readMetadataValue(metadata.managedProjectId);
-  let effectiveProjectId = projectId ?? managedProjectId;
-  let projectResolutionError: string | undefined;
+    const metadata = auth.metadata ?? {};
+    const projectId = readMetadataValue(metadata.projectId);
+    const email = readMetadataValue(metadata.email);
+    let managedProjectId = readMetadataValue(metadata.managedProjectId);
+    let effectiveProjectId = projectId ?? managedProjectId;
+    let projectResolutionError: string | undefined;
 
-  if (!effectiveProjectId) {
-    try {
-      const resolved = await resolveGeminiProjectContext(access, metadata);
-      effectiveProjectId = resolved.projectId;
-      managedProjectId =
-        resolved.managedProjectId ?? managedProjectId ?? effectiveProjectId;
-    } catch (error) {
-      projectResolutionError = toErrorMessage(error);
-      console.warn("[adapter:google] project resolution failed", {
-        error: projectResolutionError,
+    if (!effectiveProjectId) {
+      const resolution = yield* Effect.exit(
+        resolveGeminiProjectContext(access, metadata),
+      );
+      if (resolution._tag === "Success") {
+        effectiveProjectId = resolution.value.projectId;
+        managedProjectId =
+          resolution.value.managedProjectId ??
+          managedProjectId ??
+          effectiveProjectId;
+      } else {
+        const error = Cause.squash(resolution.cause);
+        projectResolutionError = toErrorMessage(error);
+        console.warn("[adapter:google] project resolution failed", {
+          error: projectResolutionError,
+        });
+      }
+    }
+
+    const nextMetadata = buildPersistedMetadata({
+      previous: auth.metadata,
+      email,
+      projectId,
+      managedProjectId,
+    });
+
+    const shouldPersistAuth =
+      access !== auth.access ||
+      refresh !== auth.refresh ||
+      expiresAt !== auth.expiresAt ||
+      !isRecordEqual(auth.metadata, nextMetadata);
+
+    if (shouldPersistAuth) {
+      yield* context.authStore.set({
+        type: "oauth",
+        access,
+        refresh,
+        expiresAt,
+        methodID: auth.methodID,
+        methodType: auth.methodType,
+        metadata: nextMetadata,
       });
     }
-  }
 
-  const nextMetadata = buildPersistedMetadata({
-    previous: auth.metadata,
-    email,
-    projectId,
-    managedProjectId,
+    return {
+      kind: "oauth",
+      apiKey: access,
+      baseURL: context.model.api.url,
+      headers: {
+        Authorization: `Bearer ${access}`,
+        ...GEMINI_CODE_ASSIST_HEADERS,
+      },
+      fetch: effectiveProjectId
+        ? createGeminiCodeAssistFetch({
+            projectId: effectiveProjectId,
+          })
+        : undefined,
+      projectId: effectiveProjectId,
+      projectResolutionError,
+    } satisfies GoogleExecutionState;
   });
-
-  const shouldPersistAuth =
-    access !== auth.access ||
-    refresh !== auth.refresh ||
-    expiresAt !== auth.expiresAt ||
-    !isRecordEqual(auth.metadata, nextMetadata);
-
-  if (shouldPersistAuth) {
-    await context.authStore.set({
-      type: "oauth",
-      access,
-      refresh,
-      expiresAt,
-      methodID: auth.methodID,
-      methodType: auth.methodType,
-      metadata: nextMetadata,
-    });
-  }
-
-  return {
-    kind: "oauth",
-    apiKey: access,
-    baseURL: context.model.api.url,
-    headers: {
-      Authorization: `Bearer ${access}`,
-      ...GEMINI_CODE_ASSIST_HEADERS,
-    },
-    fetch: effectiveProjectId
-      ? createGeminiCodeAssistFetch({
-          projectId: effectiveProjectId,
-        })
-      : undefined,
-    projectId: effectiveProjectId,
-    projectResolutionError,
-  };
 }
 
 const optionalAuthStringSchema = Schema.Union(Schema.String, Schema.Undefined);
@@ -827,8 +983,8 @@ export const googleAdapter: AIAdapter = {
   match: {
     providerIDs: ["google"],
   },
-  async listAuthMethods(ctx) {
-    return [
+  listAuthMethods(ctx) {
+    const methods: Array<AnyAuthMethodDefinition> = [
       createApiKeyMethod(ctx),
       {
         id: "oauth",
@@ -848,9 +1004,14 @@ export const googleAdapter: AIAdapter = {
         authorize: authorizeGeminiOAuth,
       },
     ];
+
+    return Effect.succeed(methods);
   },
-  async patchCatalog(ctx, provider) {
-    if (!isGeminiOAuth(normalizeGoogleAuth(ctx.auth))) return provider;
+  patchCatalog(ctx, provider) {
+    if (!isGeminiOAuth(normalizeGoogleAuth(ctx.auth))) {
+      return Effect.succeed(provider);
+    }
+
     const models = Object.fromEntries(
       Object.entries(provider.models).map(([modelID, model]) => [
         modelID,
@@ -868,40 +1029,46 @@ export const googleAdapter: AIAdapter = {
       ]),
     );
 
-    return {
+    return Effect.succeed({
       ...provider,
       models,
-    } satisfies ProviderInfo;
+    } satisfies ProviderInfo);
   },
-  async createModel(context) {
-    const providerOptions = parseProviderOptions(
-      googleProviderOptionsSchema,
-      context.provider.options,
-    );
-    const execution = await resolveGoogleExecutionState(context);
+  createModel(context) {
+    return Effect.gen(function* () {
+      const providerOptions = parseProviderOptions(
+        googleProviderOptionsSchema,
+        context.provider.options,
+      );
+      const execution = yield* resolveGoogleExecutionState(context);
 
-    if (execution.kind === "oauth" && execution.projectResolutionError) {
-      throw new Error(execution.projectResolutionError);
-    }
+      if (execution.kind === "oauth" && execution.projectResolutionError) {
+        return yield* new RuntimeValidationError({
+          message: execution.projectResolutionError,
+        });
+      }
 
-    const provider = createGoogleGenerativeAI(
-      buildGoogleSettings({
-        providerID: context.providerID,
-        providerOptions,
-        headers: context.model.headers,
-        execution,
-      }),
-    );
-    const baseModel = provider.languageModel(context.model.api.id);
+      const provider = createGoogleGenerativeAI(
+        buildGoogleSettings({
+          providerID: context.providerID,
+          providerOptions,
+          headers: context.model.headers,
+          execution,
+        }),
+      );
+      const baseModel = provider.languageModel(context.model.api.id);
 
-    if (execution.kind !== "oauth") {
-      return baseModel;
-    }
+      if (execution.kind !== "oauth") {
+        return baseModel;
+      }
 
-    return wrapLanguageModel(baseModel, async (options) =>
-      mergeModelHeaders(options, {
-        "x-activity-request-id": context.requestID,
-      }),
-    );
+      return wrapLanguageModel(baseModel, (options) =>
+        Effect.succeed(
+          mergeModelHeaders(options, {
+            "x-activity-request-id": context.requestID,
+          }),
+        ),
+      );
+    });
   },
 };

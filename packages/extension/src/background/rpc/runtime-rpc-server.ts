@@ -6,13 +6,12 @@ import type {
   FromClientEncoded,
   FromServerEncoded,
 } from "@effect/rpc/RpcMessage";
-import type * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
 import * as Mailbox from "effect/Mailbox";
 import * as Option from "effect/Option";
-import * as Layer_ from "effect/Layer";
+import * as Layer from "effect/Layer";
 import {
   RuntimeAdminRpcGroup,
   RUNTIME_ADMIN_RPC_PORT_NAME,
@@ -372,7 +371,7 @@ function protocolForRole<Rpcs extends Rpc.Any>(
   );
 }
 
-export async function registerRuntimeRpcServer<PE, AE>(input: {
+export function registerRuntimeRpcServer<PE, AE>(input: {
   publicLayer: Layer.Layer<
     Rpc.ToHandler<RuntimePublicRpc> | Rpc.Middleware<RuntimePublicRpc>,
     PE,
@@ -384,55 +383,48 @@ export async function registerRuntimeRpcServer<PE, AE>(input: {
     never
   >;
 }) {
-  const scope = await Effect.runPromise(Scope.make());
+  return Effect.gen(function* () {
+    const scope = yield* Scope.make();
+    const policy = RuntimeRpcAccessPolicy;
 
-  const policy = RuntimeRpcAccessPolicy;
-
-  const publicProtocol = await Effect.runPromise(
-    protocolForRole({
+    const publicProtocol = yield* protocolForRole({
       role: "public",
       portName: RUNTIME_PUBLIC_RPC_PORT_NAME,
       policy,
       rpcGroup: RuntimePublicRpcGroup,
       allowedTags: RuntimePublicAllowedTags,
-    }).pipe(Scope.extend(scope)),
-  );
+    }).pipe(Scope.extend(scope));
 
-  const adminProtocol = await Effect.runPromise(
-    protocolForRole({
+    const adminProtocol = yield* protocolForRole({
       role: "admin",
       portName: RUNTIME_ADMIN_RPC_PORT_NAME,
       policy,
       rpcGroup: RuntimeAdminRpcGroup,
       allowedTags: RuntimeAdminAllowedTags,
-    }).pipe(Scope.extend(scope)),
-  );
+    }).pipe(Scope.extend(scope));
 
-  await Effect.runPromise(
-    Layer_.buildWithScope(
+    yield* Layer.buildWithScope(
       RpcServer.layer(RuntimePublicRpcGroup, {
         disableTracing: true,
       }).pipe(
-        Layer_.provide(input.publicLayer),
-        Layer_.provide(Layer_.succeed(RpcServer.Protocol, publicProtocol)),
+        Layer.provide(input.publicLayer),
+        Layer.provide(Layer.succeed(RpcServer.Protocol, publicProtocol)),
       ),
       scope,
-    ),
-  );
+    );
 
-  await Effect.runPromise(
-    Layer_.buildWithScope(
+    yield* Layer.buildWithScope(
       RpcServer.layer(RuntimeAdminRpcGroup, {
         disableTracing: true,
       }).pipe(
-        Layer_.provide(input.adminLayer),
-        Layer_.provide(Layer_.succeed(RpcServer.Protocol, adminProtocol)),
+        Layer.provide(input.adminLayer),
+        Layer.provide(Layer.succeed(RpcServer.Protocol, adminProtocol)),
       ),
       scope,
-    ),
-  );
+    );
 
-  return () => Effect.runPromise(Scope.close(scope, Exit.succeed(undefined)));
+    return Scope.close(scope, Exit.void);
+  });
 }
 
 export function makeRuntimeRpcServerLayer<PE, AE>(input: {
@@ -447,13 +439,9 @@ export function makeRuntimeRpcServerLayer<PE, AE>(input: {
     never
   >;
 }) {
-  return Layer_.scopedDiscard(
-    Effect.acquireRelease(
-      Effect.promise(() => registerRuntimeRpcServer(input)),
-      (dispose) =>
-        Effect.promise(() => dispose()).pipe(
-          Effect.catchAll(() => Effect.void),
-        ),
+  return Layer.scopedDiscard(
+    Effect.acquireRelease(registerRuntimeRpcServer(input), (dispose) =>
+      dispose.pipe(Effect.catchAll(() => Effect.void)),
     ),
   );
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import * as Effect from "effect/Effect";
 import { resolveCopilotExecutionState } from "@/background/runtime/providers/adapters/github-copilot";
 import type { RuntimeAdapterContext } from "@/background/runtime/providers/adapters/types";
 
@@ -71,7 +72,7 @@ function createContext(): Omit<RuntimeAdapterContext, "auth" | "authStore"> {
 
 describe("resolveCopilotExecutionState", () => {
   it("returns github.com copilot bearer settings with default base url", async () => {
-    const output = await resolveCopilotExecutionState({
+    const output = await Effect.runPromise(resolveCopilotExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -84,18 +85,18 @@ describe("resolveCopilotExecutionState", () => {
         updatedAt: Date.now() - 1_000,
       },
       authStore: {
-        get: async () => undefined,
-        set: async () => undefined,
-        remove: async () => undefined,
+        get: () => Effect.succeed(undefined),
+        set: () => Effect.void,
+        remove: () => Effect.void,
       },
-    });
+    }));
 
     assert.equal(output.apiKey, "access-token");
     assert.equal(output.baseURL, "https://api.githubcopilot.com");
   });
 
   it("returns enterprise copilot settings for enterprise metadata", async () => {
-    const output = await resolveCopilotExecutionState({
+    const output = await Effect.runPromise(resolveCopilotExecutionState({
       ...createContext(),
       auth: {
         type: "oauth",
@@ -111,11 +112,11 @@ describe("resolveCopilotExecutionState", () => {
         },
       },
       authStore: {
-        get: async () => undefined,
-        set: async () => undefined,
-        remove: async () => undefined,
+        get: () => Effect.succeed(undefined),
+        set: () => Effect.void,
+        remove: () => Effect.void,
       },
-    });
+    }));
 
     assert.equal(output.apiKey, "enterprise-access-token");
     assert.equal(output.baseURL, "https://copilot-api.company.ghe.com");

@@ -257,23 +257,19 @@ export function buildProviderFromSource(input: {
     return Effect.succeed(provider);
   }
 
-  return Effect.promise(() =>
-    Promise.resolve(
-      patchCatalog(
-        {
-          providerID: input.providerID,
-          provider,
-          auth,
-        },
-        provider,
-      ),
-    ),
+  return patchCatalog(
+    {
+      providerID: input.providerID,
+      provider,
+      auth,
+    },
+    provider,
   ).pipe(Effect.map((patched) => patched ?? provider));
 }
 
 export function loadProviderCatalogInputs() {
   return Effect.all([
-    Effect.promise(() => getRuntimeConfig()),
+    getRuntimeConfig(),
     listAuth(),
   ]);
 }

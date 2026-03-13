@@ -168,7 +168,11 @@ mock.module("@/background/runtime/core/util", () => ({
   },
 }));
 
-const { createPermissionRequest } = await import("./permissions");
+const {
+  createPermissionRequest,
+  getModelPermission,
+  listPendingRequests,
+} = await import("./permissions");
 
 function setTrustedTarget(
   modelId: string,
@@ -397,5 +401,87 @@ describe("createPermissionRequest", () => {
     expect(permissionRows.has("https://three.test::openai/model-3")).toBe(
       true,
     );
+  });
+});
+
+describe("getModelPermission", () => {
+  it("returns denied when the origin is disabled even if the model is allowed", async () => {
+    originRows.set(TEST_ORIGIN, {
+      origin: TEST_ORIGIN,
+      enabled: false,
+      updatedAt: 1,
+    });
+    permissionRows.set(`${TEST_ORIGIN}::openai/gpt-4o-mini`, {
+      id: `${TEST_ORIGIN}::openai/gpt-4o-mini`,
+      origin: TEST_ORIGIN,
+      modelId: "openai/gpt-4o-mini",
+      status: "allowed",
+      capabilities: ["text"],
+      updatedAt: 1,
+    });
+
+    const result = await Effect.runPromise(
+      getModelPermission(TEST_ORIGIN, "openai/gpt-4o-mini"),
+    );
+
+    expect(result).toBe("denied");
+  });
+});
+
+describe("listPendingRequests", () => {
+  it("filters out dismissed and non-pending requests and scopes by origin", async () => {
+    addPendingRow({
+      id: "pending_one",
+      origin: TEST_ORIGIN,
+      modelId: "openai/model-1",
+      modelName: "Model 1",
+      provider: "openai",
+      capabilities: ["text"],
+      requestedAt: 1,
+      dismissed: false,
+      status: "pending",
+    });
+    addPendingRow({
+      id: "dismissed",
+      origin: TEST_ORIGIN,
+      modelId: "openai/model-2",
+      modelName: "Model 2",
+      provider: "openai",
+      capabilities: ["text"],
+      requestedAt: 2,
+      dismissed: true,
+      status: "pending",
+    });
+    addPendingRow({
+      id: "resolved",
+      origin: TEST_ORIGIN,
+      modelId: "openai/model-3",
+      modelName: "Model 3",
+      provider: "openai",
+      capabilities: ["text"],
+      requestedAt: 3,
+      dismissed: false,
+      status: "resolved",
+    });
+    addPendingRow({
+      id: "pending_two",
+      origin: "https://other.test",
+      modelId: "openai/model-4",
+      modelName: "Model 4",
+      provider: "openai",
+      capabilities: ["text"],
+      requestedAt: 4,
+      dismissed: false,
+      status: "pending",
+    });
+
+    const allPending = await Effect.runPromise(listPendingRequests());
+    const originPending = await Effect.runPromise(listPendingRequests(TEST_ORIGIN));
+
+    expect(allPending.map((row) => row.id)).toEqual([
+      "pending_one",
+      "pending_two",
+    ]);
+    expect(originPending.map((row) => row.id)).toEqual(["pending_one"]);
   });
 });

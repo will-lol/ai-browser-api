@@ -1,8 +1,10 @@
 import { browser } from "@wxt-dev/browser";
 import type { LanguageModelV3CallOptions } from "@ai-sdk/provider";
 import { createOpenAI } from "@ai-sdk/openai";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
+  isRuntimeRpcError,
   RuntimeAuthProviderError,
   RuntimeUpstreamServiceError,
   RuntimeValidationError,
@@ -18,6 +20,7 @@ import {
 } from "./factory-language-model";
 import type {
   AIAdapter,
+  AnyAuthMethodDefinition,
   AdapterAuthorizeContext,
   RuntimeAdapterContext,
 } from "./types";
@@ -98,6 +101,17 @@ function parseOpenAIAuthMetadata(
   return parseOptionalMetadataObject(openAIAuthMetadataSchema, auth?.metadata);
 }
 
+function toOpenAIError(operation: string, error: unknown) {
+  if (isRuntimeRpcError(error)) {
+    return error;
+  }
+
+  return codexAuthProviderError({
+    operation,
+    message: error instanceof Error ? error.message : String(error),
+  });
+}
+
 function normalizeOpenAIAuth(
   auth?: AuthRecord,
 ): AuthRecord<OpenAIAuthMetadata> | undefined {
@@ -115,32 +129,41 @@ function normalizeOpenAIAuth(
   };
 }
 
-async function parseOpenAIJson<
+function parseOpenAIJson<
   TSchema extends Schema.Schema.AnyNoContext,
 >(input: {
   response: Response;
   schema: TSchema;
   operation: string;
-}): Promise<Schema.Schema.Type<TSchema>> {
-  const payload = await input.response.json().catch(() => undefined);
-  const result = decodeSchemaOrUndefined(input.schema, payload);
-  if (result) return result;
+}) {
+  return Effect.tryPromise({
+    try: async () => {
+      const payload = await input.response.json().catch(() => undefined);
+      const result = decodeSchemaOrUndefined(input.schema, payload);
+      if (result) return result;
 
-  throw codexAuthProviderError({
-    operation: input.operation,
-    message: "OpenAI authentication response was invalid.",
+      throw codexAuthProviderError({
+        operation: input.operation,
+        message: "OpenAI authentication response was invalid.",
+      });
+    },
+    catch: (error) => toOpenAIError(input.operation, error),
   });
 }
 
 function throwIfAborted(signal?: AbortSignal) {
-  if (signal?.aborted) {
-    throw new RuntimeAuthProviderError({
+  if (!signal?.aborted) {
+    return Effect.void;
+  }
+
+  return Effect.fail(
+    new RuntimeAuthProviderError({
       providerID: CODEX_PROVIDER_ID,
       operation: "auth.abort",
       retryable: true,
       message: "Authentication canceled.",
-    });
-  }
+    }),
+  );
 }
 
 function codexUpstreamError(input: {
@@ -304,302 +327,374 @@ function isCodexOAuthCallbackURL(url: string) {
   return url.startsWith(CODEX_REDIRECT_URI);
 }
 
-async function waitForCodexOAuthCallback(
+function waitForCodexOAuthCallback(
   signal?: AbortSignal,
   onBeforeRequest: OAuthWebRequestOnBeforeRequest | undefined = browser
     ?.webRequest?.onBeforeRequest,
 ) {
-  return waitForOAuthCallback({
-    signal,
-    onBeforeRequest,
-    urlPattern: CODEX_REDIRECT_URL_PATTERN,
-    matchesUrl: isCodexOAuthCallbackURL,
-    timeoutMs: CODEX_CALLBACK_TIMEOUT_MS,
-    unsupportedErrorMessage:
-      "Codex browser OAuth is unavailable: webRequest callback interception is not supported in this browser. Use ChatGPT Pro/Plus (headless) device auth instead.",
-    timeoutErrorMessage:
-      "Timed out waiting for Codex OAuth callback on http://localhost:1455/auth/callback.",
-    registerListenerErrorPrefix:
-      "Failed to register Codex OAuth callback listener",
+  return Effect.tryPromise({
+    try: () =>
+      waitForOAuthCallback({
+        signal,
+        onBeforeRequest,
+        urlPattern: CODEX_REDIRECT_URL_PATTERN,
+        matchesUrl: isCodexOAuthCallbackURL,
+        timeoutMs: CODEX_CALLBACK_TIMEOUT_MS,
+        unsupportedErrorMessage:
+          "Codex browser OAuth is unavailable: webRequest callback interception is not supported in this browser. Use ChatGPT Pro/Plus (headless) device auth instead.",
+        timeoutErrorMessage:
+          "Timed out waiting for Codex OAuth callback on http://localhost:1455/auth/callback.",
+        registerListenerErrorPrefix:
+          "Failed to register Codex OAuth callback listener",
+      }),
+    catch: (error) => toOpenAIError("oauth.waitForCallback", error),
   });
 }
 
-async function exchangeCodeForTokens(
+function exchangeCodeForTokens(
   code: string,
   redirectUri: string,
   verifier: string,
 ) {
-  const response = await fetch(`${ISSUER}/oauth/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: redirectUri,
-      client_id: CLIENT_ID,
-      code_verifier: verifier,
-    }).toString(),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw codexUpstreamError({
-      operation: "oauth.exchangeCodeForTokens",
-      statusCode: response.status,
-      detail,
-    });
-  }
-
-  return parseOpenAIJson({
-    response,
-    schema: tokenResponseSchema,
-    operation: "oauth.exchangeCodeForTokens.parse",
-  });
-}
-
-async function refreshAccessToken(refreshToken: string) {
-  const response = await fetch(`${ISSUER}/oauth/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: CLIENT_ID,
-    }).toString(),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw codexUpstreamError({
-      operation: "oauth.refreshAccessToken",
-      statusCode: response.status,
-      detail,
-    });
-  }
-
-  return parseOpenAIJson({
-    response,
-    schema: tokenResponseSchema,
-    operation: "oauth.refreshAccessToken.parse",
-  });
-}
-
-async function authorizeBrowser(input: AdapterAuthorizeContext) {
-  throwIfAborted(input.signal);
-  const pkce = await generatePKCE();
-  const state = generateState();
-  const authorizationURL = buildCodexAuthorizationURL({
-    codeChallenge: pkce.challenge,
-    state,
-  });
-
-  let authTabID: number | undefined;
-  let autoOpened = false;
-  await browser.tabs
-    .create({
-      url: authorizationURL,
-      active: true,
-    })
-    .then((tab) => {
-      authTabID = tab.id;
-      autoOpened = true;
-    })
-    .catch(() => {
-      // Surface the auth URL in popup instructions when tab opening fails.
-    });
-
-  await input.authFlow.publish(
-    buildCodexBrowserInstruction({
-      url: authorizationURL,
-      autoOpened,
-    }),
-  );
-
-  let callbackUrl = "";
-  try {
-    callbackUrl = await waitForCodexOAuthCallback(input.signal);
-  } finally {
-    if (typeof authTabID === "number") {
-      await browser.tabs.remove(authTabID).catch(() => {
-        // Ignore tab cleanup errors once callback handling has ended.
-      });
-    }
-  }
-
-  const parsed = input.oauth.parseCallback(callbackUrl);
-  if (parsed.error) {
-    throw codexAuthProviderError({
-      operation: "oauth.authorizeBrowser",
-      message: "OpenAI OAuth authorization failed.",
-    });
-  }
-  if (!parsed.code) {
-    throw new RuntimeValidationError({
-      message: "Missing authorization code",
-    });
-  }
-  if (parsed.state !== state) {
-    throw new RuntimeValidationError({
-      message: "OAuth state mismatch",
-    });
-  }
-
-  const tokens = await exchangeCodeForTokens(
-    parsed.code,
-    CODEX_REDIRECT_URI,
-    pkce.verifier,
-  );
-  const accountId = extractAccountId(tokens);
-
-  return {
-    type: "oauth" as const,
-    methodID: "oauth-browser" as const,
-    methodType: "oauth" as const,
-    access: tokens.access_token,
-    refresh: tokens.refresh_token,
-    expiresAt: input.runtime.now() + (tokens.expires_in ?? 3600) * 1000,
-    accountId,
-    metadata: accountId ? { accountId } : undefined,
-  };
-}
-
-async function authorizeDevice(input: AdapterAuthorizeContext) {
-  const response = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": "llm-bridge",
-    },
-    body: JSON.stringify({
-      client_id: CLIENT_ID,
-    }),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw codexUpstreamError({
-      operation: "oauth.authorizeDevice.start",
-      statusCode: response.status,
-      detail,
-    });
-  }
-
-  const data = await parseOpenAIJson({
-    response,
-    schema: codexDeviceStartSchema,
-    operation: "oauth.authorizeDevice.start.parse",
-  });
-
-  const verificationUrl = `${ISSUER}/codex/device`;
-  let autoOpened = false;
-  await browser.tabs
-    .create({
-      url: verificationUrl,
-    })
-    .then(() => {
-      autoOpened = true;
-    })
-    .catch(() => {
-      // Ignore tab creation errors and continue polling.
-    });
-
-  await input.authFlow.publish(
-    buildCodexDeviceInstruction({
-      code: data.user_code,
-      url: verificationUrl,
-      autoOpened,
-    }),
-  );
-
-  const intervalMs = Math.max(parseInt(data.interval, 10) || 5, 1) * 1000;
-  const deadline = Date.now() + 5 * 60_000;
-
-  while (Date.now() < deadline) {
-    throwIfAborted(input.signal);
-    const tokenPollResponse = await fetch(
-      `${ISSUER}/api/accounts/deviceauth/token`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "llm-bridge",
-        },
-        body: JSON.stringify({
-          device_auth_id: data.device_auth_id,
-          user_code: data.user_code,
+  return Effect.gen(function* () {
+    const response = yield* Effect.tryPromise({
+      try: () =>
+        fetch(`${ISSUER}/oauth/token`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: redirectUri,
+            client_id: CLIENT_ID,
+            code_verifier: verifier,
+          }).toString(),
         }),
-      },
+      catch: (error) => toOpenAIError("oauth.exchangeCodeForTokens", error),
+    });
+
+    if (!response.ok) {
+      const detail = yield* Effect.tryPromise({
+        try: () => response.text().catch(() => ""),
+        catch: (error) => toOpenAIError("oauth.exchangeCodeForTokens.detail", error),
+      }).pipe(Effect.catchAll(() => Effect.succeed("")));
+      return yield* Effect.fail(
+        codexUpstreamError({
+          operation: "oauth.exchangeCodeForTokens",
+          statusCode: response.status,
+          detail,
+        }),
+      );
+    }
+
+    return yield* parseOpenAIJson({
+      response,
+      schema: tokenResponseSchema,
+      operation: "oauth.exchangeCodeForTokens.parse",
+    });
+  });
+}
+
+function refreshAccessToken(refreshToken: string) {
+  return Effect.gen(function* () {
+    const response = yield* Effect.tryPromise({
+      try: () =>
+        fetch(`${ISSUER}/oauth/token`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            refresh_token: refreshToken,
+            client_id: CLIENT_ID,
+          }).toString(),
+        }),
+      catch: (error) => toOpenAIError("oauth.refreshAccessToken", error),
+    });
+
+    if (!response.ok) {
+      const detail = yield* Effect.tryPromise({
+        try: () => response.text().catch(() => ""),
+        catch: (error) => toOpenAIError("oauth.refreshAccessToken.detail", error),
+      }).pipe(Effect.catchAll(() => Effect.succeed("")));
+      return yield* Effect.fail(
+        codexUpstreamError({
+          operation: "oauth.refreshAccessToken",
+          statusCode: response.status,
+          detail,
+        }),
+      );
+    }
+
+    return yield* parseOpenAIJson({
+      response,
+      schema: tokenResponseSchema,
+      operation: "oauth.refreshAccessToken.parse",
+    });
+  });
+}
+
+function authorizeBrowser(input: AdapterAuthorizeContext) {
+  return Effect.gen(function* () {
+    yield* throwIfAborted(input.signal);
+    const pkce = yield* Effect.tryPromise({
+      try: () => generatePKCE(),
+      catch: (error) => toOpenAIError("oauth.generatePKCE", error),
+    });
+    const state = generateState();
+    const authorizationURL = buildCodexAuthorizationURL({
+      codeChallenge: pkce.challenge,
+      state,
+    });
+
+    let authTabID: number | undefined;
+    let autoOpened = false;
+    const tabExit = yield* Effect.exit(
+      Effect.tryPromise({
+        try: () =>
+          browser.tabs.create({
+            url: authorizationURL,
+            active: true,
+          }),
+        catch: (error) => error,
+      }),
+    );
+    if (tabExit._tag === "Success") {
+      authTabID = tabExit.value.id;
+      autoOpened = true;
+    }
+
+    yield* input.authFlow.publish(
+      buildCodexBrowserInstruction({
+        url: authorizationURL,
+        autoOpened,
+      }),
     );
 
-    if (tokenPollResponse.ok) {
-      const payload = await parseOpenAIJson({
-        response: tokenPollResponse,
-        schema: codexDevicePollSchema,
-        operation: "oauth.authorizeDevice.poll.parse",
-      });
+    const callbackUrl = yield* Effect.ensuring(
+      waitForCodexOAuthCallback(input.signal),
+      typeof authTabID === "number"
+        ? Effect.ignore(
+            Effect.tryPromise({
+              try: () => browser.tabs.remove(authTabID),
+              catch: (error) => error,
+            }),
+          )
+        : Effect.void,
+    );
 
-      const tokenResponse = await fetch(`${ISSUER}/oauth/token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code: payload.authorization_code,
-          redirect_uri: `${ISSUER}/deviceauth/callback`,
-          client_id: CLIENT_ID,
-          code_verifier: payload.code_verifier,
-        }).toString(),
+    const parsed = input.oauth.parseCallback(callbackUrl);
+    if (parsed.error) {
+      return yield* Effect.fail(
+        codexAuthProviderError({
+          operation: "oauth.authorizeBrowser",
+          message: "OpenAI OAuth authorization failed.",
+        }),
+      );
+    }
+    if (!parsed.code) {
+      return yield* new RuntimeValidationError({
+        message: "Missing authorization code",
       });
+    }
+    if (parsed.state !== state) {
+      return yield* new RuntimeValidationError({
+        message: "OAuth state mismatch",
+      });
+    }
 
-      if (!tokenResponse.ok) {
-        const detail = await tokenResponse.text().catch(() => "");
-        throw codexUpstreamError({
-          operation: "oauth.authorizeDevice.exchangeToken",
-          statusCode: tokenResponse.status,
+    const tokens = yield* exchangeCodeForTokens(
+      parsed.code,
+      CODEX_REDIRECT_URI,
+      pkce.verifier,
+    );
+    const accountId = extractAccountId(tokens);
+
+    return {
+      type: "oauth" as const,
+      methodID: "oauth-browser" as const,
+      methodType: "oauth" as const,
+      access: tokens.access_token,
+      refresh: tokens.refresh_token,
+      expiresAt: input.runtime.now() + (tokens.expires_in ?? 3600) * 1000,
+      accountId,
+      metadata: accountId ? { accountId } : undefined,
+    };
+  });
+}
+
+function authorizeDevice(input: AdapterAuthorizeContext) {
+  return Effect.gen(function* () {
+    const response = yield* Effect.tryPromise({
+      try: () =>
+        fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "llm-bridge",
+          },
+          body: JSON.stringify({
+            client_id: CLIENT_ID,
+          }),
+        }),
+      catch: (error) => toOpenAIError("oauth.authorizeDevice.start", error),
+    });
+
+    if (!response.ok) {
+      const detail = yield* Effect.tryPromise({
+        try: () => response.text().catch(() => ""),
+        catch: (error) => toOpenAIError("oauth.authorizeDevice.start.detail", error),
+      });
+      return yield* Effect.fail(
+        codexUpstreamError({
+          operation: "oauth.authorizeDevice.start",
+          statusCode: response.status,
           detail,
+        }),
+      );
+    }
+
+    const data = yield* parseOpenAIJson({
+      response,
+      schema: codexDeviceStartSchema,
+      operation: "oauth.authorizeDevice.start.parse",
+    });
+
+    const verificationUrl = `${ISSUER}/codex/device`;
+    let autoOpened = false;
+    const tabExit = yield* Effect.exit(
+      Effect.tryPromise({
+        try: () =>
+          browser.tabs.create({
+            url: verificationUrl,
+          }),
+        catch: (error) => error,
+      }),
+    );
+    if (tabExit._tag === "Success") {
+      autoOpened = true;
+    }
+
+    yield* input.authFlow.publish(
+      buildCodexDeviceInstruction({
+        code: data.user_code,
+        url: verificationUrl,
+        autoOpened,
+      }),
+    );
+
+    const intervalMs = Math.max(parseInt(data.interval, 10) || 5, 1) * 1000;
+    const deadline = Date.now() + 5 * 60_000;
+
+    while (Date.now() < deadline) {
+      yield* throwIfAborted(input.signal);
+      const tokenPollResponse = yield* Effect.tryPromise({
+        try: () =>
+          fetch(`${ISSUER}/api/accounts/deviceauth/token`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "User-Agent": "llm-bridge",
+            },
+            body: JSON.stringify({
+              device_auth_id: data.device_auth_id,
+              user_code: data.user_code,
+            }),
+          }),
+        catch: (error) => toOpenAIError("oauth.authorizeDevice.poll", error),
+      });
+
+      if (tokenPollResponse.ok) {
+        const payload = yield* parseOpenAIJson({
+          response: tokenPollResponse,
+          schema: codexDevicePollSchema,
+          operation: "oauth.authorizeDevice.poll.parse",
         });
+
+        const tokenResponse = yield* Effect.tryPromise({
+          try: () =>
+            fetch(`${ISSUER}/oauth/token`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: new URLSearchParams({
+                grant_type: "authorization_code",
+                code: payload.authorization_code,
+                redirect_uri: `${ISSUER}/deviceauth/callback`,
+                client_id: CLIENT_ID,
+                code_verifier: payload.code_verifier,
+              }).toString(),
+            }),
+          catch: (error) =>
+            toOpenAIError("oauth.authorizeDevice.exchangeToken", error),
+        });
+
+        if (!tokenResponse.ok) {
+          const detail = yield* Effect.tryPromise({
+            try: () => tokenResponse.text().catch(() => ""),
+            catch: (error) =>
+              toOpenAIError("oauth.authorizeDevice.exchangeToken.detail", error),
+          }).pipe(Effect.catchAll(() => Effect.succeed("")));
+          return yield* Effect.fail(
+            codexUpstreamError({
+              operation: "oauth.authorizeDevice.exchangeToken",
+              statusCode: tokenResponse.status,
+              detail,
+            }),
+          );
+        }
+
+        const tokens = yield* parseOpenAIJson({
+          response: tokenResponse,
+          schema: tokenResponseSchema,
+          operation: "oauth.authorizeDevice.exchangeToken.parse",
+        });
+        const accountId = extractAccountId(tokens);
+        return {
+          type: "oauth" as const,
+          methodID: "oauth-device" as const,
+          methodType: "oauth" as const,
+          access: tokens.access_token,
+          refresh: tokens.refresh_token,
+          expiresAt: input.runtime.now() + (tokens.expires_in ?? 3600) * 1000,
+          accountId,
+          metadata: accountId ? { accountId } : undefined,
+        };
       }
 
-      const tokens = await parseOpenAIJson({
-        response: tokenResponse,
-        schema: tokenResponseSchema,
-        operation: "oauth.authorizeDevice.exchangeToken.parse",
+      if (tokenPollResponse.status !== 403 && tokenPollResponse.status !== 404) {
+        const detail = yield* Effect.tryPromise({
+          try: () => tokenPollResponse.text().catch(() => ""),
+          catch: (error) =>
+            toOpenAIError("oauth.authorizeDevice.poll.detail", error),
+        }).pipe(Effect.catchAll(() => Effect.succeed("")));
+        return yield* Effect.fail(
+          codexUpstreamError({
+            operation: "oauth.authorizeDevice.poll",
+            statusCode: tokenPollResponse.status,
+            detail,
+          }),
+        );
+      }
+
+      yield* Effect.tryPromise({
+        try: () => sleep(intervalMs + OAUTH_POLLING_SAFETY_MARGIN_MS),
+        catch: (error) => toOpenAIError("oauth.authorizeDevice.sleep", error),
       });
-      const accountId = extractAccountId(tokens);
-      return {
-        type: "oauth" as const,
-        methodID: "oauth-device" as const,
-        methodType: "oauth" as const,
-        access: tokens.access_token,
-        refresh: tokens.refresh_token,
-        expiresAt: input.runtime.now() + (tokens.expires_in ?? 3600) * 1000,
-        accountId,
-        metadata: accountId ? { accountId } : undefined,
-      };
+      yield* throwIfAborted(input.signal);
     }
 
-    if (tokenPollResponse.status !== 403 && tokenPollResponse.status !== 404) {
-      const detail = await tokenPollResponse.text().catch(() => "");
-      throw codexUpstreamError({
+    return yield* Effect.fail(
+      codexAuthProviderError({
         operation: "oauth.authorizeDevice.poll",
-        statusCode: tokenPollResponse.status,
-        detail,
-      });
-    }
-
-    await sleep(intervalMs + OAUTH_POLLING_SAFETY_MARGIN_MS);
-    throwIfAborted(input.signal);
-  }
-
-  throw codexAuthProviderError({
-    operation: "oauth.authorizeDevice.poll",
-    message: "Codex device authorization timed out.",
-    retryable: true,
+        message: "Codex device authorization timed out.",
+        retryable: true,
+      }),
+    );
   });
 }
 
@@ -705,68 +800,70 @@ function buildCodexOAuthProvider(provider: ProviderInfo) {
   };
 }
 
-export async function resolveOpenAIExecutionState(
+export function resolveOpenAIExecutionState(
   context: RuntimeAdapterContext,
 ) {
-  const auth = normalizeOpenAIAuth(context.auth);
+  return Effect.gen(function* () {
+    const auth = normalizeOpenAIAuth(context.auth);
 
-  if (!auth) {
+    if (!auth) {
+      return {
+        apiKey: undefined,
+        baseURL: undefined,
+        headers: {},
+      };
+    }
+
+    if (!isCodexOAuth(auth)) {
+      return {
+        apiKey: auth.type === "api" ? auth.key : undefined,
+        baseURL: undefined,
+        headers: {},
+      };
+    }
+
+    let access = auth.access;
+    let refresh = auth.refresh;
+    let expiresAt = auth.expiresAt;
+    let effectiveAccountId = auth.accountId ?? auth.metadata?.accountId;
+
+    if (refresh && (!expiresAt || expiresAt <= context.runtime.now() + 60_000)) {
+      const refreshed = yield* refreshAccessToken(refresh);
+      effectiveAccountId = extractAccountId(refreshed) ?? effectiveAccountId;
+      access = refreshed.access_token;
+      refresh = refreshed.refresh_token;
+      expiresAt = context.runtime.now() + (refreshed.expires_in ?? 3600) * 1000;
+
+      yield* context.authStore.set({
+        type: "oauth",
+        access,
+        refresh,
+        expiresAt,
+        accountId: effectiveAccountId,
+        methodID: auth.methodID,
+        methodType: auth.methodType,
+        metadata: effectiveAccountId
+          ? { accountId: effectiveAccountId }
+          : undefined,
+      });
+    }
+
+    if (!effectiveAccountId) {
+      console.warn(
+        "[adapter:openai] oauth accountId is missing; Codex requests may fail until token claims include chatgpt_account_id.",
+      );
+    }
+
     return {
-      apiKey: undefined,
-      baseURL: undefined,
-      headers: {},
+      baseURL: CODEX_API_BASE,
+      apiKey: access,
+      headers: {
+        ...(effectiveAccountId
+          ? { "chatgpt-account-id": effectiveAccountId }
+          : {}),
+      },
     };
-  }
-
-  if (!isCodexOAuth(auth)) {
-    return {
-      apiKey: auth.type === "api" ? auth.key : undefined,
-      baseURL: undefined,
-      headers: {},
-    };
-  }
-
-  let access = auth.access;
-  let refresh = auth.refresh;
-  let expiresAt = auth.expiresAt;
-  let effectiveAccountId = auth.accountId ?? auth.metadata?.accountId;
-
-  if (refresh && (!expiresAt || expiresAt <= context.runtime.now() + 60_000)) {
-    const refreshed = await refreshAccessToken(refresh);
-    effectiveAccountId = extractAccountId(refreshed) ?? effectiveAccountId;
-    access = refreshed.access_token;
-    refresh = refreshed.refresh_token;
-    expiresAt = context.runtime.now() + (refreshed.expires_in ?? 3600) * 1000;
-
-    await context.authStore.set({
-      type: "oauth",
-      access,
-      refresh,
-      expiresAt,
-      accountId: effectiveAccountId,
-      methodID: auth.methodID,
-      methodType: auth.methodType,
-      metadata: effectiveAccountId
-        ? { accountId: effectiveAccountId }
-        : undefined,
-    });
-  }
-
-  if (!effectiveAccountId) {
-    console.warn(
-      "[adapter:openai] oauth accountId is missing; Codex requests may fail until token claims include chatgpt_account_id.",
-    );
-  }
-
-  return {
-    baseURL: CODEX_API_BASE,
-    apiKey: access,
-    headers: {
-      ...(effectiveAccountId
-        ? { "chatgpt-account-id": effectiveAccountId }
-        : {}),
-    },
-  };
+  });
 }
 
 function wrapCodexCallOptions(
@@ -793,8 +890,8 @@ export const openaiAdapter: AIAdapter = {
   match: {
     providerIDs: ["openai"],
   },
-  async listAuthMethods(ctx) {
-    return [
+  listAuthMethods(ctx) {
+    const methods: Array<AnyAuthMethodDefinition> = [
       createApiKeyMethod(ctx),
       {
         id: "oauth-browser",
@@ -809,35 +906,42 @@ export const openaiAdapter: AIAdapter = {
         authorize: authorizeDevice,
       },
     ];
-  },
-  async patchCatalog(ctx, provider) {
-    if (!isCodexOAuth(normalizeOpenAIAuth(ctx.auth))) return provider;
-    return buildCodexOAuthProvider(provider);
-  },
-  async createModel(context) {
-    const providerOptions = parseProviderOptions(
-      openAIProviderOptionsSchema,
-      context.provider.options,
-    );
-    const execution = await resolveOpenAIExecutionState(context);
-    const provider = createOpenAI(
-      buildOpenAISettings({
-        providerID: context.providerID,
-        providerOptions,
-        headers: context.model.headers,
-        baseURL: execution.baseURL,
-        apiKey: execution.apiKey,
-        extraHeaders: execution.headers,
-      }),
-    );
-    const baseModel = provider.responses(context.model.api.id);
 
-    if (!isCodexOAuth(normalizeOpenAIAuth(context.auth))) {
-      return baseModel;
-    }
-
-    return wrapLanguageModel(baseModel, async (options) =>
-      wrapCodexCallOptions(options, context.sessionID),
+    return Effect.succeed(methods);
+  },
+  patchCatalog(ctx, provider) {
+    return Effect.succeed(
+      isCodexOAuth(normalizeOpenAIAuth(ctx.auth))
+        ? buildCodexOAuthProvider(provider)
+        : provider,
     );
+  },
+  createModel(context) {
+    return Effect.gen(function* () {
+      const providerOptions = parseProviderOptions(
+        openAIProviderOptionsSchema,
+        context.provider.options,
+      );
+      const execution = yield* resolveOpenAIExecutionState(context);
+      const provider = createOpenAI(
+        buildOpenAISettings({
+          providerID: context.providerID,
+          providerOptions,
+          headers: context.model.headers,
+          baseURL: execution.baseURL,
+          apiKey: execution.apiKey,
+          extraHeaders: execution.headers,
+        }),
+      );
+      const baseModel = provider.responses(context.model.api.id);
+
+      if (!isCodexOAuth(normalizeOpenAIAuth(context.auth))) {
+        return baseModel;
+      }
+
+      return wrapLanguageModel(baseModel, (options) =>
+        Effect.succeed(wrapCodexCallOptions(options, context.sessionID)),
+      );
+    });
   },
 };

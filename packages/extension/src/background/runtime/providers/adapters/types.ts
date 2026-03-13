@@ -1,8 +1,10 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type {
   RuntimeAuthFlowInstruction,
+  RuntimeRpcError,
   RuntimeResolvedAuthMethod,
 } from "@llm-bridge/contracts";
+import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type {
   AuthMethodType,
@@ -33,7 +35,7 @@ export interface AdapterAuthorizeContext<
   signal?: AbortSignal;
   oauth: {
     getRedirectURL: (path?: string) => string;
-    launchWebAuthFlow: (url: string) => Promise<string>;
+    launchWebAuthFlow: (url: string) => Effect.Effect<string, RuntimeRpcError>;
     parseCallback: (url: string) => {
       code?: string;
       state?: string;
@@ -42,7 +44,9 @@ export interface AdapterAuthorizeContext<
     };
   };
   authFlow: {
-    publish: (instruction: RuntimeAuthFlowInstruction) => Promise<void>;
+    publish: (
+      instruction: RuntimeAuthFlowInstruction,
+    ) => Effect.Effect<void, RuntimeRpcError>;
   };
   runtime: {
     now: () => number;
@@ -56,9 +60,9 @@ export interface RuntimeAdapterContext extends AdapterAuthContext {
   sessionID: string;
   requestID: string;
   authStore: {
-    get: () => Promise<AuthRecord | undefined>;
-    set: (auth: AuthResult) => Promise<void>;
-    remove: () => Promise<void>;
+    get: () => Effect.Effect<AuthRecord | undefined, RuntimeRpcError>;
+    set: (auth: AuthResult) => Effect.Effect<void, RuntimeRpcError>;
+    remove: () => Effect.Effect<void, RuntimeRpcError>;
   };
   runtime: {
     now: () => number;
@@ -77,7 +81,9 @@ export interface AuthMethodDefinition<
   type: AuthMethodType;
   label: string;
   inputSchema?: Schema.Schema.AnyNoContext;
-  authorize: (ctx: AdapterAuthorizeContext<TValues>) => Promise<AuthResult>;
+  authorize: (
+    ctx: AdapterAuthorizeContext<TValues>,
+  ) => Effect.Effect<AuthResult, RuntimeRpcError>;
 }
 
 export type AnyAuthMethodDefinition = AuthMethodDefinition<
@@ -95,12 +101,14 @@ export interface AIAdapter {
   };
   listAuthMethods: (
     ctx: AdapterAuthContext,
-  ) => Promise<AnyAuthMethodDefinition[]> | AnyAuthMethodDefinition[];
-  createModel: (context: RuntimeAdapterContext) => Promise<LanguageModelV3>;
+  ) => Effect.Effect<AnyAuthMethodDefinition[], RuntimeRpcError>;
+  createModel: (
+    context: RuntimeAdapterContext,
+  ) => Effect.Effect<LanguageModelV3, RuntimeRpcError>;
   patchCatalog?: (
     ctx: AdapterAuthContext,
     provider: ProviderInfo,
-  ) => Promise<ProviderInfo | void> | ProviderInfo | void;
+  ) => Effect.Effect<ProviderInfo | void, RuntimeRpcError>;
 }
 
 export type RegisteredAdapter = AIAdapter;

@@ -6,6 +6,8 @@ import {
   setAuth,
 } from "@/background/runtime/auth/auth-store";
 import {
+  isRuntimeRpcError,
+  RuntimeAuthProviderError,
   RuntimeValidationError,
 } from "@llm-bridge/contracts";
 import type { AuthRecord, AuthResult } from "@/background/runtime/auth/auth-store";
@@ -28,6 +30,23 @@ type AuthContextResolved = {
   auth?: AuthRecord;
 };
 
+function toAuthProviderError(
+  providerID: string,
+  operation: string,
+  error: unknown,
+) {
+  if (isRuntimeRpcError(error)) {
+    return error;
+  }
+
+  return new RuntimeAuthProviderError({
+    providerID,
+    operation,
+    retryable: false,
+    message: error instanceof Error ? error.message : String(error),
+  });
+}
+
 function listResolvedAuthMethods(ctx: AuthContextResolved) {
   return Effect.gen(function* () {
     const modelsDev = yield* getModelsDevData();
@@ -37,14 +56,10 @@ function listResolvedAuthMethods(ctx: AuthContextResolved) {
     });
     if (!adapter) return [];
 
-    const definitions = yield* Effect.promise(() =>
-      Promise.resolve(
-        adapter.listAuthMethods({
-          ...ctx,
-          auth: ctx.auth,
-        }),
-      ),
-    ).pipe(
+    const definitions = yield* adapter.listAuthMethods({
+      ...ctx,
+      auth: ctx.auth,
+    }).pipe(
       Effect.catchAllDefect((defect) =>
         Effect.fail(wrapAuthPluginError(defect, ctx.providerID, "auth.methods")),
       ),
@@ -111,7 +126,7 @@ export function startProviderAuth(input: {
   signal?: AbortSignal;
   onInstruction?: (
     instruction: RuntimeAuthFlowInstruction,
-  ) => void | Promise<void>;
+  ) => Effect.Effect<void>;
 }) {
   return provideRuntimeSecurity(Effect.gen(function* () {
     const ctx = yield* resolveAuthContext(input.providerID);
@@ -127,50 +142,62 @@ export function startProviderAuth(input: {
       resolved.definition,
       input.values ?? {},
     );
-    const result = yield* Effect.promise(() =>
-      resolved.definition.authorize({
-        ...ctx,
-        auth: ctx.auth,
-        values: parsedValues,
-        signal: input.signal,
-        oauth: {
-          getRedirectURL(path = "oauth") {
-            if (!browser.identity?.getRedirectURL) {
-              throw new Error("Browser OAuth flow is unavailable");
-            }
-            return browser.identity.getRedirectURL(path);
-          },
-          async launchWebAuthFlow(url: string) {
-            if (!browser.identity?.launchWebAuthFlow) {
-              throw new Error("Browser OAuth flow is unavailable");
-            }
-
-            const callbackUrl = await browser.identity.launchWebAuthFlow({
-              url,
-              interactive: true,
+    const result = yield* resolved.definition.authorize({
+      ...ctx,
+      auth: ctx.auth,
+      values: parsedValues,
+      signal: input.signal,
+      oauth: {
+        getRedirectURL(path = "oauth") {
+          if (!browser.identity?.getRedirectURL) {
+            throw new RuntimeAuthProviderError({
+              providerID: input.providerID,
+              operation: "oauth.getRedirectURL",
+              retryable: false,
+              message: "Browser OAuth flow is unavailable",
             });
+          }
+          return browser.identity.getRedirectURL(path);
+        },
+        launchWebAuthFlow(url: string) {
+          return Effect.tryPromise({
+            try: async () => {
+              if (!browser.identity?.launchWebAuthFlow) {
+                throw new Error("Browser OAuth flow is unavailable");
+              }
 
-            if (!callbackUrl) {
-              throw new Error("OAuth flow did not return a callback URL");
-            }
+              const callbackUrl = await browser.identity.launchWebAuthFlow({
+                url,
+                interactive: true,
+              });
 
-            return callbackUrl;
-          },
-          parseCallback(url: string) {
-            return parseOAuthCallbackUrl(url);
-          },
+              if (!callbackUrl) {
+                throw new Error("OAuth flow did not return a callback URL");
+              }
+
+              return callbackUrl;
+            },
+            catch: (error) =>
+              toAuthProviderError(
+                input.providerID,
+                "oauth.launchWebAuthFlow",
+                error,
+              ),
+          });
         },
-        authFlow: {
-          async publish(instruction) {
-            if (!input.onInstruction) return;
-            await input.onInstruction(instruction);
-          },
+        parseCallback(url: string) {
+          return parseOAuthCallbackUrl(url);
         },
-        runtime: {
-          now: () => Date.now(),
+      },
+      authFlow: {
+        publish(instruction) {
+          return input.onInstruction?.(instruction) ?? Effect.void;
         },
-      }),
-    ).pipe(
+      },
+      runtime: {
+        now: () => Date.now(),
+      },
+    }).pipe(
       Effect.catchAllDefect((defect) =>
         Effect.fail(
           wrapAuthPluginError(defect, input.providerID, "auth.authorize"),

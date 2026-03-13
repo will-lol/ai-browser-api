@@ -64,15 +64,17 @@ function toRuleMap(
 }
 
 export function getOriginPermissions(origin: string) {
-  return Effect.all([
-    Effect.promise(() => runtimeDb.origins.get(origin)),
-    listPermissions(origin),
-  ]).pipe(
-    Effect.map(([originRow, rules]) => ({
+  return Effect.gen(function* () {
+    const [originRow, rules] = yield* Effect.all([
+      Effect.promise(() => runtimeDb.origins.get(origin)),
+      listPermissions(origin),
+    ]);
+
+    return {
       enabled: originRow?.enabled ?? true,
       rules: toRuleMap(rules),
-    })),
-  );
+    };
+  });
 }
 
 export function setOriginEnabled(origin: string, enabled: boolean) {
@@ -117,17 +119,17 @@ export function getModelPermission(
   origin: string,
   modelId: string,
 ): Effect.Effect<PermissionStatus> {
-  return Effect.all([
-    Effect.promise(() => runtimeDb.origins.get(origin)),
-    Effect.promise(() =>
-      runtimeDb.permissions.get(runtimePermissionKey(origin, modelId)),
-    ),
-  ]).pipe(
-    Effect.map(([originState, permission]) => {
-      if (originState && !originState.enabled) return "denied";
-      return permission?.status ?? "denied";
-    }),
-  );
+  return Effect.gen(function* () {
+    const [originState, permission] = yield* Effect.all([
+      Effect.promise(() => runtimeDb.origins.get(origin)),
+      Effect.promise(() =>
+        runtimeDb.permissions.get(runtimePermissionKey(origin, modelId)),
+      ),
+    ]);
+
+    if (originState && !originState.enabled) return "denied";
+    return permission?.status ?? "denied";
+  });
 }
 
 export function createPermissionRequest(input: {
@@ -137,10 +139,8 @@ export function createPermissionRequest(input: {
   modelName: string;
   capabilities?: string[];
 }) {
-  return Effect.promise(async () => {
-    const permission = await Effect.runPromise(
-      getModelPermission(input.origin, input.modelId),
-    );
+  return Effect.gen(function* () {
+    const permission = yield* getModelPermission(input.origin, input.modelId);
     if (permission === "allowed") {
       return {
         status: "alreadyAllowed",
@@ -149,91 +149,84 @@ export function createPermissionRequest(input: {
 
     const capabilities =
       input.capabilities ?? getModelCapabilities(input.modelId);
-    let result: CreatePermissionRequestResult | undefined;
+    return yield* Effect.tryPromise({
+      try: () =>
+        runTx([runtimeDb.pendingRequests, runtimeDb.permissions], async () => {
+          const duplicate = await runtimeDb.pendingRequests
+            .where("origin")
+            .equals(input.origin)
+            .filter(
+              (item) =>
+                item.modelId === input.modelId &&
+                item.status === "pending" &&
+                !item.dismissed,
+            )
+            .first();
+          if (duplicate) {
+            return {
+              status: "requested",
+              request: duplicate,
+            } satisfies CreatePermissionRequestResult;
+          }
 
-    await runTx([runtimeDb.pendingRequests, runtimeDb.permissions], async () => {
-      const duplicate = await runtimeDb.pendingRequests
-        .where("origin")
-        .equals(input.origin)
-        .filter(
-          (item) =>
-            item.modelId === input.modelId &&
-            item.status === "pending" &&
-            !item.dismissed,
-        )
-        .first();
-      if (duplicate) {
-        result = {
-          status: "requested",
-          request: duplicate,
-        };
-        return;
-      }
+          const originPendingCount = await runtimeDb.pendingRequests
+            .where("origin")
+            .equals(input.origin)
+            .filter((item) => item.status === "pending" && !item.dismissed)
+            .count();
+          if (originPendingCount >= MAX_PENDING_REQUESTS_PER_ORIGIN) {
+            throw new RuntimeValidationError({
+              message: `Too many pending permission requests for origin ${input.origin}`,
+            });
+          }
 
-      const originPendingCount = await runtimeDb.pendingRequests
-        .where("origin")
-        .equals(input.origin)
-        .filter((item) => item.status === "pending" && !item.dismissed)
-        .count();
-      if (originPendingCount >= MAX_PENDING_REQUESTS_PER_ORIGIN) {
-        throw new RuntimeValidationError({
-          message: `Too many pending permission requests for origin ${input.origin}`,
-        });
-      }
+          const totalPendingCount = await runtimeDb.pendingRequests
+            .where("status")
+            .equals("pending")
+            .filter((item) => !item.dismissed)
+            .count();
+          if (totalPendingCount >= MAX_PENDING_REQUESTS) {
+            throw new RuntimeValidationError({
+              message: "Too many pending permission requests",
+            });
+          }
 
-      const totalPendingCount = await runtimeDb.pendingRequests
-        .where("status")
-        .equals("pending")
-        .filter((item) => !item.dismissed)
-        .count();
-      if (totalPendingCount >= MAX_PENDING_REQUESTS) {
-        throw new RuntimeValidationError({
-          message: "Too many pending permission requests",
-        });
-      }
+          const updatedAt = now();
+          const request: PermissionRequest = {
+            id: randomId("prm"),
+            origin: input.origin,
+            modelId: input.modelId,
+            provider: input.provider,
+            modelName: input.modelName,
+            capabilities,
+            requestedAt: updatedAt,
+            dismissed: false,
+            status: "pending",
+          };
 
-      const updatedAt = now();
-      const request: PermissionRequest = {
-        id: randomId("prm"),
-        origin: input.origin,
-        modelId: input.modelId,
-        provider: input.provider,
-        modelName: input.modelName,
-        capabilities,
-        requestedAt: updatedAt,
-        dismissed: false,
-        status: "pending",
-      };
+          await runtimeDb.permissions.put({
+            id: runtimePermissionKey(input.origin, input.modelId),
+            origin: input.origin,
+            modelId: input.modelId,
+            status: "pending",
+            capabilities,
+            updatedAt,
+          });
 
-      await runtimeDb.permissions.put({
-        id: runtimePermissionKey(input.origin, input.modelId),
-        origin: input.origin,
-        modelId: input.modelId,
-        status: "pending",
-        capabilities,
-        updatedAt,
-      });
+          await runtimeDb.pendingRequests.put(request);
 
-      await runtimeDb.pendingRequests.put(request);
-
-      result = {
-        status: "requested",
-        request,
-      };
-    });
-
-    if (result) {
-      return result;
-    }
-
-    throw new RuntimeValidationError({
-      message: "Permission request creation did not complete",
-    });
-  }).pipe(
-    Effect.catchAllDefect((defect) =>
-      isRuntimeRpcError(defect) ? Effect.fail(defect) : Effect.die(defect),
-    ),
-  );
+          return {
+            status: "requested",
+            request,
+          } satisfies CreatePermissionRequestResult;
+        }),
+      catch: (error) => error,
+    }).pipe(
+      Effect.catchAll((error) =>
+        isRuntimeRpcError(error) ? Effect.fail(error) : Effect.die(error),
+      ),
+    );
+  });
 }
 
 export function dismissPermissionRequest(requestId: string) {
@@ -280,17 +273,19 @@ export function resolvePermissionRequest(
 }
 
 export function listPendingRequests(origin?: string) {
-  return Effect.promise(() =>
-    runtimeDb.pendingRequests
-      .where("status")
-      .equals("pending")
-      .filter((item) => {
-        if (item.dismissed) return false;
-        if (!origin) return true;
-        return item.origin === origin;
-      })
-      .toArray(),
-  );
+  return Effect.gen(function* () {
+    return yield* Effect.promise(() =>
+      runtimeDb.pendingRequests
+        .where("status")
+        .equals("pending")
+        .filter((item) => {
+          if (item.dismissed) return false;
+          if (!origin) return true;
+          return item.origin === origin;
+        })
+        .toArray(),
+    );
+  });
 }
 
 export function getPendingRequest(requestId: string) {

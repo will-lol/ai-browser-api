@@ -4,11 +4,12 @@ import type {
 } from "@ai-sdk/provider";
 import type { ModelMessage } from "ai";
 import { fromRuntimeModelCallOptions } from "@llm-bridge/bridge-codecs";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Runtime from "effect/Runtime";
 import {
   ModelNotFoundError,
   ProviderNotConnectedError,
+  RuntimeInternalError,
   RuntimeValidationError,
   type RuntimeChatCallOptions,
   type RuntimeModelCallOptions,
@@ -146,19 +147,8 @@ function buildAdapterContext(input: {
   origin: string;
   sessionID: string;
   requestID: string;
-  runEffect: <A, E>(effect: Effect.Effect<A, E, AuthVaultStore>) => Promise<A>;
+  securityContext: Context.Context<AuthVaultStore>;
 }): RuntimeAdapterContext {
-  const adapter = resolveAdapterForModel({
-    providerID: input.runtime.providerID,
-    model: input.runtime.model,
-  });
-
-  if (!adapter) {
-    throw new Error(
-      `No adapter is registered for provider ${input.runtime.providerID} (${input.runtime.model.api.npm})`,
-    );
-  }
-
   return {
     providerID: input.runtime.providerID,
     modelID: input.runtime.modelID,
@@ -169,11 +159,18 @@ function buildAdapterContext(input: {
     provider: input.runtime.provider,
     model: input.runtime.model,
     authStore: {
-      get: () => input.runEffect(getAuth(input.runtime.providerID)),
+      get: () =>
+        Effect.provide(getAuth(input.runtime.providerID), input.securityContext),
       set: (auth) =>
-        input.runEffect(setAuth(input.runtime.providerID, auth)).then(() => undefined),
+        Effect.provide(
+          setAuth(input.runtime.providerID, auth),
+          input.securityContext,
+        ),
       remove: () =>
-        input.runEffect(removeAuth(input.runtime.providerID)).then(() => undefined),
+        Effect.provide(
+          removeAuth(input.runtime.providerID),
+          input.securityContext,
+        ),
     },
     runtime: {
       now: () => Date.now(),
@@ -189,16 +186,16 @@ function prepareCallOptions(input: {
   options: RuntimeLanguageModelCallOptions;
 }) {
   return Effect.gen(function* () {
-    const runtime = yield* Effect.runtime<AuthVaultStore>();
-    const runEffect = Runtime.runPromise(runtime);
+    const securityContext = yield* Effect.context<AuthVaultStore>();
     const adapter = resolveAdapterForModel({
       providerID: input.runtime.providerID,
       model: input.runtime.model,
     });
     if (!adapter) {
-      throw new Error(
-        `No adapter is registered for provider ${input.runtime.providerID} (${input.runtime.model.api.npm})`,
-      );
+      return yield* new RuntimeInternalError({
+        operation: "adapter.createModel",
+        message: `No adapter is registered for provider ${input.runtime.providerID} (${input.runtime.model.api.npm})`,
+      });
     }
 
     const context = buildAdapterContext({
@@ -206,11 +203,9 @@ function prepareCallOptions(input: {
       origin: input.origin,
       sessionID: input.sessionID,
       requestID: input.requestID,
-      runEffect,
+      securityContext,
     });
-    const languageModel = yield* Effect.promise(() =>
-      adapter.createModel(context),
-    );
+    const languageModel = yield* adapter.createModel(context);
     const callOptions = {
       ...input.options,
       headers: toHeaderRecord(input.options.headers),
@@ -262,32 +257,30 @@ export function prepareRuntimeChatModelCall(input: {
 }) {
   return provideRuntimeSecurity(Effect.gen(function* () {
     const runtime = yield* resolveModelRuntimeContext(input.modelID);
-    const adapterRuntime = yield* Effect.runtime<AuthVaultStore>();
-    const runEffect = Runtime.runPromise(adapterRuntime);
+    const securityContext = yield* Effect.context<AuthVaultStore>();
     const adapter = resolveAdapterForModel({
       providerID: runtime.providerID,
       model: runtime.model,
     });
     if (!adapter) {
-      throw new Error(
-        `No adapter is registered for provider ${runtime.providerID} (${runtime.model.api.npm})`,
-      );
+      return yield* new RuntimeInternalError({
+        operation: "adapter.createModel",
+        message: `No adapter is registered for provider ${runtime.providerID} (${runtime.model.api.npm})`,
+      });
     }
     const context = buildAdapterContext({
       runtime,
       origin: input.origin,
       sessionID: input.sessionID,
       requestID: input.requestID,
-      runEffect,
+      securityContext,
     });
 
     const callOptions = fromRuntimeModelCallOptions(
       toRuntimeModelCallOptionsForChat(input.options),
     );
 
-    const languageModel = yield* Effect.promise(() =>
-      adapter.createModel(context),
-    );
+    const languageModel = yield* adapter.createModel(context);
     const { prompt: _prompt, ...callOptionsWithoutPrompt } = callOptions;
 
     return {

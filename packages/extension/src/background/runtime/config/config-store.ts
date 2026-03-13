@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import { runtimeDb } from "@/background/storage/runtime-db";
 import type { ModelsDevModel } from "@/background/runtime/catalog/models-dev";
 
@@ -26,7 +27,8 @@ export interface RuntimeConfig {
 
 const RUNTIME_CONFIG_ID = "runtime-config" as const;
 
-export async function getRuntimeConfig(): Promise<RuntimeConfig> {
-  const row = await runtimeDb.config.get(RUNTIME_CONFIG_ID);
-  return row?.value ?? {};
+export function getRuntimeConfig() {
+  return Effect.promise(() => runtimeDb.config.get(RUNTIME_CONFIG_ID)).pipe(
+    Effect.map((row) => row?.value ?? {}),
+  );
 }

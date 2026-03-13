@@ -11,12 +11,12 @@
 - `key`
 - `displayName`
 - `match`
-- `listAuthMethods()`
-- `createModel()`
+- `listAuthMethods(): Effect.Effect<AnyAuthMethodDefinition[], RuntimeRpcError>`
+- `createModel(): Effect.Effect<LanguageModelV3, RuntimeRpcError>`
 
 Optional:
 
-- `patchCatalog()` to alter provider/model metadata before it is stored
+- `patchCatalog(): Effect.Effect<ProviderInfo | void, RuntimeRpcError>` to alter provider/model metadata before it is stored
 
 ## Schema Rules
 
@@ -29,14 +29,17 @@ Optional:
 
 - Auth is always stored by `providerID`.
 - Adapters receive the normalized runtime auth record directly through `ctx.auth`.
+- Auth methods must return `Effect`, not `Promise`.
 - Adapters should parse only the provider-specific metadata they need locally, close to use.
 - Adapters may refresh tokens and persist updated auth during `createModel()`.
 - OAuth/device/browser flows should return a normalized `AuthResult`.
+- `ctx.oauth.launchWebAuthFlow`, `ctx.authFlow.publish`, and `context.authStore.get/set/remove` are all Effect-returning helpers.
 
 ## Execution Boundary
 
 - `createModel()` owns the final execution configuration: base URL, auth headers, API keys, custom `fetch`, and request wrappers.
 - The shared runtime passes resolved provider/model records, request metadata, the stored auth snapshot, auth-store helpers, and a runtime clock helper into `createModel()`.
+- Keep adapter logic Effect-native all the way to the AI SDK boundary. Only `LanguageModelV3.doGenerate()` / `doStream()` should cross back into Promise-returning APIs.
 - Re-read auth from the injected `authStore` helpers only when refresh or coordination requires it.
 - Persisted auth metadata should be JSON-compatible and typed per adapter.
 - Do not reintroduce a shared transport/session abstraction for provider-specific request behavior.
@@ -49,5 +52,5 @@ Optional:
 
 ## Examples
 
-- Generic adapter: npm package plus API key auth, then parse provider options inside `createModel()` and build the SDK client directly.
-- Provider override adapter: provider-specific auth plus optional `patchCatalog()` and a wrapped `LanguageModelV3` from `createModel()`.
+- Generic adapter: npm package plus API key auth, then parse provider options inside `Effect.gen(...)` in `createModel()` and build the SDK client directly.
+- Provider override adapter: provider-specific auth plus optional `patchCatalog()` and a wrapped `LanguageModelV3` from `createModel()`, using `Effect.gen(...)` for refresh flows and auth persistence.

@@ -15,6 +15,8 @@ import { createPerplexity } from "@ai-sdk/perplexity";
 import { createTogetherAI } from "@ai-sdk/togetherai";
 import { createVercel } from "@ai-sdk/vercel";
 import { createXai } from "@ai-sdk/xai";
+import { RuntimeInternalError } from "@llm-bridge/contracts";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { parseProviderOptions } from "./provider-options";
 import { defineAuthSchema } from "./schema";
@@ -118,7 +120,7 @@ type ApiKeyProviderDescriptor<
   >;
   createLanguageModel?: (
     input: AdapterModelContext<TProviderOptions>,
-  ) => LanguageModelV3 | Promise<LanguageModelV3>;
+  ) => LanguageModelV3;
 };
 
 const requiredAuthStringSchema = Schema.String.pipe(Schema.minLength(1));
@@ -267,21 +269,22 @@ export function createApiKeyMethod(
         },
       },
     }),
-    async authorize(input) {
-      return {
+    authorize(input) {
+      return Effect.succeed({
         type: "api",
         key: input.values.apiKey ?? "",
         methodID: "apikey",
         methodType: "apikey",
-      };
+      });
     },
   };
 }
 
 function createUnsupportedModelError(npm: string) {
-  return new Error(
-    `Provider SDK package is not supported in browser runtime: ${npm}`,
-  );
+  return new RuntimeInternalError({
+    operation: "adapter.createModel",
+    message: `Provider SDK package is not supported in browser runtime: ${npm}`,
+  });
 }
 
 function resolveApiKey(context: RuntimeAdapterContext) {
@@ -298,25 +301,26 @@ function createDirectFactoryAdapter<
       npm: descriptor.npm,
     },
     listAuthMethods(ctx) {
-      return [createApiKeyMethod(ctx)];
+      return Effect.succeed([createApiKeyMethod(ctx)]);
     },
-    async createModel(context) {
-      if (
-        descriptor.browserSupported === false ||
-        !descriptor.createLanguageModel
-      ) {
-        throw createUnsupportedModelError(context.model.api.npm);
+    createModel(context) {
+      const createLanguageModel = descriptor.createLanguageModel;
+
+      if (descriptor.browserSupported === false || !createLanguageModel) {
+        return Effect.fail(createUnsupportedModelError(context.model.api.npm));
       }
 
-      return descriptor.createLanguageModel({
-        provider: context.provider,
-        providerOptions: parseProviderOptions(
-          descriptor.providerOptionsSchema,
-          context.provider.options,
-        ),
-        model: context.model,
-        apiKey: resolveApiKey(context),
-      });
+      return Effect.sync(() =>
+        createLanguageModel({
+          provider: context.provider,
+          providerOptions: parseProviderOptions(
+            descriptor.providerOptionsSchema,
+            context.provider.options,
+          ),
+          model: context.model,
+          apiKey: resolveApiKey(context),
+        }),
+      );
     },
   };
 }
