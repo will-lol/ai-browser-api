@@ -28,7 +28,10 @@ export interface RuntimeConfig {
 const RUNTIME_CONFIG_ID = "runtime-config" as const;
 
 export function getRuntimeConfig() {
-  return Effect.promise(() => runtimeDb.config.get(RUNTIME_CONFIG_ID)).pipe(
+  return Effect.tryPromise({
+    try: () => runtimeDb.config.get(RUNTIME_CONFIG_ID),
+    catch: (error) => error,
+  }).pipe(
     Effect.map((row) => row?.value ?? {}),
   );
 }

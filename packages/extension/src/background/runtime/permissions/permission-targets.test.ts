@@ -134,4 +134,14 @@ describe("permission target resolution", () => {
       modelId: CONNECTED_MODEL_ID,
     });
   });
+
+  it("leaves bulk-get read failures unnormalized on the live permission-target path", async () => {
+    modelsBulkGetMock.mockImplementationOnce(async () => {
+      throw new Error("db unavailable");
+    });
+
+    await expect(
+      Effect.runPromise(resolveTrustedPermissionTarget(CONNECTED_MODEL_ID)),
+    ).rejects.toThrow(/db unavailable/);
+  });
 });

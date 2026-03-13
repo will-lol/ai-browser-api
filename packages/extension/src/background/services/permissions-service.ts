@@ -55,7 +55,10 @@ function loadModelRows(modelIds: ReadonlyArray<string>) {
     );
   }
 
-  return Effect.promise(() => runtimeDb.models.bulkGet([...modelIds])).pipe(
+  return Effect.tryPromise({
+    try: () => runtimeDb.models.bulkGet([...modelIds]),
+    catch: (error) => error,
+  }).pipe(
     Effect.map(
       (rows) =>
         new Map(
@@ -69,7 +72,10 @@ function loadModelRows(modelIds: ReadonlyArray<string>) {
 
 function buildPermissionsMap() {
   return Effect.gen(function* () {
-    const rows = yield* Effect.promise(() => runtimeDb.permissions.toArray());
+    const rows = yield* Effect.tryPromise({
+      try: () => runtimeDb.permissions.toArray(),
+      catch: (error) => error,
+    });
     const modelRows = yield* loadModelRows(rows.map((row) => row.modelId));
     const grouped = new Map<string, Array<RuntimePermissionEntry>>();
 
@@ -100,13 +106,15 @@ function buildPermissionsMap() {
 
 function buildPendingMap() {
   return Effect.gen(function* () {
-    const rows = yield* Effect.promise(() =>
-      runtimeDb.pendingRequests
-        .where("status")
-        .equals("pending")
-        .filter((item) => !item.dismissed)
-        .toArray(),
-    );
+    const rows = yield* Effect.tryPromise({
+      try: () =>
+        runtimeDb.pendingRequests
+          .where("status")
+          .equals("pending")
+          .filter((item) => !item.dismissed)
+          .toArray(),
+      catch: (error) => error,
+    });
     const grouped = new Map<string, Array<RuntimePendingRequest>>();
 
     for (const row of rows) {
@@ -150,7 +158,10 @@ export const PermissionsServiceLive = Layer.effect(
 
     const refreshSnapshots = Effect.gen(function* () {
       const [originRows, permissionsMap, pendingMap] = yield* Effect.all([
-        Effect.promise(() => runtimeDb.origins.toArray()),
+        Effect.tryPromise({
+          try: () => runtimeDb.origins.toArray(),
+          catch: (error) => error,
+        }),
         buildPermissionsMap(),
         buildPendingMap(),
       ]);

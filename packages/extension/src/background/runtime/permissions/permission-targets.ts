@@ -25,23 +25,27 @@ type TrustedPermissionTargetResolution =
 
 function resolveTrustedPermissionTargetResolutions(
   modelIds: ReadonlyArray<string>,
-): Effect.Effect<Map<string, TrustedPermissionTargetResolution>> {
+): Effect.Effect<Map<string, TrustedPermissionTargetResolution>, unknown> {
   return Effect.gen(function* () {
     const uniqueModelIds = Array.from(new Set(modelIds));
     if (uniqueModelIds.length === 0) {
       return new Map();
     }
 
-    const modelRows = yield* Effect.promise(() =>
-      runtimeDb.models.bulkGet(uniqueModelIds),
-    );
+    const modelRows = yield* Effect.tryPromise({
+      try: () => runtimeDb.models.bulkGet(uniqueModelIds),
+      catch: (error) => error,
+    });
     const providerIDs = Array.from(
       new Set(modelRows.flatMap((row) => (row ? [row.providerID] : []))),
     );
     const providerRows =
       providerIDs.length === 0
         ? []
-        : yield* Effect.promise(() => runtimeDb.providers.bulkGet(providerIDs));
+        : yield* Effect.tryPromise({
+            try: () => runtimeDb.providers.bulkGet(providerIDs),
+            catch: (error) => error,
+          });
     const providerById = new Map(
       providerRows
         .filter((row): row is NonNullable<typeof row> => row != null)
@@ -96,7 +100,7 @@ function resolveTrustedPermissionTargetResolutions(
 
 export function resolveTrustedPermissionTargets(
   modelIds: ReadonlyArray<string>,
-): Effect.Effect<Map<string, TrustedPermissionTarget>> {
+): Effect.Effect<Map<string, TrustedPermissionTarget>, unknown> {
   return Effect.gen(function* () {
     const targets = new Map<string, TrustedPermissionTarget>();
     const resolutions = yield* resolveTrustedPermissionTargetResolutions(modelIds);

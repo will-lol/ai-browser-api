@@ -9,7 +9,10 @@ import type {
 export function listProviderRows() {
   return Effect.gen(function* () {
     yield* ensureProviderCatalog();
-    return yield* Effect.promise(() => runtimeDb.providers.toArray());
+    return yield* Effect.tryPromise({
+      try: () => runtimeDb.providers.toArray(),
+      catch: (error) => error,
+    });
   });
 }
 
@@ -24,15 +27,17 @@ export function listModelRows(
 
     if (options.providerID) {
       const providerID = options.providerID;
-      return yield* Effect.promise(() =>
-        runtimeDb.models.where("providerID").equals(providerID).toArray(),
-      );
+      return yield* Effect.tryPromise({
+        try: () => runtimeDb.models.where("providerID").equals(providerID).toArray(),
+        catch: (error) => error,
+      });
     }
 
     if (options.connectedOnly) {
-      const connectedProviderIDs = yield* Effect.promise(() =>
-        runtimeDb.providers.toArray(),
-      ).pipe(
+      const connectedProviderIDs = yield* Effect.tryPromise({
+        try: () => runtimeDb.providers.toArray(),
+        catch: (error) => error,
+      }).pipe(
         Effect.map((rows) =>
           rows.filter((row) => row.connected).map((row) => row.id),
         ),
@@ -40,19 +45,26 @@ export function listModelRows(
 
       if (connectedProviderIDs.length === 0) return [];
 
-      return yield* Effect.promise(() =>
-        runtimeDb.models.where("providerID").anyOf(connectedProviderIDs).toArray(),
-      );
+      return yield* Effect.tryPromise({
+        try: () => runtimeDb.models.where("providerID").anyOf(connectedProviderIDs).toArray(),
+        catch: (error) => error,
+      });
     }
 
-    return yield* Effect.promise(() => runtimeDb.models.toArray());
+    return yield* Effect.tryPromise({
+      try: () => runtimeDb.models.toArray(),
+      catch: (error) => error,
+    });
   });
 }
 
 export function getProvider(providerID: string) {
   return Effect.gen(function* () {
     yield* ensureProviderCatalog();
-    const providerRow = yield* Effect.promise(() => runtimeDb.providers.get(providerID));
+    const providerRow = yield* Effect.tryPromise({
+      try: () => runtimeDb.providers.get(providerID),
+      catch: (error) => error,
+    });
     if (!providerRow) return undefined;
     return {
       id: providerRow.id,
@@ -68,9 +80,10 @@ export function getProvider(providerID: string) {
 export function getModel(providerID: string, modelID: string) {
   return Effect.gen(function* () {
     yield* ensureProviderCatalog();
-    const row = yield* Effect.promise(() =>
-      runtimeDb.models.get(runtimeModelKey(providerID, modelID)),
-    );
+    const row = yield* Effect.tryPromise({
+      try: () => runtimeDb.models.get(runtimeModelKey(providerID, modelID)),
+      catch: (error) => error,
+    });
     return row?.info;
   });
 }
