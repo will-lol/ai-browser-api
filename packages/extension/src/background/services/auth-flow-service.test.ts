@@ -7,10 +7,12 @@ import {
 import {
   AuthFlowService,
   CatalogService,
+  ChatExecutionService,
   MetaService,
   ModelExecutionService,
   PermissionsService,
   type CatalogServiceApi,
+  type ChatExecutionServiceApi,
   type MetaServiceApi,
   type ModelExecutionServiceApi,
   type PermissionsServiceApi,
@@ -152,10 +154,17 @@ function makeUnusedRuntimeLayer() {
     streamModel: () => Effect.die("unused"),
   };
 
+  const chatExecution: ChatExecutionServiceApi = {
+    sendMessages: () => Effect.die("unused"),
+    reconnectStream: () => Effect.die("unused"),
+    abortStream: () => Effect.die("unused"),
+  };
+
   return Layer.mergeAll(
     Layer.succeed(PermissionsService, permissions),
     Layer.succeed(MetaService, meta),
     Layer.succeed(ModelExecutionService, modelExecution),
+    Layer.succeed(ChatExecutionService, chatExecution),
   );
 }
 
@@ -173,6 +182,7 @@ function runWithService<A, E>(
     E,
     | AuthFlowService
     | CatalogService
+    | ChatExecutionService
     | PermissionsService
     | MetaService
     | ModelExecutionService

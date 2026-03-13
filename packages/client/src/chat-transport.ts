@@ -51,12 +51,7 @@ function createChatReadableStream(input: {
   reader: ReadableStreamDefaultReader<{ readonly [key: string]: JsonValue }>;
   abortSignal?: AbortSignal;
   abortChatStream: (chatId: string) => Promise<void>;
-  bufferedChunk?: { readonly [key: string]: JsonValue };
-  streamFinished?: boolean;
 }): ReadableStream<UIMessageChunk> {
-  let bufferedChunk = input.bufferedChunk;
-  let streamFinished = input.streamFinished ?? false;
-
   const abortActiveChatStream = () =>
     input.abortChatStream(input.chatId).catch(() => undefined);
 
@@ -73,21 +68,8 @@ function createChatReadableStream(input: {
   return new ReadableStream<UIMessageChunk>({
     async pull(controller) {
       try {
-        if (bufferedChunk) {
-          controller.enqueue(bufferedChunk as UIMessageChunk);
-          bufferedChunk = undefined;
-          return;
-        }
-
-        if (streamFinished) {
-          cleanup();
-          controller.close();
-          return;
-        }
-
         const next = await input.reader.read();
         if (next.done) {
-          streamFinished = true;
           cleanup();
           controller.close();
           return;
@@ -106,10 +88,24 @@ function createChatReadableStream(input: {
         await input.reader.cancel();
       } finally {
         cleanup();
-        void abortActiveChatStream();
       }
     },
   });
+}
+
+async function prepareReconnectReadableStream(
+  stream: ReadableStream<{ readonly [key: string]: JsonValue }>,
+) {
+  const [probeStream, consumerStream] = stream.tee();
+  const reader = probeStream.getReader();
+
+  try {
+    await reader.read();
+    return consumerStream;
+  } finally {
+    void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
 }
 
 export function createChatTransport(input: {
@@ -120,7 +116,6 @@ export function createChatTransport(input: {
   abortChatStream: (chatId: string) => Promise<void>;
   options?: BridgeChatTransportOptions;
 }): ChatTransport<UIMessage> {
-  console.log("createChatTransport");
   return {
     async sendMessages({
       chatId,
@@ -206,14 +201,12 @@ export function createChatTransport(input: {
           }),
         );
 
-        const reader = runtimeStream.getReader();
-        const firstChunk = await reader.read();
+        const reconnectStream =
+          await prepareReconnectReadableStream(runtimeStream);
 
         return createChatReadableStream({
           chatId,
-          reader,
-          bufferedChunk: firstChunk.done ? undefined : firstChunk.value,
-          streamFinished: firstChunk.done,
+          reader: reconnectStream.getReader(),
           abortChatStream: input.abortChatStream,
         });
       } catch (error) {

@@ -11,7 +11,9 @@ import type {
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 import {
   hasEnabledConnectedModel,
   tabUrlOrigin,
@@ -34,34 +36,79 @@ const INACTIVE_ICON_COLORS = {
 type Rgb = { r: number; g: number; b: number };
 type IconState = "active" | "inactive";
 
-let sourceIconPromise: Promise<ImageData> | null = null;
-const iconImageCache: Partial<Record<IconState, Record<number, ImageData>>> =
-  {};
+type ToolbarProjectionState = {
+  readonly originStates: ReadonlyMap<string, RuntimeOriginState>;
+  readonly permissionsByOrigin: ReadonlyMap<
+    string,
+    ReadonlyArray<RuntimePermissionEntry>
+  >;
+  readonly pendingByOrigin: ReadonlyMap<
+    string,
+    ReadonlyArray<RuntimePendingRequest>
+  >;
+  readonly connectedModels: ReadonlyArray<RuntimeModelSummary>;
+};
+
+function initialToolbarProjectionState(): ToolbarProjectionState {
+  return {
+    originStates: new Map(),
+    permissionsByOrigin: new Map(),
+    pendingByOrigin: new Map(),
+    connectedModels: [],
+  };
+}
 
 function iconColors(iconState: IconState): { dark: Rgb; light: Rgb } {
   return iconState === "active" ? ACTIVE_ICON_COLORS : INACTIVE_ICON_COLORS;
 }
 
-async function getSourceIconData(): Promise<ImageData> {
-  if (sourceIconPromise) {
-    return sourceIconPromise;
-  }
-
-  sourceIconPromise = (async () => {
-    const response = await fetch(browser.runtime.getURL(SOURCE_ICON_PATH));
-    const blob = await response.blob();
-    const bitmap = await createImageBitmap(blob);
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext("2d");
-    if (!context) {
-      throw new Error("Failed to initialize icon drawing context");
+function getSourceIconData(
+  sourceIconRef: SynchronizedRef.SynchronizedRef<ImageData | null>,
+) {
+  return SynchronizedRef.modifyEffect(sourceIconRef, (cachedImage) => {
+    if (cachedImage) {
+      return Effect.succeed([cachedImage, cachedImage] as const);
     }
 
-    context.drawImage(bitmap, 0, 0);
-    return context.getImageData(0, 0, bitmap.width, bitmap.height);
-  })();
+    return Effect.gen(function* () {
+      const response = yield* Effect.tryPromise({
+        try: () => fetch(browser.runtime.getURL(SOURCE_ICON_PATH)),
+        catch: (error) => error,
+      });
+      const blob = yield* Effect.tryPromise({
+        try: () => response.blob(),
+        catch: (error) => error,
+      });
+      const bitmap = yield* Effect.tryPromise({
+        try: () => createImageBitmap(blob),
+        catch: (error) => error,
+      });
+      const canvas = yield* Effect.sync(
+        () => new OffscreenCanvas(bitmap.width, bitmap.height),
+      );
+      const context = yield* Effect.try({
+        try: () => {
+          const nextContext = canvas.getContext("2d");
+          if (!nextContext) {
+            throw new Error("Failed to initialize icon drawing context");
+          }
+          return nextContext;
+        },
+        catch: (error) => error,
+      });
 
-  return sourceIconPromise;
+      yield* Effect.sync(() => {
+        context.drawImage(bitmap, 0, 0);
+      });
+
+      const imageData = yield* Effect.try({
+        try: () => context.getImageData(0, 0, bitmap.width, bitmap.height),
+        catch: (error) => error,
+      });
+
+      return [imageData, imageData] as const;
+    });
+  });
 }
 
 function tintImageData(
@@ -105,42 +152,57 @@ function tintImageData(
   return output;
 }
 
-async function getIconImageData(
-  iconState: IconState,
-): Promise<Record<number, ImageData>> {
-  const cached = iconImageCache[iconState];
-  if (cached) {
-    return cached;
-  }
+function getIconImageData(input: {
+  iconState: IconState;
+  sourceIconRef: SynchronizedRef.SynchronizedRef<ImageData | null>;
+  iconImageCacheRef: SynchronizedRef.SynchronizedRef<
+    Partial<Record<IconState, Record<number, ImageData>>>
+  >;
+}) {
+  return SynchronizedRef.modifyEffect(input.iconImageCacheRef, (cache) => {
+    const cachedIcons = cache[input.iconState];
+    if (cachedIcons) {
+      return Effect.succeed([cachedIcons, cache] as const);
+    }
 
-  const sourceIcon = await getSourceIconData();
-  const colors = iconColors(iconState);
-  const nextIcons = ICON_SIZES.reduce<Record<number, ImageData>>(
-    (acc, size) => {
-      acc[size] = tintImageData(sourceIcon, colors.dark, colors.light, size);
-      return acc;
-    },
-    {},
-  );
+    return Effect.gen(function* () {
+      const sourceIcon = yield* getSourceIconData(input.sourceIconRef);
+      const colors = iconColors(input.iconState);
+      const nextIcons = ICON_SIZES.reduce<Record<number, ImageData>>(
+        (acc, size) => {
+          acc[size] = tintImageData(sourceIcon, colors.dark, colors.light, size);
+          return acc;
+        },
+        {},
+      );
 
-  iconImageCache[iconState] = nextIcons;
-  return nextIcons;
+      return [
+        nextIcons,
+        {
+          ...cache,
+          [input.iconState]: nextIcons,
+        },
+      ] as const;
+    });
+  });
 }
 
-async function getActiveTabOrigin() {
+function getActiveTabOrigin() {
   if (!browser.tabs?.query) {
-    return null;
+    return Effect.succeed<string | null>(null);
   }
 
-  try {
-    const [activeTab] = await browser.tabs.query({
-      active: true,
-      lastFocusedWindow: true,
-    });
-    return tabUrlOrigin(activeTab?.url);
-  } catch {
-    return null;
-  }
+  return Effect.tryPromise({
+    try: () =>
+      browser.tabs.query({
+        active: true,
+        lastFocusedWindow: true,
+      }),
+    catch: (error) => error,
+  }).pipe(
+    Effect.map(([activeTab]) => tabUrlOrigin(activeTab?.url)),
+    Effect.catchAll(() => Effect.succeed(null)),
+  );
 }
 
 function sumPendingRequests(
@@ -180,28 +242,54 @@ function isActiveForOrigin(input: {
   });
 }
 
-async function updateBadgeCount(count: number) {
-  await browser.action.setBadgeBackgroundColor({ color: BADGE_BG });
-  await browser.action.setBadgeText({
-    text: count > 0 ? (count > 99 ? "99+" : String(count)) : "",
+function updateBadgeCount(count: number) {
+  return Effect.tryPromise({
+    try: async () => {
+      await browser.action.setBadgeBackgroundColor({ color: BADGE_BG });
+      await browser.action.setBadgeText({
+        text: count > 0 ? (count > 99 ? "99+" : String(count)) : "",
+      });
+    },
+    catch: (error) => error,
   });
 }
 
-async function updateToolbarIcon(isActive: boolean) {
-  const iconState: IconState = isActive ? "active" : "inactive";
+function updateToolbarIcon(input: {
+  isActive: boolean;
+  sourceIconRef: SynchronizedRef.SynchronizedRef<ImageData | null>;
+  iconImageCacheRef: SynchronizedRef.SynchronizedRef<
+    Partial<Record<IconState, Record<number, ImageData>>>
+  >;
+}) {
+  const iconState: IconState = input.isActive ? "active" : "inactive";
+  const fallbackIcon = Effect.tryPromise({
+    try: () =>
+      browser.action.setIcon({
+        path: {
+          16: SOURCE_ICON_PATH,
+          32: SOURCE_ICON_PATH,
+        },
+      }),
+    catch: (error) => error,
+  });
 
-  try {
-    const imageData = await getIconImageData(iconState);
-    await browser.action.setIcon({ imageData });
-  } catch (error) {
-    console.warn("toolbar icon update failed", error);
-    await browser.action.setIcon({
-      path: {
-        16: SOURCE_ICON_PATH,
-        32: SOURCE_ICON_PATH,
-      },
-    });
-  }
+  return getIconImageData({
+    iconState,
+    sourceIconRef: input.sourceIconRef,
+    iconImageCacheRef: input.iconImageCacheRef,
+  }).pipe(
+    Effect.flatMap((imageData) =>
+      Effect.tryPromise({
+        try: () => browser.action.setIcon({ imageData }),
+        catch: (error) => error,
+      }),
+    ),
+    Effect.catchAll((error) =>
+      Effect.sync(() => {
+        console.warn("toolbar icon update failed", error);
+      }).pipe(Effect.zipRight(fallbackIcon)),
+    ),
+  );
 }
 
 export const ToolbarProjectionLive = Layer.scopedDiscard(
@@ -209,40 +297,40 @@ export const ToolbarProjectionLive = Layer.scopedDiscard(
     const catalog = yield* CatalogService;
     const permissions = yield* PermissionsService;
 
-    let originStates = new Map<string, RuntimeOriginState>();
-    let permissionsByOrigin = new Map<
-      string,
-      ReadonlyArray<RuntimePermissionEntry>
-    >();
-    let pendingByOrigin = new Map<string, ReadonlyArray<RuntimePendingRequest>>();
-    let connectedModels: ReadonlyArray<RuntimeModelSummary> = [];
-    let revision = 0;
+    const projectionStateRef = yield* Ref.make(initialToolbarProjectionState());
+    const revisionRef = yield* Ref.make(0);
+    const sourceIconRef = yield* SynchronizedRef.make<ImageData | null>(null);
+    const iconImageCacheRef = yield* SynchronizedRef.make<
+      Partial<Record<IconState, Record<number, ImageData>>>
+    >({});
 
-    const updateActionState = Effect.tryPromise({
-      try: async () => {
-        const currentRevision = ++revision;
-        const activeOrigin = await getActiveTabOrigin();
-        const pendingCount = sumPendingRequests(pendingByOrigin);
-        const active = isActiveForOrigin({
-          activeOrigin,
-          originStates,
-          permissionsByOrigin,
-          connectedModels,
-        });
+    const updateActionState = Effect.gen(function* () {
+      const currentRevision = yield* Ref.updateAndGet(revisionRef, (value) => value + 1);
+      const state = yield* Ref.get(projectionStateRef);
+      const activeOrigin = yield* getActiveTabOrigin();
+      const pendingCount = sumPendingRequests(state.pendingByOrigin);
+      const active = isActiveForOrigin({
+        activeOrigin,
+        originStates: state.originStates,
+        permissionsByOrigin: state.permissionsByOrigin,
+        connectedModels: state.connectedModels,
+      });
 
-        if (currentRevision !== revision) {
-          return;
-        }
+      if ((yield* Ref.get(revisionRef)) !== currentRevision) {
+        return;
+      }
 
-        await updateBadgeCount(pendingCount);
+      yield* updateBadgeCount(pendingCount);
 
-        if (currentRevision !== revision) {
-          return;
-        }
+      if ((yield* Ref.get(revisionRef)) !== currentRevision) {
+        return;
+      }
 
-        await updateToolbarIcon(active);
-      },
-      catch: (error) => error,
+      yield* updateToolbarIcon({
+        isActive: active,
+        sourceIconRef,
+        iconImageCacheRef,
+      });
     }).pipe(
       Effect.catchAll((error) =>
         Effect.sync(() => {
@@ -256,10 +344,11 @@ export const ToolbarProjectionLive = Layer.scopedDiscard(
         connectedOnly: true,
       })
       .pipe(
-        Stream.runForEach((models) =>
-          Effect.sync(() => {
-            connectedModels = models;
-          }).pipe(Effect.zipRight(updateActionState)),
+        Stream.runForEach((connectedModels) =>
+          Ref.update(projectionStateRef, (state) => ({
+            ...state,
+            connectedModels,
+          })).pipe(Effect.zipRight(updateActionState)),
         ),
         Effect.forkScoped,
       );
@@ -267,10 +356,11 @@ export const ToolbarProjectionLive = Layer.scopedDiscard(
     yield* permissions
       .streamOriginStates()
       .pipe(
-        Stream.runForEach((nextOriginStates) =>
-          Effect.sync(() => {
-            originStates = new Map(nextOriginStates);
-          }).pipe(Effect.zipRight(updateActionState)),
+        Stream.runForEach((originStates) =>
+          Ref.update(projectionStateRef, (state) => ({
+            ...state,
+            originStates: new Map(originStates),
+          })).pipe(Effect.zipRight(updateActionState)),
         ),
         Effect.forkScoped,
       );
@@ -278,10 +368,11 @@ export const ToolbarProjectionLive = Layer.scopedDiscard(
     yield* permissions
       .streamPermissionsMap()
       .pipe(
-        Stream.runForEach((nextPermissions) =>
-          Effect.sync(() => {
-            permissionsByOrigin = new Map(nextPermissions);
-          }).pipe(Effect.zipRight(updateActionState)),
+        Stream.runForEach((permissionsByOrigin) =>
+          Ref.update(projectionStateRef, (state) => ({
+            ...state,
+            permissionsByOrigin: new Map(permissionsByOrigin),
+          })).pipe(Effect.zipRight(updateActionState)),
         ),
         Effect.forkScoped,
       );
@@ -289,17 +380,18 @@ export const ToolbarProjectionLive = Layer.scopedDiscard(
     yield* permissions
       .streamPendingMap()
       .pipe(
-        Stream.runForEach((nextPending) =>
-          Effect.sync(() => {
-            pendingByOrigin = new Map(nextPending);
-          }).pipe(Effect.zipRight(updateActionState)),
+        Stream.runForEach((pendingByOrigin) =>
+          Ref.update(projectionStateRef, (state) => ({
+            ...state,
+            pendingByOrigin: new Map(pendingByOrigin),
+          })).pipe(Effect.zipRight(updateActionState)),
         ),
         Effect.forkScoped,
       );
 
     const onTabActivated: Parameters<typeof browser.tabs.onActivated.addListener>[0] =
       () => {
-        void Effect.runPromise(updateActionState).catch(() => undefined);
+        Effect.runFork(updateActionState);
       };
 
     const onTabUpdated: Parameters<typeof browser.tabs.onUpdated.addListener>[0] =
@@ -311,17 +403,19 @@ export const ToolbarProjectionLive = Layer.scopedDiscard(
           return;
         }
 
-        void Effect.runPromise(updateActionState).catch(() => undefined);
+        Effect.runFork(updateActionState);
       };
 
     const onWindowFocusChanged: Parameters<typeof browser.windows.onFocusChanged.addListener>[0] =
       () => {
-        void Effect.runPromise(updateActionState).catch(() => undefined);
+        Effect.runFork(updateActionState);
       };
 
-    browser.tabs?.onActivated.addListener(onTabActivated);
-    browser.tabs?.onUpdated.addListener(onTabUpdated);
-    browser.windows?.onFocusChanged.addListener(onWindowFocusChanged);
+    yield* Effect.sync(() => {
+      browser.tabs?.onActivated.addListener(onTabActivated);
+      browser.tabs?.onUpdated.addListener(onTabUpdated);
+      browser.windows?.onFocusChanged.addListener(onWindowFocusChanged);
+    });
 
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {

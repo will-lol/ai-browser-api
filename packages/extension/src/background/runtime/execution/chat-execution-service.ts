@@ -13,9 +13,9 @@ import {
 } from "@ai-sdk/provider";
 import { RetryError } from "ai";
 import {
+  JsonValueSchema,
   RuntimeChatStreamNotFoundError,
   RuntimeValidationError,
-  JsonValueSchema,
   isRuntimeRpcError,
   type JsonValue,
   type RuntimeAbortChatStreamInput,
@@ -25,13 +25,23 @@ import {
   type RuntimeRpcError,
 } from "@llm-bridge/contracts";
 import {
+  ChatExecutionService,
   ensureModelAccess,
   ensureOriginEnabled,
+  type ChatExecutionServiceApi,
 } from "@llm-bridge/runtime-core";
-import * as Context from "effect/Context";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 import {
   prepareRuntimeChatModelCall,
   type PreparedRuntimeChatModelCall,
@@ -43,11 +53,7 @@ import {
 
 const decodeJsonValue = Schema.decodeUnknownSync(JsonValueSchema);
 
-type ChatSubscriber = {
-  controller: ReadableStreamDefaultController<RuntimeChatStreamChunk>;
-};
-
-type ChatGenerationFinalState =
+type ChatTerminalEvent =
   | {
       _tag: "success";
     }
@@ -56,14 +62,28 @@ type ChatGenerationFinalState =
       error: RuntimeRpcError;
     };
 
+type ChatEvent =
+  | {
+      _tag: "chunk";
+      chunk: RuntimeChatStreamChunk;
+    }
+  | ChatTerminalEvent;
+
 type ActiveChatGeneration = {
-  key: string;
-  origin: string;
-  chatId: string;
-  abortController: AbortController;
-  bufferedChunks: Array<RuntimeChatStreamChunk>;
-  subscribers: Set<ChatSubscriber>;
-  finalState: ChatGenerationFinalState | null;
+  readonly key: string;
+  readonly origin: string;
+  readonly chatId: string;
+  readonly abortController: AbortController;
+  readonly events: PubSub.PubSub<ChatEvent>;
+  readonly subscriberCount: Ref.Ref<number>;
+  readonly terminalEventRef: Ref.Ref<ChatTerminalEvent | null>;
+  readonly producerFiberRef: SynchronizedRef.SynchronizedRef<
+    Fiber.RuntimeFiber<void, never> | null
+  >;
+  readonly startProducer: () => Effect.Effect<
+    Fiber.RuntimeFiber<void, never>,
+    never
+  >;
 };
 
 type ChatExecutionServiceDeps = {
@@ -101,6 +121,17 @@ function nextChatRequestId() {
 
 function toGenerationKey(input: { origin: string; chatId: string }) {
   return `${input.origin}::${input.chatId}`;
+}
+
+function toChatStreamNotFoundError(input: {
+  origin: string;
+  chatId: string;
+}) {
+  return new RuntimeChatStreamNotFoundError({
+    origin: input.origin,
+    chatId: input.chatId,
+    message: `No active chat stream found for ${input.chatId}`,
+  });
 }
 
 function isJsonObject(
@@ -193,201 +224,323 @@ function toRuntimeChatError(input: {
   return wrapExtensionError(input.error, input.operation);
 }
 
-function ensureNotAborted(
-  generation: ActiveChatGeneration,
+function ensureSignalNotAborted(
+  signal: AbortSignal,
 ): Effect.Effect<void, RuntimeValidationError> {
-  if (!generation.abortController.signal.aborted) {
+  if (!signal.aborted) {
     return Effect.void;
   }
 
   return Effect.fail(
     new RuntimeValidationError({
-      message: `${generation} aborted`,
+      message: "Request canceled",
     }),
   );
 }
 
-function broadcastChunk(
-  generation: ActiveChatGeneration,
-  chunk: RuntimeChatStreamChunk,
-) {
-  generation.bufferedChunks.push(chunk);
-
-  for (const subscriber of generation.subscribers) {
-    try {
-      subscriber.controller.enqueue(chunk);
-    } catch {
-      generation.subscribers.delete(subscriber);
-    }
+function eventToStream(
+  event: ChatEvent,
+): Stream.Stream<RuntimeChatStreamChunk, RuntimeRpcError> {
+  switch (event._tag) {
+    case "chunk":
+      return Stream.succeed(event.chunk);
+    case "success":
+      return Stream.empty;
+    case "failure":
+      return Stream.fail(event.error);
   }
 }
 
-function finalizeGeneration(
-  generation: ActiveChatGeneration,
-  generations: Map<string, ActiveChatGeneration>,
-  finalState: ChatGenerationFinalState,
-) {
-  if (generation.finalState !== null) {
-    return;
+function normalizeChatStreamFailure(input: {
+  error: unknown;
+  providerID: string;
+}): RuntimeRpcError {
+  if (isRuntimeRpcError(input.error)) {
+    return input.error;
   }
 
-  generation.finalState = finalState;
-
-  if (generations.get(generation.key) === generation) {
-    generations.delete(generation.key);
+  if (input.error instanceof Error) {
+    return toRuntimeChatError({
+      error: input.error,
+      providerID: input.providerID,
+      operation: "chat.stream",
+    });
   }
 
-  for (const subscriber of generation.subscribers) {
-    try {
-      if (finalState._tag === "success") {
-        subscriber.controller.close();
-      } else {
-        subscriber.controller.error(finalState.error);
-      }
-    } catch {
-      // ignored
-    }
-  }
-
-  generation.subscribers.clear();
+  return wrapExtensionError(String(input.error), "chat.stream");
 }
 
-function subscribeToGeneration(input: {
-  generation: ActiveChatGeneration;
-  generations: Map<string, ActiveChatGeneration>;
-}): ReadableStream<RuntimeChatStreamChunk> {
-  let subscriber: ChatSubscriber | null = null;
+function getGeneration(
+  registryRef: SynchronizedRef.SynchronizedRef<Map<string, ActiveChatGeneration>>,
+  key: string,
+) {
+  return SynchronizedRef.get(registryRef).pipe(
+    Effect.flatMap((registry) => Effect.fromNullable(registry.get(key))),
+  );
+}
 
-  return new ReadableStream<RuntimeChatStreamChunk>({
-    start(controller) {
-      subscriber = {
-        controller,
-      };
-
-      for (const chunk of input.generation.bufferedChunks) {
-        controller.enqueue(chunk);
-      }
-
-      if (input.generation.finalState?._tag === "success") {
-        controller.close();
-        return;
-      }
-
-      if (input.generation.finalState?._tag === "failure") {
-        controller.error(input.generation.finalState.error);
-        return;
-      }
-
-      input.generation.subscribers.add(subscriber);
-    },
-    cancel() {
-      if (subscriber) {
-        input.generation.subscribers.delete(subscriber);
-      }
-
-      if (!input.generation.abortController.signal.aborted) {
-        input.generation.abortController.abort();
-      }
-
-      if (input.generations.get(input.generation.key) === input.generation) {
-        input.generations.delete(input.generation.key);
-      }
-    },
+function replaceGeneration(
+  registryRef: SynchronizedRef.SynchronizedRef<Map<string, ActiveChatGeneration>>,
+  generation: ActiveChatGeneration,
+) {
+  return SynchronizedRef.modify(registryRef, (registry) => {
+    const nextRegistry = new Map(registry);
+    const existing = nextRegistry.get(generation.key);
+    nextRegistry.set(generation.key, generation);
+    return [existing, nextRegistry] as const;
   });
 }
 
-function startGenerationPump(input: {
+function takeGeneration(
+  registryRef: SynchronizedRef.SynchronizedRef<Map<string, ActiveChatGeneration>>,
+  key: string,
+) {
+  return SynchronizedRef.modify(registryRef, (registry) => {
+    const existing = registry.get(key);
+    if (!existing) {
+      return [undefined, registry] as const;
+    }
+
+    const nextRegistry = new Map(registry);
+    nextRegistry.delete(key);
+    return [existing, nextRegistry] as const;
+  });
+}
+
+function removeGenerationIfCurrent(input: {
+  registryRef: SynchronizedRef.SynchronizedRef<Map<string, ActiveChatGeneration>>;
   generation: ActiveChatGeneration;
-  generations: Map<string, ActiveChatGeneration>;
+}) {
+  return SynchronizedRef.modify(input.registryRef, (registry) => {
+    if (registry.get(input.generation.key) !== input.generation) {
+      return [false, registry] as const;
+    }
+
+    const nextRegistry = new Map(registry);
+    nextRegistry.delete(input.generation.key);
+    return [true, nextRegistry] as const;
+  });
+}
+
+function publishChunkEvent(
+  generation: ActiveChatGeneration,
+  chunk: RuntimeChatStreamChunk,
+) {
+  return Effect.gen(function* () {
+    const shouldPublish = yield* Ref.modify(
+      generation.terminalEventRef,
+      (current) => [current === null, current] as const,
+    );
+    if (!shouldPublish) {
+      return;
+    }
+
+    yield* PubSub.publish(generation.events, {
+      _tag: "chunk",
+      chunk,
+    }).pipe(Effect.asVoid);
+  });
+}
+
+function finishGeneration(input: {
+  registryRef: SynchronizedRef.SynchronizedRef<Map<string, ActiveChatGeneration>>;
+  generation: ActiveChatGeneration;
+  event: ChatTerminalEvent;
+}) {
+  return Effect.gen(function* () {
+    const existingTerminal = yield* Ref.modify(
+      input.generation.terminalEventRef,
+      (current) => [current, current ?? input.event] as const,
+    );
+    if (existingTerminal) {
+      return;
+    }
+
+    yield* removeGenerationIfCurrent(input);
+    yield* PubSub.publish(input.generation.events, input.event).pipe(
+      Effect.asVoid,
+    );
+  });
+}
+
+function interruptProducer(generation: ActiveChatGeneration) {
+  return SynchronizedRef.get(generation.producerFiberRef).pipe(
+    Effect.flatMap((fiber) =>
+      fiber ? Fiber.interrupt(fiber).pipe(Effect.asVoid) : Effect.void,
+    ),
+  );
+}
+
+function abortGeneration(input: {
+  registryRef: SynchronizedRef.SynchronizedRef<Map<string, ActiveChatGeneration>>;
+  generation: ActiveChatGeneration;
+}) {
+  return Effect.gen(function* () {
+    yield* Effect.sync(() => {
+      input.generation.abortController.abort();
+    });
+    yield* interruptProducer(input.generation);
+    yield* finishGeneration({
+      registryRef: input.registryRef,
+      generation: input.generation,
+      event: {
+        _tag: "success",
+      },
+    });
+  });
+}
+
+function ensureProducerStarted(generation: ActiveChatGeneration) {
+  return SynchronizedRef.modifyEffect(
+    generation.producerFiberRef,
+    (currentFiber) => {
+      if (currentFiber) {
+        return Effect.succeed([currentFiber, currentFiber] as const);
+      }
+
+      return generation.startProducer().pipe(
+        Effect.map((fiber) => [fiber, fiber] as const),
+      );
+    },
+  );
+}
+
+function detachSubscriber(input: {
+  registryRef: SynchronizedRef.SynchronizedRef<Map<string, ActiveChatGeneration>>;
+  generation: ActiveChatGeneration;
+}) {
+  return Effect.gen(function* () {
+    const nextCount = yield* Ref.updateAndGet(
+      input.generation.subscriberCount,
+      (count) => Math.max(0, count - 1),
+    );
+    if (nextCount > 0) {
+      return;
+    }
+
+    const terminalEvent = yield* Ref.get(input.generation.terminalEventRef);
+    if (terminalEvent) {
+      return;
+    }
+
+    yield* abortGeneration(input);
+  });
+}
+
+function attachGenerationStream(input: {
+  registryRef: SynchronizedRef.SynchronizedRef<Map<string, ActiveChatGeneration>>;
+  generation: ActiveChatGeneration;
+}) {
+  return Stream.unwrapScoped(
+    Effect.gen(function* () {
+      yield* Ref.update(input.generation.subscriberCount, (count) => count + 1);
+      yield* Effect.addFinalizer(() => detachSubscriber(input));
+
+      const source = yield* Stream.fromPubSub(input.generation.events, {
+        scoped: true,
+      });
+
+      yield* ensureProducerStarted(input.generation);
+
+      const terminalEvent = yield* Ref.get(input.generation.terminalEventRef);
+      if (terminalEvent) {
+        return eventToStream(terminalEvent);
+      }
+
+      return source.pipe(
+        Stream.takeUntil((event) => event._tag !== "chunk"),
+        Stream.flatMap(eventToStream),
+      );
+    }),
+  );
+}
+
+function produceGeneration(input: {
+  registryRef: SynchronizedRef.SynchronizedRef<Map<string, ActiveChatGeneration>>;
+  generation: ActiveChatGeneration;
   stream: ReadableStream<UIMessageChunk>;
   providerID: string;
 }) {
-  const reader = input.stream.getReader();
+  return Effect.gen(function* () {
+    const exit = yield* Effect.exit(
+      Stream.fromReadableStream(
+        () => input.stream,
+        (error) => error,
+      ).pipe(
+        Stream.mapEffect((chunk) =>
+          Effect.try({
+            try: () => toOpaqueJsonObject(chunk, "chat stream chunk"),
+            catch: (error) => error,
+          }).pipe(
+            Effect.flatMap((encodedChunk) =>
+              publishChunkEvent(input.generation, encodedChunk),
+            ),
+          ),
+        ),
+        Stream.runDrain,
+      ),
+    );
 
-  void (async () => {
-    try {
-      while (true) {
-        const next = await reader.read();
-
-        if (next.done) {
-          finalizeGeneration(input.generation, input.generations, {
-            _tag: "success",
-          });
-          return;
-        }
-
-        broadcastChunk(
-          input.generation,
-          toOpaqueJsonObject(next.value, "chat stream chunk"),
-        );
-      }
-    } catch (error) {
-      if (input.generation.abortController.signal.aborted) {
-        finalizeGeneration(input.generation, input.generations, {
+    if (Exit.isSuccess(exit)) {
+      yield* finishGeneration({
+        registryRef: input.registryRef,
+        generation: input.generation,
+        event: {
           _tag: "success",
-        });
-        return;
-      }
+        },
+      });
+      return;
+    }
 
-      const normalizedError =
-        error instanceof Error
-          ? toRuntimeChatError({
-              error,
-              providerID: input.providerID,
-              operation: "chat.stream",
-            })
-          : wrapExtensionError(String(error), "chat.stream");
+    if (
+      input.generation.abortController.signal.aborted ||
+      Cause.isInterruptedOnly(exit.cause)
+    ) {
+      yield* finishGeneration({
+        registryRef: input.registryRef,
+        generation: input.generation,
+        event: {
+          _tag: "success",
+        },
+      });
+      return;
+    }
 
-      if (normalizedError instanceof Error) {
-        logChatError("stream.failed", normalizedError, {
-          chatId: input.generation.chatId,
-          origin: input.generation.origin,
-        });
-      }
+    const failure = Cause.failureOption(exit.cause);
+    const normalizedError = Option.isSome(failure)
+      ? normalizeChatStreamFailure({
+          error: failure.value,
+          providerID: input.providerID,
+        })
+      : wrapExtensionError(Cause.pretty(exit.cause), "chat.stream");
 
-      finalizeGeneration(input.generation, input.generations, {
+    if (normalizedError instanceof Error) {
+      logChatError("stream.failed", normalizedError, {
+        chatId: input.generation.chatId,
+        origin: input.generation.origin,
+      });
+    }
+
+    yield* finishGeneration({
+      registryRef: input.registryRef,
+      generation: input.generation,
+      event: {
         _tag: "failure",
         error: normalizedError,
-      });
-    } finally {
-      reader.releaseLock();
-    }
-  })();
+      },
+    });
+  });
 }
 
-function makeChatExecutionService(input: ChatExecutionServiceDeps) {
-  const generations = new Map<string, ActiveChatGeneration>();
-
-  const abortGeneration = (request: RuntimeAbortChatStreamInput) =>
-    Effect.sync(() => {
-      const generation = generations.get(toGenerationKey(request));
-      if (!generation) {
-        return;
-      }
-
-      generation.abortController.abort();
-    });
-
+function makeChatExecutionService(input: {
+  deps: ChatExecutionServiceDeps;
+  registryRef: SynchronizedRef.SynchronizedRef<Map<string, ActiveChatGeneration>>;
+  producerFibers: FiberSet.FiberSet<void, never>;
+}): ChatExecutionServiceApi {
   const sendMessages = (request: RuntimeChatSendMessagesInput) =>
     Effect.gen(function* () {
       const generationKey = toGenerationKey(request);
-      const existing = generations.get(generationKey);
-      if (existing) {
-        existing.abortController.abort();
-      }
-
-      const generation: ActiveChatGeneration = {
-        key: generationKey,
-        origin: request.origin,
-        chatId: request.chatId,
-        abortController: new AbortController(),
-        bufferedChunks: [],
-        subscribers: new Set<ChatSubscriber>(),
-        finalState: null,
-      };
-
-      generations.set(generationKey, generation);
-
+      const abortController = new AbortController();
       const requestID = nextChatRequestId();
       const sessionID = request.chatId;
 
@@ -396,12 +549,12 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
         yield* ensureModelAccess({
           origin: request.origin,
           modelID: request.modelId,
-          signal: generation.abortController.signal,
+          signal: abortController.signal,
         });
 
         const validatedMessages = yield* Effect.tryPromise({
           try: () =>
-            input.validateMessages<UIMessage>({
+            input.deps.validateMessages<UIMessage>({
               messages: request.messages,
             }),
           catch: (error) =>
@@ -414,7 +567,7 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
         });
 
         const modelMessages = yield* Effect.tryPromise({
-          try: () => input.convertMessages(validatedMessages),
+          try: () => input.deps.convertMessages(validatedMessages),
           catch: (error) =>
             new RuntimeValidationError({
               message:
@@ -424,7 +577,7 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
             }),
         });
 
-        const preparedCall = yield* input
+        const preparedCall = yield* input.deps
           .prepareLanguageModelCall({
             modelID: request.modelId,
             origin: request.origin,
@@ -445,18 +598,19 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
             ),
           );
 
-        yield* ensureNotAborted(generation);
-        const result = yield* Effect.try({
+        yield* ensureSignalNotAborted(abortController.signal);
+
+        const streamTextResult = yield* Effect.try({
           try: () => {
             const preparedLanguageModel = createPreparedLanguageModel({
               languageModel: preparedCall.languageModel,
               preparedCallOptions: preparedCall.callOptions,
             });
 
-            return input.streamTextImpl(
+            return input.deps.streamTextImpl(
               toStreamTextInput({
                 languageModel: preparedLanguageModel,
-                abortSignal: generation.abortController.signal,
+                abortSignal: abortController.signal,
                 messages: modelMessages,
               }),
             );
@@ -471,7 +625,7 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
 
         return yield* Effect.try({
           try: () => ({
-            uiStream: result.toUIMessageStream({
+            uiStream: streamTextResult.toUIMessageStream({
               originalMessages: validatedMessages,
             }),
             providerID: preparedCall.providerID,
@@ -484,22 +638,48 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
             }),
         });
       }).pipe(
-        Effect.tapError((error) =>
-          Effect.sync(() => {
-            const runtimeError = isRuntimeRpcError(error)
-              ? error
-              : toRuntimeChatError({
-                  error:
-                    error instanceof Error ? error : new Error(String(error)),
-                  operation: "chat.sendMessages",
-                });
-            finalizeGeneration(generation, generations, {
-              _tag: "failure",
-              error: runtimeError,
-            });
-          }),
+        Effect.mapError((error) =>
+          isRuntimeRpcError(error)
+            ? error
+            : wrapExtensionError(error, "chat.sendMessages"),
         ),
       );
+
+      const events = yield* PubSub.unbounded<ChatEvent>();
+      const subscriberCount = yield* Ref.make(0);
+      const terminalEventRef = yield* Ref.make<ChatTerminalEvent | null>(null);
+      const producerFiberRef = yield* SynchronizedRef.make<
+        Fiber.RuntimeFiber<void, never> | null
+      >(null);
+
+      const generation: ActiveChatGeneration = {
+        key: generationKey,
+        origin: request.origin,
+        chatId: request.chatId,
+        abortController,
+        events,
+        subscriberCount,
+        terminalEventRef,
+        producerFiberRef,
+        startProducer: () =>
+          FiberSet.run(
+            input.producerFibers,
+            produceGeneration({
+              registryRef: input.registryRef,
+              generation,
+              stream: result.uiStream,
+              providerID: result.providerID,
+            }),
+          ),
+      };
+
+      const existing = yield* replaceGeneration(input.registryRef, generation);
+      if (existing) {
+        yield* abortGeneration({
+          registryRef: input.registryRef,
+          generation: existing,
+        });
+      }
 
       logChatDebug("send.started", {
         chatId: request.chatId,
@@ -508,59 +688,66 @@ function makeChatExecutionService(input: ChatExecutionServiceDeps) {
         requestID,
       });
 
-      startGenerationPump({
+      return attachGenerationStream({
+        registryRef: input.registryRef,
         generation,
-        generations,
-        stream: result.uiStream,
-        providerID: result.providerID,
-      });
-
-      return subscribeToGeneration({
-        generation,
-        generations,
       });
     });
 
   const reconnectStream = (request: RuntimeChatReconnectStreamInput) =>
     Effect.gen(function* () {
-      const generation = generations.get(toGenerationKey(request));
+      const generation = yield* getGeneration(
+        input.registryRef,
+        toGenerationKey(request),
+      ).pipe(
+        Effect.mapError(() => toChatStreamNotFoundError(request)),
+      );
+
+      return attachGenerationStream({
+        registryRef: input.registryRef,
+        generation,
+      });
+    });
+
+  const abortStream = (request: RuntimeAbortChatStreamInput) =>
+    Effect.gen(function* () {
+      const generation = yield* takeGeneration(
+        input.registryRef,
+        toGenerationKey(request),
+      );
       if (!generation) {
-        return yield* Effect.fail(
-          new RuntimeChatStreamNotFoundError({
-            origin: request.origin,
-            chatId: request.chatId,
-            message: `No active chat stream found for ${request.chatId}`,
-          }),
-        );
+        return;
       }
 
-      return subscribeToGeneration({
+      yield* abortGeneration({
+        registryRef: input.registryRef,
         generation,
-        generations,
       });
     });
 
   return {
     sendMessages,
     reconnectStream,
-    abortStream: abortGeneration,
+    abortStream,
   };
 }
 
-type ChatExecutionServiceApi = ReturnType<typeof makeChatExecutionService>;
-
-export class ChatExecutionService extends Context.Tag(
-  "@llm-bridge/extension/ChatExecutionService",
-)<ChatExecutionService, ChatExecutionServiceApi>() {}
-
-export const ChatExecutionServiceLive = Layer.effect(
+export const ChatExecutionServiceLive = Layer.scoped(
   ChatExecutionService,
-  Effect.succeed(
-    makeChatExecutionService({
-      prepareLanguageModelCall: prepareRuntimeChatModelCall,
-      convertMessages: convertToModelMessages,
-      validateMessages: validateUIMessages,
-      streamTextImpl: streamText,
-    }),
-  ),
+  Effect.gen(function* () {
+    const registryRef =
+      yield* SynchronizedRef.make<Map<string, ActiveChatGeneration>>(new Map());
+    const producerFibers = yield* FiberSet.make<void, never>();
+
+    return makeChatExecutionService({
+      deps: {
+        prepareLanguageModelCall: prepareRuntimeChatModelCall,
+        convertMessages: convertToModelMessages,
+        validateMessages: validateUIMessages,
+        streamTextImpl: streamText,
+      },
+      registryRef,
+      producerFibers,
+    });
+  }),
 );

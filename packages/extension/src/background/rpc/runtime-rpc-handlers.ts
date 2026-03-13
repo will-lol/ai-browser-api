@@ -11,6 +11,7 @@ import {
   acquireModel,
   cancelProviderAuthFlow,
   createPermissionRequest,
+  ChatExecutionService,
   dismissPermissionRequest,
   disconnectProvider,
   ensureOriginEnabled,
@@ -39,7 +40,6 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import { ChatExecutionService } from "@/background/runtime/execution/chat-execution-service";
 import { wrapTransportError } from "@/background/runtime/core/errors";
 
 function serializeUnknownRuntimeError(error: unknown): RuntimeRpcError {
@@ -95,6 +95,16 @@ function serializeRpcTypedStream<A, E, R>(
 ): Stream.Stream<A, RuntimeRpcError, R> {
   return Stream.catchAllCause(stream, (cause) =>
     Stream.fail(serializeRuntimeCause(cause)),
+  );
+}
+
+function serializeRpcEffectStream<A, E, R, R2>(
+  effect: Effect.Effect<Stream.Stream<A, E, R2>, E, R>,
+): Stream.Stream<A, RuntimeRpcError, R | R2> {
+  return Stream.unwrap(
+    Effect.map(serializeRpcError(effect), (stream) =>
+      serializeRpcTypedStream(stream),
+    ),
   );
 }
 
@@ -169,9 +179,9 @@ const makePublicRuntimeRpcHandlers = Effect.gen(function* () {
           requestID: requestId,
         }),
       ),
-    chatSendMessages: (input) => serializeRpcReadableStream(chat.sendMessages(input)),
+    chatSendMessages: (input) => serializeRpcEffectStream(chat.sendMessages(input)),
     chatReconnectStream: (input) =>
-      serializeRpcReadableStream(chat.reconnectStream(input)),
+      serializeRpcEffectStream(chat.reconnectStream(input)),
     abortChatStream: (input) => serializeRpcError(chat.abortStream(input)),
     createPermissionRequest: (input) =>
       serializeRpcError(
@@ -267,9 +277,9 @@ const makeAdminRuntimeRpcHandlers = Effect.gen(function* () {
           requestID: requestId,
         }),
       ),
-    chatSendMessages: (input) => serializeRpcReadableStream(chat.sendMessages(input)),
+    chatSendMessages: (input) => serializeRpcEffectStream(chat.sendMessages(input)),
     chatReconnectStream: (input) =>
-      serializeRpcReadableStream(chat.reconnectStream(input)),
+      serializeRpcEffectStream(chat.reconnectStream(input)),
     abortChatStream: (input) => serializeRpcError(chat.abortStream(input)),
     createPermissionRequest: (input) =>
       serializeRpcError(

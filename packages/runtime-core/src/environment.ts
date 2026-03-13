@@ -1,10 +1,14 @@
 import type {
   PermissionStatus,
+  RuntimeAbortChatStreamInput,
   RuntimeAuthFlowSnapshot,
   RuntimeCancelProviderAuthFlowResponse,
   RuntimeCreatePermissionRequestResponse,
   RuntimeDismissPermissionRequestResponse,
   RuntimeDisconnectProviderResponse,
+  RuntimeChatReconnectStreamInput,
+  RuntimeChatSendMessagesInput,
+  RuntimeChatStreamChunk,
   RuntimeGenerateResponse,
   RuntimeModelCallOptions,
   RuntimeModelDescriptor,
@@ -20,6 +24,7 @@ import type {
   RuntimeStartProviderAuthFlowResponse,
   RuntimeStreamPart,
   RuntimeUpdatePermissionResponse,
+  RuntimeRpcError,
 } from "@llm-bridge/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -197,11 +202,34 @@ export class ModelExecutionService extends Context.Tag(
   "@llm-bridge/runtime-core/ModelExecutionService",
 )<ModelExecutionService, ModelExecutionServiceApi>() {}
 
+export interface ChatExecutionServiceApi {
+  readonly sendMessages: (
+    input: RuntimeChatSendMessagesInput,
+  ) => AppEffect<
+    Stream.Stream<RuntimeChatStreamChunk, RuntimeRpcError>,
+    RuntimeRpcError
+  >;
+  readonly reconnectStream: (
+    input: RuntimeChatReconnectStreamInput,
+  ) => AppEffect<
+    Stream.Stream<RuntimeChatStreamChunk, RuntimeRpcError>,
+    RuntimeRpcError
+  >;
+  readonly abortStream: (
+    input: RuntimeAbortChatStreamInput,
+  ) => AppEffect<void, RuntimeRpcError>;
+}
+
+export class ChatExecutionService extends Context.Tag(
+  "@llm-bridge/runtime-core/ChatExecutionService",
+)<ChatExecutionService, ChatExecutionServiceApi>() {}
+
 export type AppRuntime =
   | CatalogService
   | PermissionsService
   | AuthFlowService
   | MetaService
-  | ModelExecutionService;
+  | ModelExecutionService
+  | ChatExecutionService;
 
 export type AppEffect<A, E = unknown, R = AppRuntime> = Effect.Effect<A, E, R>;
