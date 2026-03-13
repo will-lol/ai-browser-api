@@ -374,22 +374,18 @@ function normalizeGoogleAuth(
 }
 
 function waitForGeminiOAuthCallback(signal?: AbortSignal) {
-  return Effect.tryPromise({
-    try: () =>
-      waitForOAuthCallback({
-        signal,
-        urlPattern: GEMINI_REDIRECT_URL_PATTERN,
-        matchesUrl: (url) => url.startsWith(GEMINI_REDIRECT_URI),
-        timeoutMs: GEMINI_CALLBACK_TIMEOUT_MS,
-        unsupportedErrorMessage:
-          "Gemini OAuth callback interception is unavailable: webRequest is not supported in this browser.",
-        timeoutErrorMessage:
-          "Timed out waiting for Gemini OAuth callback on http://localhost:8085/oauth2callback.",
-        registerListenerErrorPrefix:
-          "Failed to register Gemini OAuth callback listener",
-      }),
-    catch: (error) => toGoogleError("oauth.waitForCallback", error),
-  });
+  return waitForOAuthCallback({
+    signal,
+    urlPattern: GEMINI_REDIRECT_URL_PATTERN,
+    matchesUrl: (url) => url.startsWith(GEMINI_REDIRECT_URI),
+    timeoutMs: GEMINI_CALLBACK_TIMEOUT_MS,
+    unsupportedErrorMessage:
+      "Gemini OAuth callback interception is unavailable: webRequest is not supported in this browser.",
+    timeoutErrorMessage:
+      "Timed out waiting for Gemini OAuth callback on http://localhost:8085/oauth2callback.",
+    registerListenerErrorPrefix:
+      "Failed to register Gemini OAuth callback listener",
+  }).pipe(Effect.mapError((error) => toGoogleError("oauth.waitForCallback", error)));
 }
 
 function exchangeAuthorizationCode(

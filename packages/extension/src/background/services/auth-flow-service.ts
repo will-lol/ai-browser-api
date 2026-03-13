@@ -14,6 +14,7 @@ import {
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
@@ -27,8 +28,6 @@ import type { RuntimeAuthMethod } from "@/background/runtime/providers/adapters/
 
 const AUTH_FLOW_WINDOW_WIDTH = 420;
 const AUTH_FLOW_WINDOW_HEIGHT = 640;
-const AUTH_FLOW_TTL_MS = 30 * 60_000;
-const AUTH_FLOW_SWEEP_INTERVAL_MS = 60_000;
 
 type RuntimeAuthFlowStatus =
   | "idle"
@@ -36,6 +35,11 @@ type RuntimeAuthFlowStatus =
   | "success"
   | "error"
   | "canceled";
+
+type AuthFlowFiber = Fiber.RuntimeFiber<
+  Effect.Effect.Success<ReturnType<typeof startProviderAuth>>,
+  Effect.Effect.Error<ReturnType<typeof startProviderAuth>>
+>;
 
 type AuthFlowState = {
   providerID: string;
@@ -45,10 +49,9 @@ type AuthFlowState = {
   instruction?: RuntimeAuthFlowInstruction;
   error?: string;
   updatedAt: number;
-  expiresAt: number;
   windowId?: number;
   controller?: AbortController;
-  task?: Promise<unknown>;
+  fiber?: AuthFlowFiber;
 };
 
 type AuthFlowStateSnapshot = {
@@ -64,8 +67,109 @@ function canCancel(status: RuntimeAuthFlowStatus) {
   return status === "authorizing";
 }
 
-function sameSnapshot<A>(left: A, right: A) {
-  return JSON.stringify(left) === JSON.stringify(right);
+function sameInstruction(
+  left: RuntimeAuthFlowInstruction | undefined,
+  right: RuntimeAuthFlowInstruction | undefined,
+) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+
+  return (
+    left.kind === right.kind &&
+    left.title === right.title &&
+    left.message === right.message &&
+    left.code === right.code &&
+    left.url === right.url &&
+    left.autoOpened === right.autoOpened
+  );
+}
+
+function sameMethods(
+  left: ReadonlyArray<RuntimeAuthMethod>,
+  right: ReadonlyArray<RuntimeAuthMethod>,
+) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    const current = left[index];
+    const next = right[index];
+
+    if (
+      current.id !== next.id ||
+      current.type !== next.type ||
+      current.label !== next.label ||
+      current.fields.length !== next.fields.length
+    ) {
+      return false;
+    }
+
+    for (let fieldIndex = 0; fieldIndex < current.fields.length; fieldIndex += 1) {
+      const currentField = current.fields[fieldIndex];
+      const nextField = next.fields[fieldIndex];
+
+      if (
+        currentField.key !== nextField.key ||
+        currentField.type !== nextField.type ||
+        currentField.label !== nextField.label ||
+        currentField.placeholder !== nextField.placeholder ||
+        currentField.defaultValue !== nextField.defaultValue ||
+        currentField.required !== nextField.required ||
+        currentField.description !== nextField.description ||
+        currentField.condition?.key !== nextField.condition?.key ||
+        currentField.condition?.equals !== nextField.condition?.equals
+      ) {
+        return false;
+      }
+
+      if (currentField.type !== "select") {
+        continue;
+      }
+
+      if (nextField.type !== "select") {
+        return false;
+      }
+
+      if (currentField.options.length !== nextField.options.length) {
+        return false;
+      }
+
+      for (
+        let optionIndex = 0;
+        optionIndex < currentField.options.length;
+        optionIndex += 1
+      ) {
+        const currentOption = currentField.options[optionIndex];
+        const nextOption = nextField.options[optionIndex];
+
+        if (
+          currentOption.label !== nextOption.label ||
+          currentOption.value !== nextOption.value ||
+          currentOption.hint !== nextOption.hint
+        ) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+function sameSnapshotPayload(
+  left: RuntimeAuthFlowSnapshot,
+  right: RuntimeAuthFlowSnapshot,
+) {
+  return (
+    left.providerID === right.providerID &&
+    left.status === right.status &&
+    left.runningMethodID === right.runningMethodID &&
+    left.error === right.error &&
+    left.canCancel === right.canCancel &&
+    sameInstruction(left.instruction, right.instruction) &&
+    sameMethods(left.methods, right.methods)
+  );
 }
 
 function toAuthFlowErrorSummary(error: unknown) {
@@ -115,25 +219,16 @@ function snapshot(flow: AuthFlowState): RuntimeAuthFlowSnapshot {
 function toSnapshotState(
   providerID: string,
   methods: ReadonlyArray<RuntimeAuthMethod>,
+  options: {
+    windowId?: number;
+  } = {},
 ): AuthFlowState {
-  const updatedAt = Date.now();
-
   return {
     providerID,
     status: "idle",
     methods,
-    updatedAt,
-    expiresAt: updatedAt + AUTH_FLOW_TTL_MS,
-  };
-}
-
-function fallbackIdleSnapshot(providerID: string): RuntimeAuthFlowSnapshot {
-  return {
-    providerID,
-    status: "idle",
-    methods: [],
     updatedAt: Date.now(),
-    canCancel: false,
+    windowId: options.windowId,
   };
 }
 
@@ -141,64 +236,85 @@ export const AuthFlowServiceLive = Layer.scoped(
   AuthFlowService,
   Effect.gen(function* () {
     const catalog = yield* CatalogService;
+    const serviceScope = yield* Effect.scope;
     const snapshotsRef = yield* SubscriptionRef.make<
       ReadonlyMap<string, AuthFlowStateSnapshot>
     >(new Map());
 
     const flows = new Map<string, AuthFlowState>();
-    const providerWindows = new Map<string, number>();
     const windowProviders = new Map<number, string>();
 
-    const publishState = (flow: AuthFlowState) =>
+    const setFlow = (flow: AuthFlowState) =>
       SubscriptionRef.modify(snapshotsRef, (current) => {
+        flows.set(flow.providerID, flow);
+
+        const previous = current.get(flow.providerID)?.result;
+        flow.updatedAt = Date.now();
+        const result = snapshot(flow);
+
+        if (previous && sameSnapshotPayload(previous, result)) {
+          flow.updatedAt = previous.updatedAt;
+          return [undefined, current] as const;
+        }
+
         const next = new Map(current);
         next.set(flow.providerID, {
           providerID: flow.providerID,
-          result: snapshot(flow),
-        });
-        return [undefined, next] as const;
-      });
-
-    const publishSnapshot = (providerID: string, result: RuntimeAuthFlowSnapshot) =>
-      SubscriptionRef.modify(snapshotsRef, (current) => {
-        const next = new Map(current);
-        next.set(providerID, {
-          providerID,
           result,
         });
         return [undefined, next] as const;
       });
 
-    const markUpdated = (flow: AuthFlowState) => {
-      const updatedAt = Date.now();
-      flow.updatedAt = updatedAt;
-      flow.expiresAt = updatedAt + AUTH_FLOW_TTL_MS;
-    };
-
-    const setFlow = (flow: AuthFlowState) =>
-      Effect.gen(function* () {
-        markUpdated(flow);
-        flows.set(flow.providerID, flow);
-        yield* publishState(flow);
-      });
-
     const clearExecution = (flow: AuthFlowState) => {
       flow.controller = undefined;
-      flow.task = undefined;
+      flow.fiber = undefined;
       flow.runningMethodID = undefined;
     };
 
-    const idleSnapshot = (providerID: string) =>
-      Effect.gen(function* () {
-        const methods = yield* listProviderAuthMethods(providerID);
-        const state = toSnapshotState(providerID, methods);
-        return snapshot(state);
-      });
+    const clearWindowReference = (flow: AuthFlowState) => {
+      if (typeof flow.windowId !== "number") {
+        return;
+      }
 
-    const buildIdleFlow = (providerID: string) =>
+      windowProviders.delete(flow.windowId);
+      flow.windowId = undefined;
+    };
+
+    const setWindowReference = (flow: AuthFlowState, windowId: number) => {
+      if (typeof flow.windowId === "number" && flow.windowId !== windowId) {
+        windowProviders.delete(flow.windowId);
+      }
+
+      flow.windowId = windowId;
+      windowProviders.set(windowId, flow.providerID);
+    };
+
+    const buildIdleFlow = (
+      providerID: string,
+      options: {
+        windowId?: number;
+      } = {},
+    ) =>
       Effect.map(listProviderAuthMethods(providerID), (methods) =>
-        toSnapshotState(providerID, methods),
+        toSnapshotState(providerID, methods, options),
       );
+
+    const resolveProviderAuthFlow = (providerID: string) =>
+      Effect.gen(function* () {
+        const current = flows.get(providerID);
+        if (current) {
+          return {
+            providerID,
+            result: snapshot(current),
+          };
+        }
+
+        const next = yield* buildIdleFlow(providerID);
+        return {
+          providerID,
+          result: snapshot(next),
+        };
+      });
 
     const ensureFlow = (providerID: string) =>
       Effect.gen(function* () {
@@ -207,30 +323,43 @@ export const AuthFlowServiceLive = Layer.scoped(
           return current;
         }
 
-        const next = yield* buildIdleFlow(providerID);
+        const next = yield* buildIdleFlow(providerID, {
+          windowId: current?.windowId,
+        });
         yield* setFlow(next);
         return next;
+      });
+
+    const interruptExecution = (flow: AuthFlowState) =>
+      Effect.gen(function* () {
+        const fiber = flow.fiber;
+        flow.controller?.abort();
+        clearExecution(flow);
+
+        if (fiber) {
+          yield* Fiber.interrupt(fiber).pipe(Effect.asVoid);
+        }
       });
 
     const cancelFlow = (input: { providerID: string; reason?: string }) =>
       Effect.gen(function* () {
         const flow = flows.get(input.providerID);
         if (!flow) {
-          return yield* idleSnapshot(input.providerID);
+          return (yield* resolveProviderAuthFlow(input.providerID)).result;
         }
 
-        if (isTerminalStatus(flow.status)) {
+        if (!canCancel(flow.status)) {
           return snapshot(flow);
         }
 
-        flow.controller?.abort();
+        if (input.reason === "window_closed") {
+          clearWindowReference(flow);
+        }
+
         flow.status = "canceled";
-        flow.error =
-          input.reason === "expired"
-            ? "Authentication expired."
-            : "Authentication canceled.";
+        flow.error = "Authentication canceled.";
         flow.instruction = undefined;
-        clearExecution(flow);
+        yield* interruptExecution(flow);
         yield* setFlow(flow);
         return snapshot(flow);
       });
@@ -243,11 +372,15 @@ export const AuthFlowServiceLive = Layer.scoped(
         }
 
         windowProviders.delete(windowId);
-        providerWindows.delete(providerID);
 
         const flow = flows.get(providerID);
-        if (flow) {
-          flow.windowId = undefined;
+        if (!flow || flow.windowId !== windowId) {
+          return;
+        }
+
+        flow.windowId = undefined;
+        if (!canCancel(flow.status)) {
+          return;
         }
 
         yield* cancelFlow({
@@ -256,34 +389,16 @@ export const AuthFlowServiceLive = Layer.scoped(
         });
       });
 
-    const pruneExpiredFlows = Effect.gen(function* () {
-      const now = Date.now();
-      for (const [providerID, flow] of flows) {
-        if (flow.expiresAt > now || isTerminalStatus(flow.status)) {
-          continue;
-        }
-
-        yield* cancelFlow({
-          providerID,
-          reason: "expired",
-        });
-      }
-    });
-
     const onWindowRemoved: Parameters<typeof browser.windows.onRemoved.addListener>[0] =
       (windowId) => {
-        void Effect.runPromise(handleWindowClosed(windowId)).catch(() => undefined);
+        Effect.runFork(handleWindowClosed(windowId).pipe(Effect.catchAll(() => Effect.void)));
       };
 
     browser.windows?.onRemoved.addListener(onWindowRemoved);
-    const sweepTimer = setInterval(() => {
-      void Effect.runPromise(pruneExpiredFlows).catch(() => undefined);
-    }, AUTH_FLOW_SWEEP_INTERVAL_MS);
 
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         browser.windows?.onRemoved.removeListener(onWindowRemoved);
-        clearInterval(sweepTimer);
       }),
     );
 
@@ -320,11 +435,7 @@ export const AuthFlowServiceLive = Layer.scoped(
               };
             }
 
-            providerWindows.delete(providerID);
-            if (typeof flow.windowId === "number") {
-              windowProviders.delete(flow.windowId);
-            }
-            flow.windowId = undefined;
+            clearWindowReference(flow);
           }
 
           const url = new URL(browser.runtime.getURL("/connect.html"));
@@ -356,10 +467,7 @@ export const AuthFlowServiceLive = Layer.scoped(
             });
           }
 
-          flow.windowId = windowRef.id;
-          providerWindows.set(providerID, windowRef.id);
-          windowProviders.set(windowRef.id, providerID);
-          yield* setFlow(flow);
+          setWindowReference(flow, windowRef.id);
 
           return {
             providerID,
@@ -367,43 +475,11 @@ export const AuthFlowServiceLive = Layer.scoped(
             windowId: windowRef.id,
           };
         }),
-      getProviderAuthFlow: (providerID: string) =>
-        Effect.gen(function* () {
-          const flow = flows.get(providerID);
-          if (!flow) {
-            return {
-              providerID,
-              result: yield* idleSnapshot(providerID),
-            };
-          }
-
-          if (flow.expiresAt <= Date.now() && !isTerminalStatus(flow.status)) {
-            return {
-              providerID,
-              result: yield* cancelFlow({
-                providerID,
-                reason: "expired",
-              }),
-            };
-          }
-
-          return {
-            providerID,
-            result: snapshot(flow),
-          };
-        }),
+      getProviderAuthFlow: (providerID: string) => resolveProviderAuthFlow(providerID),
       streamProviderAuthFlow: (providerID: string) =>
         Stream.unwrap(
           Effect.gen(function* () {
-            const initial = yield* idleSnapshot(providerID).pipe(
-              Effect.catchAll(() =>
-                Effect.succeed(fallbackIdleSnapshot(providerID)),
-              ),
-              Effect.map((result) => ({
-                providerID,
-                result,
-              })),
-            );
+            const initial = yield* resolveProviderAuthFlow(providerID);
 
             return Stream.concat(
               Stream.make(initial),
@@ -412,16 +488,23 @@ export const AuthFlowServiceLive = Layer.scoped(
                 Stream.filterMap((entries) =>
                   Option.fromNullable(entries.get(providerID)),
                 ),
-                Stream.changesWith((left, right) =>
-                  sameSnapshot(left.result, right.result),
-                ),
               ),
             );
           }),
         ),
       startProviderAuthFlow: (input) =>
         Effect.gen(function* () {
-          const flow = yield* ensureFlow(input.providerID);
+          const current = flows.get(input.providerID);
+          const flow =
+            current && !isTerminalStatus(current.status)
+              ? current
+              : yield* buildIdleFlow(input.providerID, {
+                  windowId: current?.windowId,
+                });
+
+          if (flow !== current) {
+            flows.set(input.providerID, flow);
+          }
 
           if (flow.status === "authorizing") {
             return yield* new RuntimeValidationError({
@@ -446,7 +529,7 @@ export const AuthFlowServiceLive = Layer.scoped(
           flow.controller = new AbortController();
           yield* setFlow(flow);
 
-          const task = Effect.runPromise(
+          const fiber = yield* Effect.forkIn(
             startProviderAuth({
               providerID: input.providerID,
               methodID: selected.id,
@@ -463,25 +546,18 @@ export const AuthFlowServiceLive = Layer.scoped(
                   yield* setFlow(latest);
                 }),
             }),
+            serviceScope,
           );
-          flow.task = task;
+          flow.fiber = fiber;
 
-          const exit = yield* Effect.exit(
-            Effect.tryPromise({
-              try: () => task,
-              catch: (error) => error,
-            }),
-          );
+          const exit = yield* Fiber.await(fiber);
 
           const latest = flows.get(input.providerID);
           if (!latest) {
-            return {
-              providerID: input.providerID,
-              result: yield* idleSnapshot(input.providerID),
-            };
+            return yield* resolveProviderAuthFlow(input.providerID);
           }
 
-          if (latest !== flow) {
+          if (latest !== flow || latest.status !== "authorizing") {
             return {
               providerID: input.providerID,
               result: snapshot(latest),
@@ -503,11 +579,15 @@ export const AuthFlowServiceLive = Layer.scoped(
             };
           }
 
-          const failure = Cause.squash(exit.cause);
-          if (latest.controller?.signal.aborted) {
+          const canceled =
+            latest.controller?.signal.aborted === true ||
+            Cause.isInterruptedOnly(exit.cause);
+
+          if (canceled) {
             latest.status = "canceled";
             latest.error = "Authentication canceled.";
           } else {
+            const failure = Cause.squash(exit.cause);
             latest.status = "error";
             latest.error = toAuthFlowErrorSummary(failure);
             console.error("[auth-flow] provider auth failed", {
@@ -538,27 +618,26 @@ export const AuthFlowServiceLive = Layer.scoped(
         ),
       disconnectProvider: (providerID: string) =>
         Effect.gen(function* () {
-          yield* cancelFlow({
-            providerID,
-            reason: "disconnect",
-          });
+          const current = flows.get(providerID);
+          if (current) {
+            current.instruction = undefined;
+            current.error = undefined;
+            yield* interruptExecution(current);
+          }
+
           yield* disconnectProviderAuth(providerID);
           yield* catalog.refreshCatalogForProvider(providerID);
 
-          const idle = yield* idleSnapshot(providerID);
-          yield* publishSnapshot(providerID, idle);
-          flows.set(providerID, {
-            ...toSnapshotState(providerID, idle.methods),
-            windowId: providerWindows.get(providerID),
+          const next = yield* buildIdleFlow(providerID, {
+            windowId: current?.windowId,
           });
+          yield* setFlow(next);
 
           return {
             providerID,
             connected: false,
           };
         }),
-      handleWindowClosed: (windowId: number) =>
-        handleWindowClosed(windowId).pipe(Effect.catchAll(() => Effect.void)),
     } satisfies AuthFlowServiceApi;
   }),
 );

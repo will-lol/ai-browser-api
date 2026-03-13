@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import * as Effect from "effect/Effect";
 import {
   type OAuthCallbackRequestListener,
   type OAuthCallbackRequestDetails,
@@ -47,8 +48,6 @@ function buildOptions(input?: {
   onBeforeRequest?: OAuthWebRequestOnBeforeRequest;
   signal?: AbortSignal;
   timeoutMs?: number;
-  onListenerArmed?: () => void;
-  onIntercepted?: (url: string) => void;
 }) {
   return {
     onBeforeRequest: input?.onBeforeRequest,
@@ -60,27 +59,19 @@ function buildOptions(input?: {
     unsupportedErrorMessage: "custom unsupported message",
     timeoutErrorMessage: "custom timeout message",
     registerListenerErrorPrefix: "custom register failure",
-    onListenerArmed: input?.onListenerArmed,
-    onIntercepted: input?.onIntercepted,
   };
 }
 
 describe("waitForOAuthCallback", () => {
-  it("resolves on main_frame callback, emits hooks, and cleans listener once", async () => {
+  it("resolves on main_frame callback and cleans listener once", async () => {
     const harness = createOnBeforeRequestHarness();
-    let armedCalls = 0;
-    let interceptedUrl: string | undefined;
 
-    const wait = waitForOAuthCallback(
-      buildOptions({
-        onBeforeRequest: harness.onBeforeRequest,
-        onListenerArmed: () => {
-          armedCalls += 1;
-        },
-        onIntercepted: (url) => {
-          interceptedUrl = url;
-        },
-      }),
+    const wait = Effect.runPromise(
+      waitForOAuthCallback(
+        buildOptions({
+          onBeforeRequest: harness.onBeforeRequest,
+        }),
+      ),
     );
 
     const listener = harness.getListener();
@@ -98,17 +89,17 @@ describe("waitForOAuthCallback", () => {
     } as OAuthCallbackRequestDetails);
 
     assert.equal(await wait, callbackUrl);
-    assert.equal(armedCalls, 1);
-    assert.equal(interceptedUrl, callbackUrl);
     assert.equal(harness.getRemoveCalls(), 1);
   });
 
   it("ignores non-main_frame requests", async () => {
     const harness = createOnBeforeRequestHarness();
-    const wait = waitForOAuthCallback(
-      buildOptions({
-        onBeforeRequest: harness.onBeforeRequest,
-      }),
+    const wait = Effect.runPromise(
+      waitForOAuthCallback(
+        buildOptions({
+          onBeforeRequest: harness.onBeforeRequest,
+        }),
+      ),
     );
     const listener = harness.getListener();
     assert.ok(listener);
@@ -135,10 +126,12 @@ describe("waitForOAuthCallback", () => {
 
   it("ignores non-matching urls", async () => {
     const harness = createOnBeforeRequestHarness();
-    const wait = waitForOAuthCallback(
-      buildOptions({
-        onBeforeRequest: harness.onBeforeRequest,
-      }),
+    const wait = Effect.runPromise(
+      waitForOAuthCallback(
+        buildOptions({
+          onBeforeRequest: harness.onBeforeRequest,
+        }),
+      ),
     );
     const listener = harness.getListener();
     assert.ok(listener);
@@ -166,10 +159,12 @@ describe("waitForOAuthCallback", () => {
   it("throws provider-defined unsupported error when webRequest is unavailable", async () => {
     await assert.rejects(
       () =>
-        waitForOAuthCallback(
-          buildOptions({
-            onBeforeRequest: undefined,
-          }),
+        Effect.runPromise(
+          waitForOAuthCallback(
+            buildOptions({
+              onBeforeRequest: undefined,
+            }),
+          ),
         ),
       /custom unsupported message/,
     );
@@ -182,10 +177,12 @@ describe("waitForOAuthCallback", () => {
 
     await assert.rejects(
       () =>
-        waitForOAuthCallback(
-          buildOptions({
-            onBeforeRequest: harness.onBeforeRequest,
-          }),
+        Effect.runPromise(
+          waitForOAuthCallback(
+            buildOptions({
+              onBeforeRequest: harness.onBeforeRequest,
+            }),
+          ),
         ),
       /custom register failure: listener registration boom/,
     );
@@ -196,11 +193,13 @@ describe("waitForOAuthCallback", () => {
     const harness = createOnBeforeRequestHarness();
     const controller = new AbortController();
 
-    const wait = waitForOAuthCallback(
-      buildOptions({
-        onBeforeRequest: harness.onBeforeRequest,
-        signal: controller.signal,
-      }),
+    const wait = Effect.runPromise(
+      waitForOAuthCallback(
+        buildOptions({
+          onBeforeRequest: harness.onBeforeRequest,
+          signal: controller.signal,
+        }),
+      ),
     );
     controller.abort();
 
@@ -213,11 +212,13 @@ describe("waitForOAuthCallback", () => {
 
     await assert.rejects(
       () =>
-        waitForOAuthCallback(
-          buildOptions({
-            onBeforeRequest: harness.onBeforeRequest,
-            timeoutMs: 20,
-          }),
+        Effect.runPromise(
+          waitForOAuthCallback(
+            buildOptions({
+              onBeforeRequest: harness.onBeforeRequest,
+              timeoutMs: 20,
+            }),
+          ),
         ),
       /custom timeout message/,
     );

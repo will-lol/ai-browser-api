@@ -332,23 +332,19 @@ function waitForCodexOAuthCallback(
   onBeforeRequest: OAuthWebRequestOnBeforeRequest | undefined = browser
     ?.webRequest?.onBeforeRequest,
 ) {
-  return Effect.tryPromise({
-    try: () =>
-      waitForOAuthCallback({
-        signal,
-        onBeforeRequest,
-        urlPattern: CODEX_REDIRECT_URL_PATTERN,
-        matchesUrl: isCodexOAuthCallbackURL,
-        timeoutMs: CODEX_CALLBACK_TIMEOUT_MS,
-        unsupportedErrorMessage:
-          "Codex browser OAuth is unavailable: webRequest callback interception is not supported in this browser. Use ChatGPT Pro/Plus (headless) device auth instead.",
-        timeoutErrorMessage:
-          "Timed out waiting for Codex OAuth callback on http://localhost:1455/auth/callback.",
-        registerListenerErrorPrefix:
-          "Failed to register Codex OAuth callback listener",
-      }),
-    catch: (error) => toOpenAIError("oauth.waitForCallback", error),
-  });
+  return waitForOAuthCallback({
+    signal,
+    onBeforeRequest,
+    urlPattern: CODEX_REDIRECT_URL_PATTERN,
+    matchesUrl: isCodexOAuthCallbackURL,
+    timeoutMs: CODEX_CALLBACK_TIMEOUT_MS,
+    unsupportedErrorMessage:
+      "Codex browser OAuth is unavailable: webRequest callback interception is not supported in this browser. Use ChatGPT Pro/Plus (headless) device auth instead.",
+    timeoutErrorMessage:
+      "Timed out waiting for Codex OAuth callback on http://localhost:1455/auth/callback.",
+    registerListenerErrorPrefix:
+      "Failed to register Codex OAuth callback listener",
+  }).pipe(Effect.mapError((error) => toOpenAIError("oauth.waitForCallback", error)));
 }
 
 function exchangeCodeForTokens(

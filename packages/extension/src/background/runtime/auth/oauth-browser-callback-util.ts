@@ -1,4 +1,5 @@
 import { browser } from "@wxt-dev/browser";
+import * as Effect from "effect/Effect";
 
 export type OAuthWebRequestOnBeforeRequest = NonNullable<
   NonNullable<typeof browser.webRequest>["onBeforeRequest"]
@@ -19,8 +20,6 @@ type WaitForOAuthCallbackOptions = {
   registerListenerErrorPrefix: string;
   signal?: AbortSignal;
   onBeforeRequest?: OAuthWebRequestOnBeforeRequest;
-  onListenerArmed?: () => void;
-  onIntercepted?: (url: string) => void;
 };
 
 function toErrorMessage(error: unknown) {
@@ -28,38 +27,25 @@ function toErrorMessage(error: unknown) {
   return String(error);
 }
 
-export async function waitForOAuthCallback(
-  options: WaitForOAuthCallbackOptions,
-) {
-  const onBeforeRequest =
-    options.onBeforeRequest ?? browser?.webRequest?.onBeforeRequest;
-  if (!onBeforeRequest) {
-    throw new Error(options.unsupportedErrorMessage);
-  }
+export function waitForOAuthCallback(options: WaitForOAuthCallbackOptions) {
+  return Effect.async<string, Error>(
+    (resume: (_: Effect.Effect<string, Error>) => void) => {
+    const onBeforeRequest =
+      options.onBeforeRequest ?? browser?.webRequest?.onBeforeRequest;
+    if (!onBeforeRequest) {
+      resume(Effect.fail(new Error(options.unsupportedErrorMessage)));
+      return;
+    }
 
-  return await new Promise<string>((resolve, reject) => {
     let settled = false;
-    const timeoutId = setTimeout(() => {
-      finalize(() => reject(new Error(options.timeoutErrorMessage)));
-    }, options.timeoutMs);
+    let cleanedUp = false;
 
-    const listener: OAuthCallbackRequestListener = (details) => {
-      if (details.type !== "main_frame") return undefined;
-      if (!options.matchesUrl(details.url)) return undefined;
+    const cleanup = () => {
+      if (cleanedUp) {
+        return;
+      }
 
-      options.onIntercepted?.(details.url);
-      finalize(() => resolve(details.url));
-      return undefined;
-    };
-
-    const onAbort = () => {
-      finalize(() => reject(new Error("Authentication canceled")));
-    };
-
-    const finalize = (action: () => void) => {
-      if (settled) return;
-      settled = true;
-
+      cleanedUp = true;
       clearTimeout(timeoutId);
       try {
         onBeforeRequest.removeListener(listener);
@@ -67,18 +53,42 @@ export async function waitForOAuthCallback(
         // Ignore teardown errors while auth is ending.
       }
       options.signal?.removeEventListener("abort", onAbort);
-      action();
     };
+
+    const finalize = (effect: Effect.Effect<string, Error>) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      resume(effect);
+    };
+
+    const listener: OAuthCallbackRequestListener = (details) => {
+      if (details.type !== "main_frame") return undefined;
+      if (!options.matchesUrl(details.url)) return undefined;
+
+      finalize(Effect.succeed(details.url));
+      return undefined;
+    };
+
+    const onAbort = () => {
+      finalize(Effect.fail(new Error("Authentication canceled")));
+    };
+
+    const timeoutId = setTimeout(() => {
+      finalize(Effect.fail(new Error(options.timeoutErrorMessage)));
+    }, options.timeoutMs);
 
     try {
       onBeforeRequest.addListener(listener, {
         urls: [options.urlPattern],
         types: ["main_frame"],
       });
-      options.onListenerArmed?.();
     } catch (error) {
-      finalize(() =>
-        reject(
+      finalize(
+        Effect.fail(
           new Error(
             `${options.registerListenerErrorPrefix}: ${toErrorMessage(error)}`,
           ),
@@ -89,8 +99,11 @@ export async function waitForOAuthCallback(
 
     if (options.signal?.aborted) {
       onAbort();
-      return;
+      return Effect.sync(cleanup);
     }
+
     options.signal?.addEventListener("abort", onAbort, { once: true });
-  });
+    return Effect.sync(cleanup);
+    },
+  );
 }

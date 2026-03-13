@@ -127,10 +127,15 @@ export interface AuthFlowServiceApi {
     providerID: string;
     result: RuntimeAuthFlowSnapshot;
   }>;
-  readonly streamProviderAuthFlow: (providerID: string) => Stream.Stream<{
-    providerID: string;
-    result: RuntimeAuthFlowSnapshot;
-  }>;
+  readonly streamProviderAuthFlow: (
+    providerID: string,
+  ) => Stream.Stream<
+    {
+      providerID: string;
+      result: RuntimeAuthFlowSnapshot;
+    },
+    unknown
+  >;
   readonly startProviderAuthFlow: (input: {
     providerID: string;
     methodID: string;
@@ -143,7 +148,6 @@ export interface AuthFlowServiceApi {
   readonly disconnectProvider: (
     providerID: string,
   ) => AppEffect<RuntimeDisconnectProviderResponse>;
-  readonly handleWindowClosed: (windowId: number) => AppEffect<void, never>;
 }
 
 export class AuthFlowService extends Context.Tag(
