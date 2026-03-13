@@ -62,44 +62,84 @@ export function makeAuthVaultStore(vault: SecretVaultApi) {
         }),
     });
 
-  return {
-    getAuth: (providerID: string) =>
-      Effect.gen(function* () {
-        const row = yield* readAuthRow(providerID);
-        if (!row) return undefined;
-
-        return yield* vault.openAuth(row).pipe(
-          Effect.catchTag("VaultDecryptError", (error) =>
-            Effect.sync(() => {
-              warnCorruptAuth(providerID, error);
-              return undefined;
-            }),
-          ),
-        );
+  const readAllAuthRows = Effect.tryPromise({
+    try: () => runtimeDb.auth.toArray(),
+    catch: () =>
+      new VaultKeyUnavailableError({
+        operation: "listAuth",
+        message: "Failed to list auth rows.",
       }),
-    listAuth: Effect.gen(function* () {
-      const rows = yield* Effect.tryPromise({
-        try: () => runtimeDb.auth.toArray(),
-        catch: () =>
-          new VaultKeyUnavailableError({
-            operation: "listAuth",
-            message: "Failed to list auth rows.",
-          }),
+  });
+
+  const openAuthRow = (row: {
+    providerID: string;
+    recordType: "api" | "oauth";
+    version: number;
+    iv: Uint8Array;
+    ciphertext: ArrayBuffer;
+    createdAt: number;
+    updatedAt: number;
+  }) =>
+    vault.openAuth(row).pipe(
+      Effect.catchTag("VaultDecryptError", (error) =>
+        Effect.sync(() => {
+          warnCorruptAuth(row.providerID, error);
+          return undefined;
+        }),
+      ),
+    );
+
+  const readAuthRecord = (providerID: string) =>
+    Effect.flatMap(readAuthRow(providerID), (row) => {
+      if (!row) {
+        return Effect.succeed(undefined);
+      }
+
+      return openAuthRow(row);
+    });
+
+  const updateProviderConnection = (
+    providerID: string,
+    connected: boolean,
+    updatedAt: number,
+  ) =>
+    Effect.gen(function* () {
+      const provider = yield* Effect.tryPromise({
+        try: () => runtimeDb.providers.get(providerID),
+        catch: (error) => error,
       });
+
+      if (!provider) {
+        return;
+      }
+
+      yield* Effect.tryPromise({
+        try: () =>
+          runtimeDb.providers.put({
+            ...provider,
+            connected,
+            updatedAt,
+          }),
+        catch: (error) => error,
+      });
+    });
+
+  return {
+    getAuth: (providerID: string) => readAuthRecord(providerID),
+    listAuth: Effect.gen(function* () {
+      const rows = yield* readAllAuthRows;
 
       const records = yield* Effect.forEach(
         rows,
         (row) =>
-          vault.openAuth(row).pipe(
-            Effect.map((record) => ({
-              providerID: row.providerID,
-              record,
-            })),
-            Effect.catchTag("VaultDecryptError", (error) =>
-              Effect.sync(() => {
-                warnCorruptAuth(row.providerID, error);
-                return undefined;
-              }),
+          openAuthRow(row).pipe(
+            Effect.map((record) =>
+              record
+                ? {
+                    providerID: row.providerID,
+                    record,
+                  }
+                : undefined,
             ),
           ),
         { concurrency: 1 },
@@ -114,19 +154,7 @@ export function makeAuthVaultStore(vault: SecretVaultApi) {
     }),
     setAuth: (providerID: string, value: AuthResult) =>
       Effect.gen(function* () {
-        const existing = yield* readAuthRow(providerID).pipe(
-          Effect.flatMap((row) => {
-            if (!row) return Effect.succeed(undefined);
-            return vault.openAuth(row).pipe(
-              Effect.catchTag("VaultDecryptError", (error) =>
-                Effect.sync(() => {
-                  warnCorruptAuth(providerID, error);
-                  return undefined;
-                }),
-              ),
-            );
-          }),
-        );
+        const existing = yield* readAuthRecord(providerID);
         const auth = buildAuthRecord(existing, value);
         const sealed = yield* vault.sealAuth({
           providerID,
@@ -140,24 +168,7 @@ export function makeAuthVaultStore(vault: SecretVaultApi) {
               catch: (error) => error,
             });
 
-            const provider = yield* Effect.tryPromise({
-              try: () => runtimeDb.providers.get(providerID),
-              catch: (error) => error,
-            });
-
-            if (!provider) {
-              return;
-            }
-
-            yield* Effect.tryPromise({
-              try: () =>
-                runtimeDb.providers.put({
-                  ...provider,
-                  connected: true,
-                  updatedAt: auth.updatedAt,
-                }),
-              catch: (error) => error,
-            });
+            yield* updateProviderConnection(providerID, true, auth.updatedAt);
           }),
         ).pipe(
           Effect.mapError(() =>
@@ -178,24 +189,7 @@ export function makeAuthVaultStore(vault: SecretVaultApi) {
             catch: (error) => error,
           });
 
-          const provider = yield* Effect.tryPromise({
-            try: () => runtimeDb.providers.get(providerID),
-            catch: (error) => error,
-          });
-
-          if (!provider) {
-            return;
-          }
-
-          yield* Effect.tryPromise({
-            try: () =>
-              runtimeDb.providers.put({
-                ...provider,
-                connected: false,
-                updatedAt: now(),
-              }),
-            catch: (error) => error,
-          });
+          yield* updateProviderConnection(providerID, false, now());
         }),
       ).pipe(
         Effect.mapError(() =>

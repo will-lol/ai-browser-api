@@ -20,6 +20,43 @@ function authAdditionalData(
   );
 }
 
+function encodeAuthRecord(providerID: string, record: AuthRecord) {
+  return Effect.try({
+    try: () => Uint8Array.from(encoder.encode(JSON.stringify(record))),
+    catch: () =>
+      new VaultEncryptError({
+        providerID,
+        message: `Failed to serialize auth for provider ${providerID}.`,
+      }),
+  });
+}
+
+function decodeAuthRecord(
+  row: RuntimeDbAuth,
+  plaintext: ArrayBuffer,
+): Effect.Effect<AuthRecord, VaultDecryptError> {
+  return Effect.gen(function* () {
+    const parsed = yield* Effect.try({
+      try: () => JSON.parse(decoder.decode(new Uint8Array(plaintext))),
+      catch: () =>
+        new VaultDecryptError({
+          providerID: row.providerID,
+          message: `Failed to parse auth payload for provider ${row.providerID}.`,
+        }),
+    });
+
+    const authRecord = decodeSchemaOrUndefined(authRecordSchema, parsed);
+    if (!authRecord) {
+      return yield* new VaultDecryptError({
+        providerID: row.providerID,
+        message: `Auth payload for provider ${row.providerID} is invalid.`,
+      });
+    }
+
+    return authRecord;
+  });
+}
+
 export function makeSecretVault(keyProvider: VaultKeyProviderApi) {
   return {
     sealAuth: ({
@@ -34,14 +71,7 @@ export function makeSecretVault(keyProvider: VaultKeyProviderApi) {
         const iv = yield* Effect.sync(() =>
           Uint8Array.from(crypto.getRandomValues(new Uint8Array(12))),
         );
-        const payload = yield* Effect.try({
-          try: () => Uint8Array.from(encoder.encode(JSON.stringify(record))),
-          catch: () =>
-            new VaultEncryptError({
-              providerID,
-              message: `Failed to serialize auth for provider ${providerID}.`,
-            }),
-        });
+        const payload = yield* encodeAuthRecord(providerID, record);
         const ciphertext = yield* Effect.tryPromise({
           try: () =>
             crypto.subtle.encrypt(
@@ -105,24 +135,8 @@ export function makeSecretVault(keyProvider: VaultKeyProviderApi) {
               message: `Failed to decrypt auth for provider ${row.providerID}.`,
             }),
         });
-        const parsed = yield* Effect.try({
-          try: () => JSON.parse(decoder.decode(new Uint8Array(plaintext))),
-          catch: () =>
-            new VaultDecryptError({
-              providerID: row.providerID,
-              message: `Failed to parse auth payload for provider ${row.providerID}.`,
-            }),
-        });
 
-        const authRecord = decodeSchemaOrUndefined(authRecordSchema, parsed);
-        if (!authRecord) {
-          return yield* new VaultDecryptError({
-            providerID: row.providerID,
-            message: `Auth payload for provider ${row.providerID} is invalid.`,
-          });
-        }
-
-        return authRecord;
+        return yield* decodeAuthRecord(row, plaintext);
       }),
   };
 }

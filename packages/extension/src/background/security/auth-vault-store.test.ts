@@ -136,8 +136,9 @@ function createProviderRow(providerID: string) {
   };
 }
 
-function createStore() {
-  return makeAuthVaultStore(makeSecretVault(makeVaultKeyProvider()));
+async function createStore() {
+  const keyProvider = await Effect.runPromise(makeVaultKeyProvider());
+  return makeAuthVaultStore(makeSecretVault(keyProvider));
 }
 
 beforeEach(() => {
@@ -154,7 +155,7 @@ afterAll(() => {
 describe("AuthVaultStore", () => {
   it("writes sealed auth rows and returns decrypted auth", async () => {
     providerRows.set("openai", createProviderRow("openai"));
-    const store = createStore();
+    const store = await createStore();
 
     const stored = await Effect.runPromise(
       store.setAuth("openai", {
@@ -191,7 +192,7 @@ describe("AuthVaultStore", () => {
 
   it("removes auth and marks the provider disconnected", async () => {
     providerRows.set("gitlab", createProviderRow("gitlab"));
-    const store = createStore();
+    const store = await createStore();
 
     await Effect.runPromise(
       store.setAuth("gitlab", {
@@ -210,11 +211,11 @@ describe("AuthVaultStore", () => {
   });
 
   it("treats corrupt auth rows as missing and only warns once", async () => {
-    providerRows.set("broken", createProviderRow("broken"));
-    const store = createStore();
+    providerRows.set("broken_get", createProviderRow("broken_get"));
+    const store = await createStore();
 
     await Effect.runPromise(
-      store.setAuth("broken", {
+      store.setAuth("broken_get", {
         type: "api",
         key: "sk-corrupt",
         methodID: "apikey",
@@ -222,12 +223,12 @@ describe("AuthVaultStore", () => {
       }),
     );
 
-    const corruptRow = authRows.get("broken");
+    const corruptRow = authRows.get("broken_get");
     if (!corruptRow) {
       throw new Error("Expected broken auth row to exist");
     }
 
-    authRows.set("broken", {
+    authRows.set("broken_get", {
       ...corruptRow,
       recordType: "oauth",
     });
@@ -237,11 +238,111 @@ describe("AuthVaultStore", () => {
     console.warn = warnMock;
 
     try {
-      const first = await Effect.runPromise(store.getAuth("broken"));
-      const second = await Effect.runPromise(store.getAuth("broken"));
+      const first = await Effect.runPromise(store.getAuth("broken_get"));
+      const second = await Effect.runPromise(store.getAuth("broken_get"));
 
       expect(first).toBeUndefined();
       expect(second).toBeUndefined();
+      expect(warnMock).toHaveBeenCalledTimes(1);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it("skips corrupt rows during listAuth and only warns once", async () => {
+    const store = await createStore();
+
+    await Effect.runPromise(
+      store.setAuth("openai_list", {
+        type: "api",
+        key: "sk-valid",
+        methodID: "apikey",
+        methodType: "apikey",
+      }),
+    );
+    await Effect.runPromise(
+      store.setAuth("broken_list", {
+        type: "oauth",
+        access: "access-token",
+        refresh: "refresh-token",
+        methodID: "oauth",
+        methodType: "oauth",
+      }),
+    );
+
+    const corruptRow = authRows.get("broken_list");
+    if (!corruptRow) {
+      throw new Error("Expected broken_list auth row to exist");
+    }
+
+    authRows.set("broken_list", {
+      ...corruptRow,
+      recordType: "api",
+    });
+
+    const originalWarn = console.warn;
+    const warnMock = mock(() => undefined);
+    console.warn = warnMock;
+
+    try {
+      const first = await Effect.runPromise(store.listAuth);
+      const second = await Effect.runPromise(store.listAuth);
+
+      expect(first).toHaveProperty("openai_list");
+      expect(first).not.toHaveProperty("broken_list");
+      expect(second).toHaveProperty("openai_list");
+      expect(second).not.toHaveProperty("broken_list");
+      expect(warnMock).toHaveBeenCalledTimes(1);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it("treats corrupt existing auth as missing when writing a fresh record", async () => {
+    providerRows.set("recover", createProviderRow("recover"));
+    const store = await createStore();
+
+    await Effect.runPromise(
+      store.setAuth("recover", {
+        type: "api",
+        key: "sk-old",
+        methodID: "apikey",
+        methodType: "apikey",
+      }),
+    );
+
+    const corruptRow = authRows.get("recover");
+    if (!corruptRow) {
+      throw new Error("Expected recover auth row to exist");
+    }
+
+    authRows.set("recover", {
+      ...corruptRow,
+      recordType: "oauth",
+    });
+
+    const originalWarn = console.warn;
+    const warnMock = mock(() => undefined);
+    console.warn = warnMock;
+
+    try {
+      const stored = await Effect.runPromise(
+        store.setAuth("recover", {
+          type: "api",
+          key: "sk-new",
+          methodID: "apikey",
+          methodType: "apikey",
+        }),
+      );
+
+      expect(stored).toEqual({
+        type: "api",
+        key: "sk-new",
+        methodID: "apikey",
+        methodType: "apikey",
+        createdAt: 103,
+        updatedAt: 104,
+      });
       expect(warnMock).toHaveBeenCalledTimes(1);
     } finally {
       console.warn = originalWarn;

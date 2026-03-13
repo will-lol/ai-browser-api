@@ -12,8 +12,8 @@ export type RuntimeSecurityServices =
   | AuthVaultStore;
 
 export const RuntimeSecurityLive = Layer.effectContext(
-  Effect.sync(() => {
-    const keyProvider = makeVaultKeyProvider();
+  Effect.gen(function* () {
+    const keyProvider = yield* makeVaultKeyProvider();
     const secretVault = makeSecretVault(keyProvider);
     const authVaultStore = makeAuthVaultStore(secretVault);
 

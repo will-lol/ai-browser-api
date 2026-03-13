@@ -17,14 +17,17 @@ async function createSecretVault() {
     throw new Error("Expected AES vault key to be a CryptoKey");
   }
 
-  return makeSecretVault({
-    getOrCreateAuthKey: Effect.succeed(key),
-  });
+  return {
+    key,
+    vault: makeSecretVault({
+      getOrCreateAuthKey: Effect.succeed(key),
+    }),
+  };
 }
 
 describe("SecretVault", () => {
   it("round-trips API key auth records", async () => {
-    const vault = await createSecretVault();
+    const { vault } = await createSecretVault();
     const record: AuthRecord = {
       type: "api",
       key: "sk-test",
@@ -53,7 +56,7 @@ describe("SecretVault", () => {
   });
 
   it("round-trips OAuth auth records", async () => {
-    const vault = await createSecretVault();
+    const { vault } = await createSecretVault();
     const record: AuthRecord = {
       type: "oauth",
       access: "access-token",
@@ -79,7 +82,7 @@ describe("SecretVault", () => {
   });
 
   it("fails decryption when auth metadata used as AAD changes", async () => {
-    const vault = await createSecretVault();
+    const { vault } = await createSecretVault();
     const sealed = await Effect.runPromise(
       vault.sealAuth({
         providerID: "openai",
@@ -102,5 +105,43 @@ describe("SecretVault", () => {
         }),
       ),
     ).rejects.toBeDefined();
+  });
+
+  it("fails when the decrypted payload does not match the auth schema", async () => {
+    const { key, vault } = await createSecretVault();
+    const iv = Uint8Array.from(crypto.getRandomValues(new Uint8Array(12)));
+    const payload = Uint8Array.from(
+      new TextEncoder().encode(JSON.stringify({ nope: true })),
+    );
+    const ciphertext = await crypto.subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv,
+        additionalData: Uint8Array.from(
+          new TextEncoder().encode("llm-bridge-auth:v1:openai:api"),
+        ),
+      },
+      key,
+      payload,
+    );
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        vault.openAuth({
+          providerID: "openai",
+          recordType: "api",
+          version: 1,
+          iv,
+          ciphertext,
+          createdAt: 1,
+          updatedAt: 2,
+        }),
+      ),
+    );
+
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      expect(result.left._tag).toBe("VaultDecryptError");
+    }
   });
 });
