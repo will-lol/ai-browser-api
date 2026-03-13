@@ -13,7 +13,10 @@ import type { ProviderInfo } from "./provider-registry-types";
 const CATALOG_INITIALIZED_KEY = "catalogInitialized";
 
 function isCatalogInitialized() {
-  return Effect.promise(() => runtimeDb.meta.get(CATALOG_INITIALIZED_KEY)).pipe(
+  return Effect.tryPromise({
+    try: () => runtimeDb.meta.get(CATALOG_INITIALIZED_KEY),
+    catch: (error) => error,
+  }).pipe(
     Effect.map((value) => value?.value === true),
   );
 }

@@ -91,14 +91,25 @@ const doStreamMock = mock(async () => {
   });
 });
 
+let supportedUrlsValue: Record<string, RegExp[]> = {};
+let supportedUrlsError: Error | null = null;
+
 const adapter = {
-  createModel: mock(() => Effect.succeed({
-    provider: "openai",
-    modelId: "gpt-4o-mini",
-    specificationVersion: "v3",
-    doGenerate: doGenerateMock,
-    doStream: doStreamMock,
-  })),
+  createModel: mock(() =>
+    Effect.succeed({
+      provider: "openai",
+      modelId: "gpt-4o-mini",
+      specificationVersion: "v3",
+      get supportedUrls() {
+        if (supportedUrlsError) {
+          throw supportedUrlsError;
+        }
+        return supportedUrlsValue;
+      },
+      doGenerate: doGenerateMock,
+      doStream: doStreamMock,
+    }),
+  ),
 };
 
 mock.module("@/background/runtime/auth/auth-store", () => ({
@@ -132,6 +143,8 @@ mock.module("@/background/runtime/providers/adapters", () => ({
 
 const { runLanguageModelGenerate, runLanguageModelStream } =
   await import("@/background/runtime/execution/language-model-runtime");
+const { getRuntimeModelDescriptor } =
+  await import("@/background/runtime/execution/language-model-runtime");
 
 beforeEach(() => {
   getAuthMock.mockClear();
@@ -142,6 +155,8 @@ beforeEach(() => {
   doGenerateMock.mockClear();
   doStreamMock.mockClear();
   adapter.createModel.mockClear();
+  supportedUrlsValue = {};
+  supportedUrlsError = null;
 });
 
 afterAll(() => {
@@ -149,22 +164,46 @@ afterAll(() => {
 });
 
 describe("language-model-runtime error normalization", () => {
-  it("wraps generate provider failures as RuntimeUpstreamServiceError", async () => {
+  it("returns supportedUrls in the runtime model descriptor", async () => {
+    supportedUrlsValue = {
+      "image/*": [/^https:\/\/files\.openai\.com\/.*$/],
+    };
+
+    const result = await Effect.runPromise(
+      getRuntimeModelDescriptor({
+        modelID: "openai/gpt-4o-mini",
+        origin: "https://example.test",
+        sessionID: "session-1",
+        requestID: "request-describe",
+      }),
+    );
+
+    expect(result).toEqual({
+      provider: "openai",
+      modelId: "openai/gpt-4o-mini",
+      supportedUrls: supportedUrlsValue,
+    });
+  });
+
+  it("wraps provider-style descriptor failures as RuntimeUpstreamServiceError", async () => {
+    supportedUrlsError = new APICallError({
+      message: "Describe failed",
+      url: "https://api.openai.com/v1/models/gpt-4o-mini",
+      requestBodyValues: {},
+      statusCode: 429,
+      responseHeaders: {
+        "retry-after": "1",
+      },
+      isRetryable: true,
+    });
+
     const result = await Effect.runPromise(
       Effect.either(
-        runLanguageModelGenerate({
+        getRuntimeModelDescriptor({
           modelID: "openai/gpt-4o-mini",
           origin: "https://example.test",
           sessionID: "session-1",
-        requestID: "request-1",
-        options: {
-          prompt: [
-            {
-              role: "user",
-              content: [{ type: "text", text: "hello" }],
-            },
-          ],
-        },
+          requestID: "request-describe",
         }),
       ),
     );
@@ -172,15 +211,51 @@ describe("language-model-runtime error normalization", () => {
     expect("left" in result).toBe(true);
     if ("left" in result) {
       expect(result.left).toMatchObject({
-      _tag: "RuntimeUpstreamServiceError",
-      providerID: "openai",
-      operation: "generate",
-      statusCode: 429,
-      responseHeaders: {
-        "retry-after-ms": "1500",
-      },
-      retryable: true,
-      message: "Rate limited",
+        _tag: "RuntimeUpstreamServiceError",
+        providerID: "openai",
+        operation: "describe",
+        statusCode: 429,
+        responseHeaders: {
+          "retry-after": "1",
+        },
+        retryable: true,
+        message: "Describe failed",
+      } satisfies Partial<RuntimeUpstreamServiceError>);
+    }
+  });
+
+  it("wraps generate provider failures as RuntimeUpstreamServiceError", async () => {
+    const result = await Effect.runPromise(
+      Effect.either(
+        runLanguageModelGenerate({
+          modelID: "openai/gpt-4o-mini",
+          origin: "https://example.test",
+          sessionID: "session-1",
+          requestID: "request-1",
+          options: {
+            prompt: [
+              {
+                role: "user",
+                content: [{ type: "text", text: "hello" }],
+              },
+            ],
+          },
+        }),
+      ),
+    );
+
+    expect("left" in result).toBe(true);
+    if ("left" in result) {
+      expect(result.left).toMatchObject({
+        _tag: "RuntimeUpstreamServiceError",
+        providerID: "openai",
+        operation: "generate",
+        statusCode: 429,
+        responseHeaders: {
+          "retry-after-ms": "1500",
+        },
+        retryable: true,
+        message: "Rate limited",
       } satisfies Partial<RuntimeUpstreamServiceError>);
     }
   });
@@ -192,15 +267,15 @@ describe("language-model-runtime error normalization", () => {
           modelID: "openai/gpt-4o-mini",
           origin: "https://example.test",
           sessionID: "session-1",
-        requestID: "request-2",
-        options: {
-          prompt: [
-            {
-              role: "user",
-              content: [{ type: "text", text: "hello" }],
-            },
-          ],
-        },
+          requestID: "request-2",
+          options: {
+            prompt: [
+              {
+                role: "user",
+                content: [{ type: "text", text: "hello" }],
+              },
+            ],
+          },
         }),
       ),
     );
@@ -208,15 +283,15 @@ describe("language-model-runtime error normalization", () => {
     expect("left" in result).toBe(true);
     if ("left" in result) {
       expect(result.left).toMatchObject({
-      _tag: "RuntimeUpstreamServiceError",
-      providerID: "openai",
-      operation: "stream",
-      statusCode: 503,
-      responseHeaders: {
-        "retry-after": "2",
-      },
-      retryable: true,
-      message: "Overloaded",
+        _tag: "RuntimeUpstreamServiceError",
+        providerID: "openai",
+        operation: "stream",
+        statusCode: 503,
+        responseHeaders: {
+          "retry-after": "2",
+        },
+        retryable: true,
+        message: "Overloaded",
       } satisfies Partial<RuntimeUpstreamServiceError>);
     }
   });

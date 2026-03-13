@@ -43,6 +43,8 @@ const trustedTargetsById = new Map<
 >();
 let idSequence = 0;
 let nowValue = 100;
+let originsGetError: Error | null = null;
+let permissionsToArrayError: Error | null = null;
 
 function createCollection(rows: PendingRow[]) {
   return {
@@ -70,7 +72,12 @@ mock.module("@/background/runtime/core/constants", () => ({
 mock.module("@/background/storage/runtime-db", () => ({
   runtimeDb: {
     origins: {
-      get: async (origin: string) => originRows.get(origin),
+      get: async (origin: string) => {
+        if (originsGetError) {
+          throw originsGetError;
+        }
+        return originRows.get(origin);
+      },
       put: async (row: {
         origin: string;
         enabled: boolean;
@@ -89,10 +96,14 @@ mock.module("@/background/storage/runtime-db", () => ({
       },
       where: (_field: string) => ({
         equals: (value: string) => ({
-          toArray: async () =>
-            Array.from(permissionRows.values()).filter(
+          toArray: async () => {
+            if (permissionsToArrayError) {
+              throw permissionsToArrayError;
+            }
+            return Array.from(permissionRows.values()).filter(
               (row) => row.origin === value,
-            ),
+            );
+          },
         }),
       }),
     },
@@ -170,8 +181,10 @@ mock.module("@/background/runtime/core/util", () => ({
 
 const {
   createPermissionRequest,
+  getOriginPermissions,
   getModelPermission,
   listPendingRequests,
+  listPermissions,
 } = await import("./permissions");
 
 function setTrustedTarget(
@@ -213,6 +226,8 @@ beforeEach(() => {
   trustedTargetsById.clear();
   idSequence = 0;
   nowValue = 100;
+  originsGetError = null;
+  permissionsToArrayError = null;
 });
 
 afterAll(() => {
@@ -425,6 +440,87 @@ describe("getModelPermission", () => {
     );
 
     expect(result).toBe("denied");
+  });
+});
+
+describe("listPermissions", () => {
+  it("returns mapped permission rows for an origin", async () => {
+    permissionRows.set(`${TEST_ORIGIN}::openai/gpt-4o-mini`, {
+      id: `${TEST_ORIGIN}::openai/gpt-4o-mini`,
+      origin: TEST_ORIGIN,
+      modelId: "openai/gpt-4o-mini",
+      status: "allowed",
+      capabilities: ["text", "code"],
+      updatedAt: 42,
+    });
+    permissionRows.set(`${TEST_ORIGIN}::openai/gpt-4.1`, {
+      id: `${TEST_ORIGIN}::openai/gpt-4.1`,
+      origin: TEST_ORIGIN,
+      modelId: "openai/gpt-4.1",
+      status: "denied",
+      capabilities: ["text"],
+      updatedAt: 43,
+    });
+    permissionRows.set(`https://other.test::openai/gpt-4o-mini`, {
+      id: `https://other.test::openai/gpt-4o-mini`,
+      origin: "https://other.test",
+      modelId: "openai/gpt-4o-mini",
+      status: "pending",
+      capabilities: ["text"],
+      updatedAt: 99,
+    });
+
+    const result = await Effect.runPromise(listPermissions(TEST_ORIGIN));
+
+    expect(result).toEqual([
+      {
+        modelId: "openai/gpt-4o-mini",
+        status: "allowed",
+        capabilities: ["text", "code"],
+        updatedAt: 42,
+      },
+      {
+        modelId: "openai/gpt-4.1",
+        status: "denied",
+        capabilities: ["text"],
+        updatedAt: 43,
+      },
+    ]);
+  });
+
+  it("leaves permission-row read failures unnormalized on the live path", async () => {
+    permissionsToArrayError = new Error("db unavailable");
+
+    await expect(Effect.runPromise(listPermissions(TEST_ORIGIN))).rejects.toThrow(
+      /db unavailable/,
+    );
+  });
+});
+
+describe("getOriginPermissions", () => {
+  it("defaults enabled to true when the origin row is missing", async () => {
+    permissionRows.set(`${TEST_ORIGIN}::openai/gpt-4o-mini`, {
+      id: `${TEST_ORIGIN}::openai/gpt-4o-mini`,
+      origin: TEST_ORIGIN,
+      modelId: "openai/gpt-4o-mini",
+      status: "allowed",
+      capabilities: ["text"],
+      updatedAt: 17,
+    });
+
+    const result = await Effect.runPromise(getOriginPermissions(TEST_ORIGIN));
+
+    expect(result).toEqual({
+      enabled: true,
+      rules: {
+        "openai/gpt-4o-mini": {
+          modelId: "openai/gpt-4o-mini",
+          status: "allowed",
+          capabilities: ["text"],
+          updatedAt: 17,
+        },
+      },
+    });
   });
 });
 

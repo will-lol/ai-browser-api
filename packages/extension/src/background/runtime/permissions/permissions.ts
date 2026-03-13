@@ -35,10 +35,52 @@ export type CreatePermissionRequestResult =
       request: PermissionRequest;
     };
 
+function readOriginRow(origin: string) {
+  return Effect.tryPromise({
+    try: () => runtimeDb.origins.get(origin),
+    catch: (error) => error,
+  });
+}
+
+function readPermissionRow(origin: string, modelId: string) {
+  return Effect.tryPromise({
+    try: () => runtimeDb.permissions.get(runtimePermissionKey(origin, modelId)),
+    catch: (error) => error,
+  });
+}
+
+function readPermissionRows(origin: string) {
+  return Effect.tryPromise({
+    try: () => runtimeDb.permissions.where("origin").equals(origin).toArray(),
+    catch: (error) => error,
+  });
+}
+
+function readPendingRequestRow(requestId: string) {
+  return Effect.tryPromise({
+    try: () => runtimeDb.pendingRequests.get(requestId),
+    catch: (error) => error,
+  });
+}
+
+function readPendingRequestRows(origin?: string) {
+  return Effect.tryPromise({
+    try: () =>
+      runtimeDb.pendingRequests
+        .where("status")
+        .equals("pending")
+        .filter((item) => {
+          if (item.dismissed) return false;
+          if (!origin) return true;
+          return item.origin === origin;
+        })
+        .toArray(),
+    catch: (error) => error,
+  });
+}
+
 export function listPermissions(origin: string) {
-  return Effect.promise(() =>
-    runtimeDb.permissions.where("origin").equals(origin).toArray(),
-  ).pipe(
+  return readPermissionRows(origin).pipe(
     Effect.map((rows) =>
       rows.map((row) => ({
         modelId: row.modelId,
@@ -66,7 +108,7 @@ function toRuleMap(
 export function getOriginPermissions(origin: string) {
   return Effect.gen(function* () {
     const [originRow, rules] = yield* Effect.all([
-      Effect.promise(() => runtimeDb.origins.get(origin)),
+      readOriginRow(origin),
       listPermissions(origin),
     ]);
 
@@ -129,13 +171,11 @@ export function setModelPermission(
 export function getModelPermission(
   origin: string,
   modelId: string,
-): Effect.Effect<PermissionStatus> {
+): Effect.Effect<PermissionStatus, unknown> {
   return Effect.gen(function* () {
     const [originState, permission] = yield* Effect.all([
-      Effect.promise(() => runtimeDb.origins.get(origin)),
-      Effect.promise(() =>
-        runtimeDb.permissions.get(runtimePermissionKey(origin, modelId)),
-      ),
+      readOriginRow(origin),
+      readPermissionRow(origin, modelId),
     ]);
 
     if (originState && !originState.enabled) return "denied";
@@ -261,10 +301,7 @@ export function createPermissionRequest(input: {
 export function dismissPermissionRequest(requestId: string) {
   return runTx([runtimeDb.pendingRequests, runtimeDb.permissions], () =>
     Effect.gen(function* () {
-      const match = yield* Effect.tryPromise({
-        try: () => runtimeDb.pendingRequests.get(requestId),
-        catch: (error) => error,
-      });
+      const match = yield* readPendingRequestRow(requestId);
       if (!match) return;
 
       yield* Effect.tryPromise({
@@ -294,10 +331,7 @@ export function resolvePermissionRequest(
 ) {
   return runTx([runtimeDb.pendingRequests, runtimeDb.permissions], () =>
     Effect.gen(function* () {
-      const match = yield* Effect.tryPromise({
-        try: () => runtimeDb.pendingRequests.get(requestId),
-        catch: (error) => error,
-      });
+      const match = yield* readPendingRequestRow(requestId);
       if (!match) return;
 
       yield* Effect.tryPromise({
@@ -322,21 +356,9 @@ export function resolvePermissionRequest(
 }
 
 export function listPendingRequests(origin?: string) {
-  return Effect.gen(function* () {
-    return yield* Effect.promise(() =>
-      runtimeDb.pendingRequests
-        .where("status")
-        .equals("pending")
-        .filter((item) => {
-          if (item.dismissed) return false;
-          if (!origin) return true;
-          return item.origin === origin;
-        })
-        .toArray(),
-    );
-  });
+  return readPendingRequestRows(origin);
 }
 
 export function getPendingRequest(requestId: string) {
-  return Effect.promise(() => runtimeDb.pendingRequests.get(requestId));
+  return readPendingRequestRow(requestId);
 }

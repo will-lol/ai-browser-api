@@ -25,6 +25,25 @@ function logRuntimeModelError(
   });
 }
 
+function wrapProviderStyleFailure<A>(
+  effect: Effect.Effect<A, unknown>,
+  input: {
+    operation: string;
+    providerID: string;
+  },
+) {
+  return effect.pipe(
+    Effect.catchAll((error) =>
+      error instanceof Error &&
+      (APICallError.isInstance(error) || RetryError.isInstance(error))
+        ? Effect.fail(
+            wrapProviderError(error, input.providerID, input.operation),
+          )
+        : Effect.die(error),
+    ),
+  );
+}
+
 export function getRuntimeModelDescriptor(input: {
   modelID: string;
   origin: string;
@@ -47,17 +66,22 @@ export function getRuntimeModelDescriptor(input: {
       } satisfies RuntimeLanguageModelCallOptions,
     });
 
-    const supportedUrls = yield* Effect.promise(() =>
-      Promise.resolve(preparedCall.languageModel.supportedUrls ?? {}),
-    ).pipe(
-      Effect.catchAllDefect((defect) =>
-        defect instanceof Error &&
-        (APICallError.isInstance(defect) || RetryError.isInstance(defect))
-          ? Effect.fail(
-              wrapProviderError(defect, preparedCall.providerID, "describe"),
-            )
-          : Effect.die(defect),
+    const supportedUrls = yield* wrapProviderStyleFailure(
+      Effect.try({
+        try: () => preparedCall.languageModel.supportedUrls,
+        catch: (error) => error,
+      }).pipe(
+        Effect.flatMap((value) =>
+          Effect.tryPromise({
+            try: () => Promise.resolve(value ?? {}),
+            catch: (error) => error,
+          }),
+        ),
       ),
+      {
+        providerID: preparedCall.providerID,
+        operation: "describe",
+      },
     );
 
     return {
@@ -81,20 +105,19 @@ export function runLanguageModelGenerate(input: {
   return Effect.gen(function* () {
     const preparedCall = yield* prepareRuntimeLanguageModelCall(input);
 
-    const result = yield* Effect.promise(() =>
-      preparedCall.languageModel.doGenerate({
-        ...preparedCall.callOptions,
-        abortSignal: input.signal,
+    const result = yield* wrapProviderStyleFailure(
+      Effect.tryPromise({
+        try: () =>
+          preparedCall.languageModel.doGenerate({
+            ...preparedCall.callOptions,
+            abortSignal: input.signal,
+          }),
+        catch: (error) => error,
       }),
-    ).pipe(
-      Effect.catchAllDefect((defect) =>
-        defect instanceof Error &&
-        (APICallError.isInstance(defect) || RetryError.isInstance(defect))
-          ? Effect.fail(
-              wrapProviderError(defect, preparedCall.providerID, "generate"),
-            )
-          : Effect.die(defect),
-      ),
+      {
+        providerID: preparedCall.providerID,
+        operation: "generate",
+      },
     );
 
     logRuntimeModelDebug("generate.succeeded", {
@@ -130,20 +153,19 @@ export function runLanguageModelStream(input: {
   return Effect.gen(function* () {
     const preparedCall = yield* prepareRuntimeLanguageModelCall(input);
 
-    const result = yield* Effect.promise(() =>
-      preparedCall.languageModel.doStream({
-        ...preparedCall.callOptions,
-        abortSignal: input.signal,
+    const result = yield* wrapProviderStyleFailure(
+      Effect.tryPromise({
+        try: () =>
+          preparedCall.languageModel.doStream({
+            ...preparedCall.callOptions,
+            abortSignal: input.signal,
+          }),
+        catch: (error) => error,
       }),
-    ).pipe(
-      Effect.catchAllDefect((defect) =>
-        defect instanceof Error &&
-        (APICallError.isInstance(defect) || RetryError.isInstance(defect))
-          ? Effect.fail(
-              wrapProviderError(defect, preparedCall.providerID, "stream"),
-            )
-          : Effect.die(defect),
-      ),
+      {
+        providerID: preparedCall.providerID,
+        operation: "stream",
+      },
     );
 
     logRuntimeModelDebug("stream.succeeded", {
