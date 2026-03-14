@@ -10,7 +10,7 @@ import {
 } from "./entities";
 import { RuntimeRpcErrorSchema } from "./errors";
 
-export const RuntimeProviderIdPayloadSchema = Schema.Struct({
+const RuntimeProviderIdPayloadSchema = Schema.Struct({
   providerID: Schema.String,
 });
 

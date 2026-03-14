@@ -98,22 +98,6 @@ function resolveTrustedPermissionTargetResolutions(
   });
 }
 
-export function resolveTrustedPermissionTargets(
-  modelIds: ReadonlyArray<string>,
-): Effect.Effect<Map<string, TrustedPermissionTarget>, unknown> {
-  return Effect.gen(function* () {
-    const targets = new Map<string, TrustedPermissionTarget>();
-    const resolutions = yield* resolveTrustedPermissionTargetResolutions(modelIds);
-
-    for (const [modelId, resolution] of resolutions) {
-      if (resolution.status !== "resolved") continue;
-      targets.set(modelId, resolution.target);
-    }
-
-    return targets;
-  });
-}
-
 export function resolveTrustedPermissionTarget(modelId: string) {
   return Effect.gen(function* () {
     return (

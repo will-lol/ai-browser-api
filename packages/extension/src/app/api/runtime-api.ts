@@ -13,25 +13,9 @@ export function currentOrigin() {
   return window.location.origin;
 }
 
-export function fetchProviders() {
-  const runtime = getRuntimeAdminRPC();
-  return runtime.listProviders({});
-}
-
 export function streamProviders() {
   const runtime = getRuntimeAdminRPC();
   return runtime.streamProviders({});
-}
-
-export function fetchModels(input?: {
-  connectedOnly?: boolean;
-  providerID?: string;
-}) {
-  const runtime = getRuntimeAdminRPC();
-  return runtime.listModels({
-    connectedOnly: input?.connectedOnly,
-    providerID: input?.providerID,
-  });
 }
 
 export function streamModels(input?: {
@@ -45,29 +29,14 @@ export function streamModels(input?: {
   });
 }
 
-export function fetchOriginState(origin = currentOrigin()) {
-  const runtime = getRuntimeAdminRPC();
-  return runtime.getOriginState({ origin });
-}
-
 export function streamOriginState(origin = currentOrigin()) {
   const runtime = getRuntimeAdminRPC();
   return runtime.streamOriginState({ origin });
 }
 
-export function fetchPermissions(origin = currentOrigin()) {
-  const runtime = getRuntimeAdminRPC();
-  return runtime.listPermissions({ origin });
-}
-
 export function streamPermissions(origin = currentOrigin()) {
   const runtime = getRuntimeAdminRPC();
   return runtime.streamPermissions({ origin });
-}
-
-export function fetchPendingRequests(origin = currentOrigin()) {
-  const runtime = getRuntimeAdminRPC();
-  return runtime.listPending({ origin });
 }
 
 export function streamPendingRequests(origin = currentOrigin()) {
@@ -78,13 +47,6 @@ export function streamPendingRequests(origin = currentOrigin()) {
 export function openRuntimeProviderAuthWindow(input: { providerID: string }) {
   const runtime = getRuntimeAdminRPC();
   return runtime.openProviderAuthWindow({
-    providerID: input.providerID,
-  });
-}
-
-export function fetchProviderAuthFlow(input: { providerID: string }) {
-  const runtime = getRuntimeAdminRPC();
-  return runtime.getProviderAuthFlow({
     providerID: input.providerID,
   });
 }

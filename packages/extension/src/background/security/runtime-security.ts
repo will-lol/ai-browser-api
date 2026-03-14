@@ -6,12 +6,12 @@ import { AuthVaultStore, makeAuthVaultStore } from "./auth-vault-store";
 import { makeSecretVault, SecretVault } from "./secret-vault";
 import { makeVaultKeyProvider, VaultKeyProvider } from "./vault-key-provider";
 
-export type RuntimeSecurityServices =
+type RuntimeSecurityServices =
   | VaultKeyProvider
   | SecretVault
   | AuthVaultStore;
 
-export const RuntimeSecurityLive = Layer.effectContext(
+const RuntimeSecurityLive = Layer.effectContext(
   Effect.gen(function* () {
     const keyProvider = yield* makeVaultKeyProvider();
     const secretVault = makeSecretVault(keyProvider);

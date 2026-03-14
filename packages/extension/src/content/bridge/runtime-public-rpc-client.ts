@@ -5,11 +5,14 @@ import {
   RuntimeValidationError,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
-import * as Stream from "effect/Stream";
 import {
   makeRuntimeRpcClientCore,
   type RuntimeRpcClientConnection,
 } from "@/shared/rpc/runtime-rpc-client-core";
+import {
+  bindRuntimeRpcStreamMethod,
+  bindRuntimeRpcUnaryMethod,
+} from "@/shared/rpc/runtime-rpc-client-facade";
 
 const CONNECTION_INVALIDATED_MESSAGE =
   "Runtime connection was destroyed while connecting";
@@ -30,100 +33,28 @@ function createRuntimePublicRpcClient(input: {
   >;
 }) {
   return {
-    listModels: (
-      payload: Parameters<
-        RuntimeRpcClientConnection<RuntimePublicRpc>["listModels"]
-      >[0],
-    ) =>
-      Effect.flatMap(input.ensureClient, (client) =>
-        client.listModels(payload),
-      ),
-    getOriginState: (
-      payload: Parameters<
-        RuntimeRpcClientConnection<RuntimePublicRpc>["getOriginState"]
-      >[0],
-    ) =>
-      Effect.flatMap(input.ensureClient, (client) =>
-        client.getOriginState(payload),
-      ),
-    listPending: (
-      payload: Parameters<
-        RuntimeRpcClientConnection<RuntimePublicRpc>["listPending"]
-      >[0],
-    ) =>
-      Effect.flatMap(input.ensureClient, (client) =>
-        client.listPending(payload),
-      ),
-    acquireModel: (
-      payload: Parameters<
-        RuntimeRpcClientConnection<RuntimePublicRpc>["acquireModel"]
-      >[0],
-    ) =>
-      Effect.flatMap(input.ensureClient, (client) =>
-        client.acquireModel(payload),
-      ),
-    modelDoGenerate: (
-      payload: Parameters<
-        RuntimeRpcClientConnection<RuntimePublicRpc>["modelDoGenerate"]
-      >[0],
-    ) =>
-      Effect.flatMap(input.ensureClient, (client) =>
-        client.modelDoGenerate(payload),
-      ),
-    modelDoStream: (
-      payload: Parameters<
-        RuntimeRpcClientConnection<RuntimePublicRpc>["modelDoStream"]
-      >[0],
-    ) =>
-      Stream.unwrap(
-        Effect.map(input.ensureClient, (client) =>
-          client.modelDoStream(payload),
-        ),
-      ),
-    abortModelCall: (
-      payload: Parameters<
-        RuntimeRpcClientConnection<RuntimePublicRpc>["abortModelCall"]
-      >[0],
-    ) =>
-      Effect.flatMap(input.ensureClient, (client) =>
-        client.abortModelCall(payload),
-      ),
-    chatSendMessages: (
-      payload: Parameters<
-        RuntimeRpcClientConnection<RuntimePublicRpc>["chatSendMessages"]
-      >[0],
-    ) =>
-      Stream.unwrap(
-        Effect.map(input.ensureClient, (client) =>
-          client.chatSendMessages(payload),
-        ),
-      ),
-    chatReconnectStream: (
-      payload: Parameters<
-        RuntimeRpcClientConnection<RuntimePublicRpc>["chatReconnectStream"]
-      >[0],
-    ) =>
-      Stream.unwrap(
-        Effect.map(input.ensureClient, (client) =>
-          client.chatReconnectStream(payload),
-        ),
-      ),
-    abortChatStream: (
-      payload: Parameters<
-        RuntimeRpcClientConnection<RuntimePublicRpc>["abortChatStream"]
-      >[0],
-    ) =>
-      Effect.flatMap(input.ensureClient, (client) =>
-        client.abortChatStream(payload),
-      ),
-    createPermissionRequest: (
-      payload: Parameters<
-        RuntimeRpcClientConnection<RuntimePublicRpc>["createPermissionRequest"]
-      >[0],
-    ) =>
-      Effect.flatMap(input.ensureClient, (client) =>
-        client.createPermissionRequest(payload),
-      ),
+    listModels: bindRuntimeRpcUnaryMethod(input.ensureClient, (client) => (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["listModels"]>[0]) =>
+      client.listModels(payload)),
+    getOriginState: bindRuntimeRpcUnaryMethod(input.ensureClient, (client) => (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["getOriginState"]>[0]) =>
+      client.getOriginState(payload)),
+    listPending: bindRuntimeRpcUnaryMethod(input.ensureClient, (client) => (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["listPending"]>[0]) =>
+      client.listPending(payload)),
+    acquireModel: bindRuntimeRpcUnaryMethod(input.ensureClient, (client) => (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["acquireModel"]>[0]) =>
+      client.acquireModel(payload)),
+    modelDoGenerate: bindRuntimeRpcUnaryMethod(input.ensureClient, (client) => (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["modelDoGenerate"]>[0]) =>
+      client.modelDoGenerate(payload)),
+    modelDoStream: bindRuntimeRpcStreamMethod(input.ensureClient, (client) => (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["modelDoStream"]>[0]) =>
+      client.modelDoStream(payload)),
+    abortModelCall: bindRuntimeRpcUnaryMethod(input.ensureClient, (client) => (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["abortModelCall"]>[0]) =>
+      client.abortModelCall(payload)),
+    chatSendMessages: bindRuntimeRpcStreamMethod(input.ensureClient, (client) => (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["chatSendMessages"]>[0]) =>
+      client.chatSendMessages(payload)),
+    chatReconnectStream: bindRuntimeRpcStreamMethod(input.ensureClient, (client) => (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["chatReconnectStream"]>[0]) =>
+      client.chatReconnectStream(payload)),
+    abortChatStream: bindRuntimeRpcUnaryMethod(input.ensureClient, (client) => (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["abortChatStream"]>[0]) =>
+      client.abortChatStream(payload)),
+    createPermissionRequest: bindRuntimeRpcUnaryMethod(input.ensureClient, (client) => (payload: Parameters<RuntimeRpcClientConnection<RuntimePublicRpc>["createPermissionRequest"]>[0]) =>
+      client.createPermissionRequest(payload)),
   };
 }
 
