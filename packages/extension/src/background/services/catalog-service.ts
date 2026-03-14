@@ -53,8 +53,63 @@ function summarizeModels(
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function sameSnapshot<A>(left: A, right: A) {
-  return JSON.stringify(left) === JSON.stringify(right);
+type CatalogSnapshot = {
+  readonly providers: ReadonlyArray<RuntimeProviderSummary>;
+  readonly models: ReadonlyArray<RuntimeModelSummary>;
+};
+
+function sameCapabilities(
+  left: ReadonlyArray<string>,
+  right: ReadonlyArray<string>,
+) {
+  return (
+    left.length === right.length &&
+    left.every((capability, index) => capability === right[index])
+  );
+}
+
+function sameProviderSummary(
+  left: RuntimeProviderSummary,
+  right: RuntimeProviderSummary,
+) {
+  return (
+    left.id === right.id &&
+    left.name === right.name &&
+    left.connected === right.connected &&
+    left.env === right.env &&
+    left.modelCount === right.modelCount
+  );
+}
+
+function sameModelSummary(
+  left: RuntimeModelSummary,
+  right: RuntimeModelSummary,
+) {
+  return (
+    left.id === right.id &&
+    left.name === right.name &&
+    left.provider === right.provider &&
+    left.connected === right.connected &&
+    sameCapabilities(left.capabilities, right.capabilities)
+  );
+}
+
+function sameArray<A>(
+  left: ReadonlyArray<A>,
+  right: ReadonlyArray<A>,
+  sameValue: (left: A, right: A) => boolean,
+) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => sameValue(value, right[index]!))
+  );
+}
+
+function sameCatalogSnapshot(left: CatalogSnapshot, right: CatalogSnapshot) {
+  return (
+    sameArray(left.providers, right.providers, sameProviderSummary) &&
+    sameArray(left.models, right.models, sameModelSummary)
+  );
 }
 
 function filterModels(
@@ -74,23 +129,29 @@ function filterModels(
 export const CatalogServiceLive = Layer.effect(
   CatalogService,
   Effect.gen(function* () {
-    const providersRef = yield* SubscriptionRef.make<
-      ReadonlyArray<RuntimeProviderSummary>
-    >([]);
-    const modelsRef = yield* SubscriptionRef.make<
-      ReadonlyArray<RuntimeModelSummary>
-    >([]);
+    const snapshotRef = yield* SubscriptionRef.make<CatalogSnapshot>({
+      providers: [],
+      models: [],
+    });
 
     const refreshSnapshots = Effect.gen(function* () {
       const providerRows = yield* listProviderRows();
-      const providers = summarizeProviders(providerRows);
       const connectedProviders = new Set(
         providerRows.filter((row) => row.connected).map((row) => row.id),
       );
-      const models = summarizeModels(yield* listModelRows(), connectedProviders);
+      const nextSnapshot = {
+        providers: summarizeProviders(providerRows),
+        models: summarizeModels(
+          yield* listModelRows(),
+          connectedProviders,
+        ),
+      } satisfies CatalogSnapshot;
 
-      yield* SubscriptionRef.set(providersRef, providers);
-      yield* SubscriptionRef.set(modelsRef, models);
+      yield* SubscriptionRef.modify(snapshotRef, (current) =>
+        sameCatalogSnapshot(current, nextSnapshot)
+          ? [undefined, current]
+          : [undefined, nextSnapshot],
+      );
     });
 
     yield* ensureProviderCatalog();
@@ -104,19 +165,27 @@ export const CatalogServiceLive = Layer.effect(
         refreshProviderCatalogForProvider(providerID).pipe(
           Effect.zipRight(refreshSnapshots),
         ),
-      listProviders: () => SubscriptionRef.get(providersRef),
+      listProviders: () =>
+        SubscriptionRef.get(snapshotRef).pipe(
+          Effect.map((snapshot) => snapshot.providers),
+        ),
       streamProviders: () =>
-        providersRef.changes.pipe(
-          Stream.changesWith(sameSnapshot),
+        snapshotRef.changes.pipe(
+          Stream.map((snapshot) => snapshot.providers),
+          Stream.changesWith((left, right) =>
+            sameArray(left, right, sameProviderSummary),
+          ),
         ),
       listModels: (options) =>
-        SubscriptionRef.get(modelsRef).pipe(
-          Effect.map((models) => filterModels(models, options)),
+        SubscriptionRef.get(snapshotRef).pipe(
+          Effect.map((snapshot) => filterModels(snapshot.models, options)),
         ),
       streamModels: (options) =>
-        modelsRef.changes.pipe(
-          Stream.map((models) => filterModels(models, options)),
-          Stream.changesWith(sameSnapshot),
+        snapshotRef.changes.pipe(
+          Stream.map((snapshot) => filterModels(snapshot.models, options)),
+          Stream.changesWith((left, right) =>
+            sameArray(left, right, sameModelSummary),
+          ),
         ),
     } satisfies CatalogServiceApi;
   }),

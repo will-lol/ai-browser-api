@@ -24,8 +24,96 @@ import {
   setOriginEnabled,
 } from "@/background/runtime/permissions";
 
-function sameSnapshot<A>(left: A, right: A) {
-  return JSON.stringify(left) === JSON.stringify(right);
+type PermissionsSnapshot = {
+  readonly originStates: ReadonlyMap<string, RuntimeOriginState>;
+  readonly permissionsByOrigin: ReadonlyMap<
+    string,
+    ReadonlyArray<RuntimePermissionEntry>
+  >;
+  readonly pendingByOrigin: ReadonlyMap<
+    string,
+    ReadonlyArray<RuntimePendingRequest>
+  >;
+};
+
+function sameArray<A>(
+  left: ReadonlyArray<A>,
+  right: ReadonlyArray<A>,
+  sameValue: (left: A, right: A) => boolean,
+) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => sameValue(value, right[index]!))
+  );
+}
+
+function sameMap<K, V>(
+  left: ReadonlyMap<K, V>,
+  right: ReadonlyMap<K, V>,
+  sameValue: (left: V, right: V) => boolean,
+) {
+  if (left.size !== right.size) {
+    return false;
+  }
+
+  for (const [key, leftValue] of left.entries()) {
+    const rightValue = right.get(key);
+    if (rightValue === undefined || !sameValue(leftValue, rightValue)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function sameOriginState(left: RuntimeOriginState, right: RuntimeOriginState) {
+  return left.origin === right.origin && left.enabled === right.enabled;
+}
+
+function samePermissionEntry(
+  left: RuntimePermissionEntry,
+  right: RuntimePermissionEntry,
+) {
+  return (
+    left.modelId === right.modelId &&
+    left.modelName === right.modelName &&
+    left.provider === right.provider &&
+    left.status === right.status &&
+    left.requestedAt === right.requestedAt &&
+    sameArray(left.capabilities, right.capabilities, (l, r) => l === r)
+  );
+}
+
+function samePendingRequest(
+  left: RuntimePendingRequest,
+  right: RuntimePendingRequest,
+) {
+  return (
+    left.id === right.id &&
+    left.origin === right.origin &&
+    left.modelId === right.modelId &&
+    left.modelName === right.modelName &&
+    left.provider === right.provider &&
+    left.requestedAt === right.requestedAt &&
+    left.dismissed === right.dismissed &&
+    left.status === right.status &&
+    sameArray(left.capabilities, right.capabilities, (l, r) => l === r)
+  );
+}
+
+function samePermissionsSnapshot(
+  left: PermissionsSnapshot,
+  right: PermissionsSnapshot,
+) {
+  return (
+    sameMap(left.originStates, right.originStates, sameOriginState) &&
+    sameMap(left.permissionsByOrigin, right.permissionsByOrigin, (l, r) =>
+      sameArray(l, r, samePermissionEntry),
+    ) &&
+    sameMap(left.pendingByOrigin, right.pendingByOrigin, (l, r) =>
+      sameArray(l, r, samePendingRequest),
+    )
+  );
 }
 
 function toOriginStateMap(
@@ -145,15 +233,11 @@ function buildPendingMap() {
 export const PermissionsServiceLive = Layer.effect(
   PermissionsService,
   Effect.gen(function* () {
-    const originStatesRef = yield* SubscriptionRef.make<
-      ReadonlyMap<string, RuntimeOriginState>
-    >(new Map());
-    const permissionsRef = yield* SubscriptionRef.make<
-      ReadonlyMap<string, ReadonlyArray<RuntimePermissionEntry>>
-    >(new Map());
-    const pendingRef = yield* SubscriptionRef.make<
-      ReadonlyMap<string, ReadonlyArray<RuntimePendingRequest>>
-    >(new Map());
+    const snapshotRef = yield* SubscriptionRef.make<PermissionsSnapshot>({
+      originStates: new Map(),
+      permissionsByOrigin: new Map(),
+      pendingByOrigin: new Map(),
+    });
     const waiters = new Map<string, Deferred.Deferred<void>>();
 
     const refreshSnapshots = Effect.gen(function* () {
@@ -166,9 +250,17 @@ export const PermissionsServiceLive = Layer.effect(
         buildPendingMap(),
       ]);
 
-      yield* SubscriptionRef.set(originStatesRef, toOriginStateMap(originRows));
-      yield* SubscriptionRef.set(permissionsRef, permissionsMap);
-      yield* SubscriptionRef.set(pendingRef, pendingMap);
+      const nextSnapshot = {
+        originStates: toOriginStateMap(originRows),
+        permissionsByOrigin: permissionsMap,
+        pendingByOrigin: pendingMap,
+      } satisfies PermissionsSnapshot;
+
+      yield* SubscriptionRef.modify(snapshotRef, (current) =>
+        samePermissionsSnapshot(current, nextSnapshot)
+          ? [undefined, current]
+          : [undefined, nextSnapshot],
+      );
     });
 
     const getOrCreateWaiter = (requestId: string) =>
@@ -214,34 +306,40 @@ export const PermissionsServiceLive = Layer.effect(
 
     return {
       getOriginState: (origin: string) =>
-        SubscriptionRef.get(originStatesRef).pipe(
+        SubscriptionRef.get(snapshotRef).pipe(
           Effect.map(
-            (states) =>
-              states.get(origin) ?? {
+            (snapshot) =>
+              snapshot.originStates.get(origin) ?? {
                 origin,
                 enabled: true,
               },
           ),
         ),
       streamOriginState: (origin: string) =>
-        originStatesRef.changes.pipe(
+        snapshotRef.changes.pipe(
           Stream.map(
-            (states) =>
-              states.get(origin) ?? {
+            (snapshot) =>
+              snapshot.originStates.get(origin) ?? {
                 origin,
                 enabled: true,
               },
           ),
-          Stream.changesWith(sameSnapshot),
+          Stream.changesWith(sameOriginState),
         ),
       listPermissions: (origin: string) =>
-        SubscriptionRef.get(permissionsRef).pipe(
-          Effect.map((entries) => entries.get(origin) ?? []),
+        SubscriptionRef.get(snapshotRef).pipe(
+          Effect.map(
+            (snapshot) => snapshot.permissionsByOrigin.get(origin) ?? [],
+          ),
         ),
       streamPermissions: (origin: string) =>
-        permissionsRef.changes.pipe(
-          Stream.map((entries) => entries.get(origin) ?? []),
-          Stream.changesWith(sameSnapshot),
+        snapshotRef.changes.pipe(
+          Stream.map(
+            (snapshot) => snapshot.permissionsByOrigin.get(origin) ?? [],
+          ),
+          Stream.changesWith((left, right) =>
+            sameArray(left, right, samePermissionEntry),
+          ),
         ),
       getModelPermission,
       setOriginEnabled: (origin: string, enabled: boolean) =>
@@ -291,13 +389,15 @@ export const PermissionsServiceLive = Layer.effect(
           }),
         ),
       listPending: (origin: string) =>
-        SubscriptionRef.get(pendingRef).pipe(
-          Effect.map((entries) => entries.get(origin) ?? []),
+        SubscriptionRef.get(snapshotRef).pipe(
+          Effect.map((snapshot) => snapshot.pendingByOrigin.get(origin) ?? []),
         ),
       streamPending: (origin: string) =>
-        pendingRef.changes.pipe(
-          Stream.map((entries) => entries.get(origin) ?? []),
-          Stream.changesWith(sameSnapshot),
+        snapshotRef.changes.pipe(
+          Stream.map((snapshot) => snapshot.pendingByOrigin.get(origin) ?? []),
+          Stream.changesWith((left, right) =>
+            sameArray(left, right, samePendingRequest),
+          ),
         ),
       waitForPermissionDecision: (
         requestId: string,
@@ -328,16 +428,25 @@ export const PermissionsServiceLive = Layer.effect(
           return yield* Effect.raceAll(contenders);
         }),
       streamOriginStates: () =>
-        originStatesRef.changes.pipe(
-          Stream.changesWith(sameSnapshot),
+        snapshotRef.changes.pipe(
+          Stream.map((snapshot) => snapshot.originStates),
+          Stream.changesWith((left, right) =>
+            sameMap(left, right, sameOriginState),
+          ),
         ),
       streamPermissionsMap: () =>
-        permissionsRef.changes.pipe(
-          Stream.changesWith(sameSnapshot),
+        snapshotRef.changes.pipe(
+          Stream.map((snapshot) => snapshot.permissionsByOrigin),
+          Stream.changesWith((left, right) =>
+            sameMap(left, right, (l, r) => sameArray(l, r, samePermissionEntry)),
+          ),
         ),
       streamPendingMap: () =>
-        pendingRef.changes.pipe(
-          Stream.changesWith(sameSnapshot),
+        snapshotRef.changes.pipe(
+          Stream.map((snapshot) => snapshot.pendingByOrigin),
+          Stream.changesWith((left, right) =>
+            sameMap(left, right, (l, r) => sameArray(l, r, samePendingRequest)),
+          ),
         ),
     } satisfies PermissionsServiceApi;
   }),

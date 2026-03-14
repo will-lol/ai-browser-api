@@ -6,9 +6,9 @@ import {
   RuntimeUpstreamServiceError,
   isRuntimeRpcError,
 } from "@llm-bridge/contracts";
+import { wrapLanguageModelCallOptionsBoundary } from "@/background/runtime/interop/ai-sdk-interop";
 import { mergeModelHeaders } from "./factory-language-model";
 import { parseOptionalMetadataObject } from "./auth-metadata";
-import { wrapLanguageModel } from "./helpers";
 import {
   parseOptionalTrimmedString,
   parseProviderOptions,
@@ -430,11 +430,11 @@ function authorizeCopilotDevice(
       }
 
       if (data.error === "authorization_pending") {
-        yield* Effect.tryPromise({
-          try: () =>
-            sleep(intervalSeconds * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS),
-          catch: (error) => toCopilotError("oauth.device.sleep", error),
-        });
+        yield* sleep(
+          intervalSeconds * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS,
+        ).pipe(
+          Effect.mapError((error) => toCopilotError("oauth.device.sleep", error)),
+        );
         yield* throwIfAborted(input.signal);
         continue;
       }
@@ -444,11 +444,11 @@ function authorizeCopilotDevice(
           data.interval && data.interval > 0
             ? data.interval
             : intervalSeconds + 5;
-        yield* Effect.tryPromise({
-          try: () =>
-            sleep(intervalSeconds * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS),
-          catch: (error) => toCopilotError("oauth.device.sleep", error),
-        });
+        yield* sleep(
+          intervalSeconds * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS,
+        ).pipe(
+          Effect.mapError((error) => toCopilotError("oauth.device.sleep", error)),
+        );
         yield* throwIfAborted(input.signal);
         continue;
       }
@@ -681,7 +681,7 @@ export const githubCopilotAdapter: AIAdapter = {
       );
       const baseModel = provider.languageModel(context.model.api.id);
 
-      return wrapLanguageModel(baseModel, (options) => {
+      return wrapLanguageModelCallOptionsBoundary(baseModel, (options) => {
         const { isAgent, isVision } = inspectCopilotRequest(
           options as unknown as Record<string, unknown>,
         );

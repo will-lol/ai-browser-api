@@ -1,5 +1,7 @@
-export async function sleep(ms: number) {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+import * as Effect from "effect/Effect";
+
+export function sleep(ms: number) {
+  return Effect.sleep(ms);
 }
 
 function base64UrlEncodeBytes(bytes: Uint8Array) {
@@ -22,17 +24,19 @@ function generateRandomString(length: number) {
     .join("");
 }
 
-export async function generatePKCE() {
-  const verifier = generateRandomString(64);
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(verifier),
-  );
-  const challenge = base64UrlEncodeBytes(new Uint8Array(digest));
-  return {
-    verifier,
-    challenge,
-  };
+export function generatePKCE() {
+  return Effect.gen(function* () {
+    const verifier = generateRandomString(64);
+    const digest = yield* Effect.tryPromise({
+      try: () => crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+      catch: (error) => error,
+    });
+    const challenge = base64UrlEncodeBytes(new Uint8Array(digest));
+    return {
+      verifier,
+      challenge,
+    };
+  });
 }
 
 export function generateState() {

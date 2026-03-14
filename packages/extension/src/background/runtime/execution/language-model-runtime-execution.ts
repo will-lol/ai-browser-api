@@ -4,11 +4,11 @@ import { toRuntimeStreamPart } from "@llm-bridge/bridge-codecs";
 import { isRuntimeRpcError } from "@llm-bridge/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
-import * as Stream from "effect/Stream";
 import {
   prepareRuntimeLanguageModelCall,
   type RuntimeLanguageModelCallOptions,
 } from "./language-model-runtime-context";
+import { readableStreamToEffectStream } from "@/background/runtime/interop/ai-sdk-interop";
 import {
   wrapExtensionError,
   wrapProviderError,
@@ -198,17 +198,16 @@ export function runLanguageModelStream(input: {
       providerModelID: preparedCall.providerModelID,
       ...input,
     });
-    return Stream.fromReadableStream(
-      () => result.stream,
-      (error) =>
+    return readableStreamToEffectStream({
+      stream: result.stream,
+      map: (part) => Effect.succeed(toRuntimeStreamPart(part)),
+      mapError: (error) =>
         toRuntimeStreamError({
           error,
           providerID: preparedCall.providerID,
           operation: "stream",
         }),
-    ).pipe(
-      Stream.map((part) => toRuntimeStreamPart(part)),
-    );
+    });
   }).pipe(
     Effect.catchAllCause((cause) => {
       logRuntimeModelError(

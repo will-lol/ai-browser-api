@@ -9,11 +9,11 @@ import {
   RuntimeUpstreamServiceError,
   RuntimeValidationError,
 } from "@llm-bridge/contracts";
+import { wrapLanguageModelCallOptionsBoundary } from "@/background/runtime/interop/ai-sdk-interop";
 import { decodeSchemaOrUndefined } from "@/background/runtime/core/effect-schema";
 import { parseOptionalMetadataObject } from "./auth-metadata";
 import { parseProviderOptions } from "./provider-options";
 import { createApiKeyMethod } from "./generic-factory";
-import { wrapLanguageModel } from "./helpers";
 import {
   mergeModelHeaders,
   mergeModelProviderOptions,
@@ -436,10 +436,9 @@ function refreshAccessToken(refreshToken: string) {
 function authorizeBrowser(input: AdapterAuthorizeContext) {
   return Effect.gen(function* () {
     yield* throwIfAborted(input.signal);
-    const pkce = yield* Effect.tryPromise({
-      try: () => generatePKCE(),
-      catch: (error) => toOpenAIError("oauth.generatePKCE", error),
-    });
+    const pkce = yield* generatePKCE().pipe(
+      Effect.mapError((error) => toOpenAIError("oauth.generatePKCE", error)),
+    );
     const state = generateState();
     const authorizationURL = buildCodexAuthorizationURL({
       codeChallenge: pkce.challenge,
@@ -677,10 +676,9 @@ function authorizeDevice(input: AdapterAuthorizeContext) {
         );
       }
 
-      yield* Effect.tryPromise({
-        try: () => sleep(intervalMs + OAUTH_POLLING_SAFETY_MARGIN_MS),
-        catch: (error) => toOpenAIError("oauth.authorizeDevice.sleep", error),
-      });
+      yield* sleep(intervalMs + OAUTH_POLLING_SAFETY_MARGIN_MS).pipe(
+        Effect.mapError((error) => toOpenAIError("oauth.authorizeDevice.sleep", error)),
+      );
       yield* throwIfAborted(input.signal);
     }
 
@@ -935,7 +933,7 @@ export const openaiAdapter: AIAdapter = {
         return baseModel;
       }
 
-      return wrapLanguageModel(baseModel, (options) =>
+      return wrapLanguageModelCallOptionsBoundary(baseModel, (options) =>
         Effect.succeed(wrapCodexCallOptions(options, context.sessionID)),
       );
     });

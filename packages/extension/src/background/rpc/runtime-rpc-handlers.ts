@@ -91,164 +91,163 @@ function requireOrigin(operation: string, origin: string | undefined) {
   );
 }
 
+function handleListModels(input: {
+  origin?: string;
+  connectedOnly?: boolean;
+  providerID?: string;
+}) {
+  return serializeRpcError(
+    input.origin
+      ? Effect.gen(function* () {
+          yield* ensureOriginEnabled(
+            yield* requireOrigin("listModels", input.origin),
+          );
+          return yield* listModels({
+            connectedOnly: input.connectedOnly,
+            providerID: input.providerID,
+          });
+        })
+      : listModels({
+          connectedOnly: input.connectedOnly,
+          providerID: input.providerID,
+        }),
+  );
+}
+
+function handleStreamModels(input: {
+  origin?: string;
+  connectedOnly?: boolean;
+  providerID?: string;
+}) {
+  return Stream.unwrap(
+    serializeRpcError(
+      input.origin
+        ? Effect.gen(function* () {
+            yield* ensureOriginEnabled(
+              yield* requireOrigin("streamModels", input.origin),
+            );
+            return streamModels({
+              connectedOnly: input.connectedOnly,
+              providerID: input.providerID,
+            });
+          })
+        : Effect.succeed(
+            streamModels({
+              connectedOnly: input.connectedOnly,
+              providerID: input.providerID,
+            }),
+          ),
+    ),
+  );
+}
+
+function handleAcquireModel(input: {
+  origin: string;
+  requestId: string;
+  sessionID: string;
+  modelId: string;
+}) {
+  return serializeRpcError(
+    acquireModel({
+      origin: input.origin,
+      requestID: input.requestId,
+      sessionID: input.sessionID,
+      modelID: input.modelId,
+    }),
+  );
+}
+
+function handleModelDoGenerate(input: {
+  origin: string;
+  requestId: string;
+  sessionID: string;
+  modelId: string;
+  options: Parameters<typeof generateModel>[0]["options"];
+}) {
+  return serializeRpcError(
+    generateModel({
+      origin: input.origin,
+      requestID: input.requestId,
+      sessionID: input.sessionID,
+      modelID: input.modelId,
+      options: input.options,
+    }),
+  );
+}
+
+function handleModelDoStream(input: {
+  origin: string;
+  requestId: string;
+  sessionID: string;
+  modelId: string;
+  options: Parameters<typeof streamModel>[0]["options"];
+}) {
+  return streamModel({
+    origin: input.origin,
+    requestID: input.requestId,
+    sessionID: input.sessionID,
+    modelID: input.modelId,
+    options: input.options,
+  });
+}
+
+function handleAbortModelCall(input: {
+  origin: string;
+  sessionID: string;
+  requestId: string;
+}) {
+  return serializeRpcError(
+    abortModelCall({
+      origin: input.origin,
+      sessionID: input.sessionID,
+      requestID: input.requestId,
+    }),
+  );
+}
+
+function handleCreatePermissionRequest(input: Parameters<
+  typeof createPermissionRequest
+>[0]) {
+  return serializeRpcError(
+    Effect.gen(function* () {
+      yield* ensureOriginEnabled(input.origin);
+      return yield* createPermissionRequest(input);
+    }),
+  );
+}
+
 const makePublicRuntimeRpcHandlers = Effect.sync(() =>
   RuntimePublicRpcGroup.of({
-    listModels: ({ origin, connectedOnly, providerID }) =>
-      serializeRpcError(
-        origin
-          ? Effect.gen(function* () {
-              yield* ensureOriginEnabled(
-                yield* requireOrigin("listModels", origin),
-              );
-              return yield* listModels({
-                connectedOnly,
-                providerID,
-              });
-            })
-          : listModels({
-              connectedOnly,
-              providerID,
-            }),
-      ),
+    listModels: handleListModels,
     getOriginState: ({ origin }) => serializeRpcError(getOriginState(origin)),
     listPending: ({ origin }) => serializeRpcError(listPending(origin)),
-    acquireModel: ({ origin, requestId, sessionID, modelId }) =>
-      serializeRpcError(
-        acquireModel({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-        }),
-      ),
-    modelDoGenerate: ({ origin, requestId, sessionID, modelId, options }) =>
-      serializeRpcError(
-        generateModel({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-          options,
-        }),
-      ),
-    modelDoStream: ({ origin, requestId, sessionID, modelId, options }) =>
-      streamModel({
-        origin,
-        requestID: requestId,
-        sessionID,
-        modelID: modelId,
-        options,
-      }),
-    abortModelCall: ({ origin, sessionID, requestId }) =>
-      serializeRpcError(
-        abortModelCall({
-          origin,
-          sessionID,
-          requestID: requestId,
-        }),
-      ),
+    acquireModel: handleAcquireModel,
+    modelDoGenerate: handleModelDoGenerate,
+    modelDoStream: handleModelDoStream,
+    abortModelCall: handleAbortModelCall,
     chatSendMessages: (input) => sendChatMessages(input),
     chatReconnectStream: (input) => reconnectChatStream(input),
     abortChatStream: (input) => serializeRpcError(abortChatStream(input)),
-    createPermissionRequest: (input) =>
-      serializeRpcError(
-        Effect.gen(function* () {
-          yield* ensureOriginEnabled(input.origin);
-          return yield* createPermissionRequest(input);
-        }),
-      ),
+    createPermissionRequest: handleCreatePermissionRequest,
   }),
 );
 
 const makeAdminRuntimeRpcHandlers = Effect.sync(() =>
   RuntimeAdminRpcGroup.of({
-    listModels: ({ origin, connectedOnly, providerID }) =>
-      serializeRpcError(
-        origin
-          ? Effect.gen(function* () {
-              yield* ensureOriginEnabled(
-                yield* requireOrigin("listModels", origin),
-              );
-              return yield* listModels({
-                connectedOnly,
-                providerID,
-              });
-            })
-          : listModels({
-              connectedOnly,
-              providerID,
-            }),
-      ),
-    streamModels: ({ origin, connectedOnly, providerID }) =>
-      Stream.unwrap(
-        serializeRpcError(
-          origin
-            ? Effect.gen(function* () {
-                yield* ensureOriginEnabled(
-                  yield* requireOrigin("streamModels", origin),
-                );
-                return streamModels({
-                  connectedOnly,
-                  providerID,
-                });
-              })
-            : Effect.succeed(
-                streamModels({
-                  connectedOnly,
-                  providerID,
-                }),
-              ),
-        ),
-      ),
+    listModels: handleListModels,
+    streamModels: handleStreamModels,
     getOriginState: ({ origin }) => serializeRpcError(getOriginState(origin)),
     streamOriginState: ({ origin }) => streamOriginState(origin),
     listPending: ({ origin }) => serializeRpcError(listPending(origin)),
     streamPending: ({ origin }) => streamPending(origin),
-    acquireModel: ({ origin, requestId, sessionID, modelId }) =>
-      serializeRpcError(
-        acquireModel({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-        }),
-      ),
-    modelDoGenerate: ({ origin, requestId, sessionID, modelId, options }) =>
-      serializeRpcError(
-        generateModel({
-          origin,
-          requestID: requestId,
-          sessionID,
-          modelID: modelId,
-          options,
-        }),
-      ),
-    modelDoStream: ({ origin, requestId, sessionID, modelId, options }) =>
-      streamModel({
-        origin,
-        requestID: requestId,
-        sessionID,
-        modelID: modelId,
-        options,
-      }),
-    abortModelCall: ({ origin, sessionID, requestId }) =>
-      serializeRpcError(
-        abortModelCall({
-          origin,
-          sessionID,
-          requestID: requestId,
-        }),
-      ),
+    acquireModel: handleAcquireModel,
+    modelDoGenerate: handleModelDoGenerate,
+    modelDoStream: handleModelDoStream,
+    abortModelCall: handleAbortModelCall,
     chatSendMessages: (input) => sendChatMessages(input),
     chatReconnectStream: (input) => reconnectChatStream(input),
     abortChatStream: (input) => serializeRpcError(abortChatStream(input)),
-    createPermissionRequest: (input) =>
-      serializeRpcError(
-        Effect.gen(function* () {
-          yield* ensureOriginEnabled(input.origin);
-          return yield* createPermissionRequest(input);
-        }),
-      ),
+    createPermissionRequest: handleCreatePermissionRequest,
     listProviders: () => serializeRpcError(listProviders()),
     streamProviders: () => streamProviders(),
     listConnectedModels: () => serializeRpcError(listConnectedModels()),

@@ -10,13 +10,13 @@ import {
   RuntimeValidationError,
   isRuntimeRpcError,
 } from "@llm-bridge/contracts";
+import { wrapLanguageModelCallOptionsBoundary } from "@/background/runtime/interop/ai-sdk-interop";
 import { parseOptionalMetadataObject } from "./auth-metadata";
 import {
   createGeminiCodeAssistFetch,
   GEMINI_CODE_ASSIST_HEADERS,
 } from "./gemini-code-assist-transport";
 import { createApiKeyMethod } from "./generic-factory";
-import { wrapLanguageModel } from "./helpers";
 import { parseProviderOptions } from "./provider-options";
 import { defineAuthSchema } from "./schema";
 import { mergeModelHeaders } from "./factory-language-model";
@@ -752,10 +752,9 @@ function authorizeGeminiOAuth(
       catch: (error) => toGoogleError("oauth.clientSecret", error),
     });
     const redirectUri = GEMINI_REDIRECT_URI;
-    const pkce = yield* Effect.tryPromise({
-      try: () => generatePKCE(),
-      catch: (error) => toGoogleError("oauth.generatePKCE", error),
-    });
+    const pkce = yield* generatePKCE().pipe(
+      Effect.mapError((error) => toGoogleError("oauth.generatePKCE", error)),
+    );
     const state = generateState();
 
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -1058,7 +1057,7 @@ export const googleAdapter: AIAdapter = {
         return baseModel;
       }
 
-      return wrapLanguageModel(baseModel, (options) =>
+      return wrapLanguageModelCallOptionsBoundary(baseModel, (options) =>
         Effect.succeed(
           mergeModelHeaders(options, {
             "x-activity-request-id": context.requestID,

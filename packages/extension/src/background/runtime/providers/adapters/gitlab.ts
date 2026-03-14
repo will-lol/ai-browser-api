@@ -141,14 +141,14 @@ function authorizeGitLabOAuth(
               message: error instanceof Error ? error.message : String(error),
             }),
     });
-    const pkce = yield* Effect.tryPromise({
-      try: () => generatePKCE(),
-      catch: (error) =>
+    const pkce = yield* generatePKCE().pipe(
+      Effect.mapError((error) =>
         gitlabAuthProviderError({
           operation: "oauth.generatePKCE",
           message: error instanceof Error ? error.message : String(error),
         }),
-    });
+      ),
+    );
     const state = generateState();
 
     const params = new URLSearchParams({

@@ -46,6 +46,7 @@ import {
   prepareRuntimeChatModelCall,
   type PreparedRuntimeChatModelCall,
 } from "@/background/runtime/execution/language-model-runtime";
+import { readableStreamToEffectStream } from "@/background/runtime/interop/ai-sdk-interop";
 import {
   wrapExtensionError,
   wrapProviderError,
@@ -101,6 +102,11 @@ type ChatExecutionServiceDeps = {
 };
 
 type StreamTextInput = Parameters<typeof streamText>[0];
+
+type PreparedChatGeneration = {
+  readonly providerID: string;
+  readonly uiStream: ReadableStream<UIMessageChunk>;
+};
 
 function logChatDebug(event: string, details?: object) {
   console.log(`[chat-execution-service] ${event}`, details);
@@ -268,6 +274,156 @@ function normalizeChatStreamFailure(input: {
   }
 
   return wrapExtensionError(String(input.error), "chat.stream");
+}
+
+function prepareChatGeneration(input: {
+  deps: ChatExecutionServiceDeps;
+  request: RuntimeChatSendMessagesInput;
+  abortController: AbortController;
+  requestID: string;
+  sessionID: string;
+}) {
+  return Effect.gen(function* () {
+    yield* ensureOriginEnabled(input.request.origin);
+    yield* ensureModelAccess({
+      origin: input.request.origin,
+      modelID: input.request.modelId,
+      signal: input.abortController.signal,
+    });
+
+    const validatedMessages = yield* Effect.tryPromise({
+      try: () =>
+        input.deps.validateMessages<UIMessage>({
+          messages: input.request.messages,
+        }),
+      catch: (error) =>
+        new RuntimeValidationError({
+          message:
+            error instanceof Error
+              ? error.message
+              : "Chat messages failed validation",
+        }),
+    });
+
+    const modelMessages = yield* Effect.tryPromise({
+      try: () => input.deps.convertMessages(validatedMessages),
+      catch: (error) =>
+        new RuntimeValidationError({
+          message:
+            error instanceof Error
+              ? error.message
+              : "Chat messages could not be converted",
+        }),
+    });
+
+    const preparedCall = yield* input.deps
+      .prepareLanguageModelCall({
+        modelID: input.request.modelId,
+        origin: input.request.origin,
+        sessionID: input.sessionID,
+        requestID: input.requestID,
+        messages: modelMessages,
+        options: input.request.options,
+      })
+      .pipe(
+        Effect.catchAllDefect((error) =>
+          Effect.fail(
+            toRuntimeChatError({
+              error: error instanceof Error ? error : new Error(String(error)),
+              operation: "chat.prepareLanguageModelCall",
+            }),
+          ),
+        ),
+      );
+
+    yield* ensureSignalNotAborted(input.abortController.signal);
+
+    const streamTextResult = yield* Effect.try({
+      try: () => {
+        const preparedLanguageModel = createPreparedLanguageModel({
+          languageModel: preparedCall.languageModel,
+          preparedCallOptions: preparedCall.callOptions,
+        });
+
+        return input.deps.streamTextImpl(
+          toStreamTextInput({
+            languageModel: preparedLanguageModel,
+            abortSignal: input.abortController.signal,
+            messages: modelMessages,
+          }),
+        );
+      },
+      catch: (error) =>
+        toRuntimeChatError({
+          error: error instanceof Error ? error : new Error(String(error)),
+          providerID: preparedCall.providerID,
+          operation: "chat.streamText",
+        }),
+    });
+
+    return yield* Effect.try({
+      try: () => ({
+        uiStream: streamTextResult.toUIMessageStream({
+          originalMessages: validatedMessages,
+        }),
+        providerID: preparedCall.providerID,
+      }),
+      catch: (error) =>
+        toRuntimeChatError({
+          error: error instanceof Error ? error : new Error(String(error)),
+          providerID: preparedCall.providerID,
+          operation: "chat.toUIMessageStream",
+        }),
+    });
+  }).pipe(
+    Effect.mapError((error) =>
+      isRuntimeRpcError(error)
+        ? error
+        : wrapExtensionError(error, "chat.sendMessages"),
+    ),
+  );
+}
+
+function makeGenerationState(input: {
+  generationKey: string;
+  origin: string;
+  chatId: string;
+  abortController: AbortController;
+  registryRef: SynchronizedRef.SynchronizedRef<Map<string, ActiveChatGeneration>>;
+  producerFibers: FiberSet.FiberSet<void, never>;
+  prepared: PreparedChatGeneration;
+}): Effect.Effect<ActiveChatGeneration> {
+  return Effect.gen(function* () {
+    const events = yield* PubSub.unbounded<ChatEvent>();
+    const subscriberCount = yield* Ref.make(0);
+    const terminalEventRef = yield* Ref.make<ChatTerminalEvent | null>(null);
+    const producerFiberRef = yield* SynchronizedRef.make<
+      Fiber.RuntimeFiber<void, never> | null
+    >(null);
+
+    const generation: ActiveChatGeneration = {
+      key: input.generationKey,
+      origin: input.origin,
+      chatId: input.chatId,
+      abortController: input.abortController,
+      events,
+      subscriberCount,
+      terminalEventRef,
+      producerFiberRef,
+      startProducer: () =>
+        FiberSet.run(
+          input.producerFibers,
+          produceGeneration({
+            registryRef: input.registryRef,
+            generation,
+            stream: input.prepared.uiStream,
+            providerID: input.prepared.providerID,
+          }),
+        ),
+    };
+
+    return generation;
+  });
 }
 
 function getGeneration(
@@ -463,11 +619,9 @@ function produceGeneration(input: {
 }) {
   return Effect.gen(function* () {
     const exit = yield* Effect.exit(
-      Stream.fromReadableStream(
-        () => input.stream,
-        (error) => error,
-      ).pipe(
-        Stream.mapEffect((chunk) =>
+      readableStreamToEffectStream({
+        stream: input.stream,
+        map: (chunk) =>
           Effect.try({
             try: () => toOpaqueJsonObject(chunk, "chat stream chunk"),
             catch: (error) => error,
@@ -476,7 +630,8 @@ function produceGeneration(input: {
               publishChunkEvent(input.generation, encodedChunk),
             ),
           ),
-        ),
+        mapError: (error) => error,
+      }).pipe(
         Stream.runDrain,
       ),
     );
@@ -543,135 +698,22 @@ function makeChatExecutionService(input: {
       const abortController = new AbortController();
       const requestID = nextChatRequestId();
       const sessionID = request.chatId;
-
-      const result = yield* Effect.gen(function* () {
-        yield* ensureOriginEnabled(request.origin);
-        yield* ensureModelAccess({
-          origin: request.origin,
-          modelID: request.modelId,
-          signal: abortController.signal,
-        });
-
-        const validatedMessages = yield* Effect.tryPromise({
-          try: () =>
-            input.deps.validateMessages<UIMessage>({
-              messages: request.messages,
-            }),
-          catch: (error) =>
-            new RuntimeValidationError({
-              message:
-                error instanceof Error
-                  ? error.message
-                  : "Chat messages failed validation",
-            }),
-        });
-
-        const modelMessages = yield* Effect.tryPromise({
-          try: () => input.deps.convertMessages(validatedMessages),
-          catch: (error) =>
-            new RuntimeValidationError({
-              message:
-                error instanceof Error
-                  ? error.message
-                  : "Chat messages could not be converted",
-            }),
-        });
-
-        const preparedCall = yield* input.deps
-          .prepareLanguageModelCall({
-            modelID: request.modelId,
-            origin: request.origin,
-            sessionID,
-            requestID,
-            messages: modelMessages,
-            options: request.options,
-          })
-          .pipe(
-            Effect.catchAllDefect((error) =>
-              Effect.fail(
-                toRuntimeChatError({
-                  error:
-                    error instanceof Error ? error : new Error(String(error)),
-                  operation: "chat.prepareLanguageModelCall",
-                }),
-              ),
-            ),
-          );
-
-        yield* ensureSignalNotAborted(abortController.signal);
-
-        const streamTextResult = yield* Effect.try({
-          try: () => {
-            const preparedLanguageModel = createPreparedLanguageModel({
-              languageModel: preparedCall.languageModel,
-              preparedCallOptions: preparedCall.callOptions,
-            });
-
-            return input.deps.streamTextImpl(
-              toStreamTextInput({
-                languageModel: preparedLanguageModel,
-                abortSignal: abortController.signal,
-                messages: modelMessages,
-              }),
-            );
-          },
-          catch: (error) =>
-            toRuntimeChatError({
-              error: error instanceof Error ? error : new Error(String(error)),
-              providerID: preparedCall.providerID,
-              operation: "chat.streamText",
-            }),
-        });
-
-        return yield* Effect.try({
-          try: () => ({
-            uiStream: streamTextResult.toUIMessageStream({
-              originalMessages: validatedMessages,
-            }),
-            providerID: preparedCall.providerID,
-          }),
-          catch: (error) =>
-            toRuntimeChatError({
-              error: error instanceof Error ? error : new Error(String(error)),
-              providerID: preparedCall.providerID,
-              operation: "chat.toUIMessageStream",
-            }),
-        });
-      }).pipe(
-        Effect.mapError((error) =>
-          isRuntimeRpcError(error)
-            ? error
-            : wrapExtensionError(error, "chat.sendMessages"),
-        ),
-      );
-
-      const events = yield* PubSub.unbounded<ChatEvent>();
-      const subscriberCount = yield* Ref.make(0);
-      const terminalEventRef = yield* Ref.make<ChatTerminalEvent | null>(null);
-      const producerFiberRef = yield* SynchronizedRef.make<
-        Fiber.RuntimeFiber<void, never> | null
-      >(null);
-
-      const generation: ActiveChatGeneration = {
-        key: generationKey,
+      const prepared = yield* prepareChatGeneration({
+        deps: input.deps,
+        request,
+        abortController,
+        requestID,
+        sessionID,
+      });
+      const generation = yield* makeGenerationState({
+        generationKey,
         origin: request.origin,
         chatId: request.chatId,
         abortController,
-        events,
-        subscriberCount,
-        terminalEventRef,
-        producerFiberRef,
-        startProducer: () =>
-          FiberSet.run(
-            input.producerFibers,
-            produceGeneration({
-              registryRef: input.registryRef,
-              generation,
-              stream: result.uiStream,
-              providerID: result.providerID,
-            }),
-          ),
-      };
+        registryRef: input.registryRef,
+        producerFibers: input.producerFibers,
+        prepared,
+      });
 
       const existing = yield* replaceGeneration(input.registryRef, generation);
       if (existing) {
