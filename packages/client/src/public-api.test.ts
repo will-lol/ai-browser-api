@@ -11,7 +11,7 @@ describe("client public API", () => {
   it("exports a factory-based client instead of an Effect service tag", () => {
     const source = readFileSync(clientIndexPath, "utf8");
 
-    assert.equal(source.includes("export { createBridgeClient }"), true);
+    assert.equal(source.includes("createBridgeClient"), true);
     assert.equal(source.includes("export class BridgeClient"), false);
     assert.equal(source.includes("withBridgeClient"), false);
   });

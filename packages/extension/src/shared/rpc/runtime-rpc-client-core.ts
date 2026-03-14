@@ -14,6 +14,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
+import { runDetachedRuntimeRpcClientEffect } from "./runtime-rpc-client-boundary";
 
 type RuntimeMessageListener = (
   payload: FromServerEncoded,
@@ -113,8 +114,10 @@ function createClient<Rpcs extends Rpc.Any>(
   return RpcClient.Protocol.make((writeResponse) =>
     Effect.gen(function* () {
       const onMessage: RuntimeMessageListener = (payload) => {
-        void Effect.runPromise(writeResponse(payload)).catch((error) => {
-          console.warn("runtime rpc: failed to process server message", error);
+        runDetachedRuntimeRpcClientEffect(writeResponse(payload), {
+          onError: (error) => {
+            console.warn("runtime rpc: failed to process server message", error);
+          },
         });
       };
 
@@ -154,7 +157,7 @@ function createClient<Rpcs extends Rpc.Any>(
 
 function createRuntimeConnection<Rpcs extends Rpc.Any, E>(
   options: RuntimeRpcClientCoreOptions<Rpcs, E>,
-  destroyIfCurrent: (token: number) => Promise<void>,
+  destroyIfCurrent: (token: number) => Effect.Effect<void, never>,
   connectionId: number,
 ): Effect.Effect<RuntimeConnection<Rpcs>, E> {
   const connect = options.connect ?? defaultConnect;
@@ -169,7 +172,9 @@ function createRuntimeConnection<Rpcs extends Rpc.Any, E>(
       });
 
       const onDisconnect = () => {
-        void destroyIfCurrent(connectionId).catch(() => undefined);
+        runDetachedRuntimeRpcClientEffect(destroyIfCurrent(connectionId), {
+          onError: () => undefined,
+        });
       };
 
       runtimePort.onDisconnect.addListener(onDisconnect);
@@ -221,10 +226,11 @@ export function makeRuntimeRpcClientCore<Rpcs extends Rpc.Any, E>(
 
   const destroyIfCurrent = (token: number) => {
     const current = lifecycle;
-    if (!current) return Promise.resolve();
-    return Effect.runPromise(
-      current.destroyIfCurrent(token, "disconnect"),
-    ).catch(() => undefined);
+    return current
+      ? current.destroyIfCurrent(token, "disconnect").pipe(
+          Effect.catchAll(() => Effect.void),
+        )
+      : Effect.void;
   };
 
   lifecycle = Effect.runSync(
@@ -247,7 +253,9 @@ export function makeRuntimeRpcClientCore<Rpcs extends Rpc.Any, E>(
   windowLike?.addEventListener(
     "pagehide",
     () => {
-      void Effect.runPromise(destroyConnection("pagehide"));
+      runDetachedRuntimeRpcClientEffect(destroyConnection("pagehide"), {
+        onError: () => undefined,
+      });
     },
     { once: true },
   );

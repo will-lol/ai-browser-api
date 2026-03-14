@@ -18,6 +18,12 @@ import * as Mailbox from "effect/Mailbox";
 import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import { getRuntimePublicRPC } from "@/content/bridge/runtime-public-rpc-client";
+import {
+  closeScopeQuietly,
+  makeOnceTransportCleanup,
+  offerMailboxFromCallback,
+  runDetachedTransportServerEffect,
+} from "@/shared/rpc/transport-server-boundary";
 
 function mapRuntimeEffect<A, E, R>(effect: Effect.Effect<A, E, R>) {
   return Effect.catchAllDefect(effect, (defect) =>
@@ -119,7 +125,7 @@ function createPageBridgeHandlers() {
 type PageBridgeSession = {
   readonly id: number;
   readonly port: MessagePort;
-  readonly cleanup: (reason: string) => Effect.Effect<void>;
+  readonly cleanup: (reason: string) => Effect.Effect<void, never>;
 };
 
 function attachServerToPort(
@@ -129,7 +135,6 @@ function attachServerToPort(
 ) {
   return Effect.gen(function* () {
     const scope = yield* Scope.make();
-    let disposed = false;
     let onMessage:
       | ((
           event: MessageEvent<FromClientEncoded | PageBridgePortControlMessage>,
@@ -137,11 +142,8 @@ function attachServerToPort(
       | null = null;
     let onMessageError: ((event: MessageEvent<unknown>) => void) | null = null;
 
-    const cleanup = (_reason: string) =>
+    const cleanup = makeOnceTransportCleanup((_reason: string) =>
       Effect.gen(function* () {
-        if (disposed) return;
-        disposed = true;
-
         if (onMessage) {
           port.removeEventListener("message", onMessage);
         }
@@ -155,104 +157,119 @@ function attachServerToPort(
           sessions.delete(port);
         }
 
-        yield* Scope.close(scope, Exit.void);
+        yield* closeScopeQuietly(scope, Exit.void);
 
         try {
           port.close();
         } catch {
           // ignored
         }
-      });
+      }),
+    );
 
     const handlersLayer = PageBridgeRpcGroup.toLayer(
       Effect.succeed(createPageBridgeHandlers()),
     );
 
-    const protocol = yield* RpcServer.Protocol.make((writeRequest) =>
-      Effect.gen(function* () {
-        const disconnects = yield* Mailbox.make<number>();
-        const clientIds = new Set<number>([0]);
+    return yield* Effect.gen(function* () {
+      const protocol = yield* RpcServer.Protocol.make((writeRequest) =>
+        Effect.gen(function* () {
+          const disconnects = yield* Mailbox.make<number>();
+          const clientIds = new Set<number>([0]);
 
-        onMessage = (
-          event: MessageEvent<FromClientEncoded | PageBridgePortControlMessage>,
-        ) => {
-          if (isPageBridgePortControlMessage(event.data)) {
-            if (event.data.type === "disconnect") {
-              void Effect.runPromise(cleanup("control-disconnect")).catch(
-                () => undefined,
-              );
+          onMessage = (
+            event: MessageEvent<FromClientEncoded | PageBridgePortControlMessage>,
+          ) => {
+            if (isPageBridgePortControlMessage(event.data)) {
+              if (event.data.type === "disconnect") {
+                runDetachedTransportServerEffect(cleanup("control-disconnect"), {
+                  onError: () => undefined,
+                });
+              }
+
+              return;
             }
 
-            return;
-          }
+            runDetachedTransportServerEffect(writeRequest(0, event.data), {
+              onError: (error) => {
+                console.warn("page bridge rpc write failed", error);
+              },
+            });
+          };
 
-          void Effect.runPromise(writeRequest(0, event.data)).catch((error) => {
-            console.warn("page bridge rpc write failed", error);
-          });
-        };
+          onMessageError = (_event: MessageEvent<unknown>) => {
+            offerMailboxFromCallback(disconnects, 0, {
+              onError: () => undefined,
+            });
+            runDetachedTransportServerEffect(cleanup("messageerror"), {
+              onError: () => undefined,
+            });
+          };
 
-        onMessageError = (_event: MessageEvent<unknown>) => {
-          void Effect.runPromise(disconnects.offer(0)).catch(() => undefined);
-          void Effect.runPromise(cleanup("messageerror")).catch(
-            () => undefined,
-          );
-        };
+          port.addEventListener("message", onMessage);
+          port.addEventListener("messageerror", onMessageError);
+          port.start();
 
-        port.addEventListener("message", onMessage);
-        port.addEventListener("messageerror", onMessageError);
-        port.start();
-
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            if (onMessage) {
-              port.removeEventListener("message", onMessage);
-            }
-
-            if (onMessageError) {
-              port.removeEventListener("messageerror", onMessageError);
-            }
-          }),
-        );
-
-        return {
-          disconnects,
-          send: (_clientId: number, message: FromServerEncoded) =>
+          yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              try {
-                port.postMessage(message);
-              } catch (_error) {
-                void Effect.runPromise(cleanup("postMessage-failed")).catch(
-                  () => undefined,
-                );
+              if (onMessage) {
+                port.removeEventListener("message", onMessage);
+              }
+
+              if (onMessageError) {
+                port.removeEventListener("messageerror", onMessageError);
               }
             }),
-          end: (_clientId: number) => Effect.void,
-          clientIds: Effect.sync(() => new Set(clientIds)),
-          initialMessage: Effect.succeed(Option.none()),
-          supportsAck: true,
-          supportsTransferables: false,
-          supportsSpanPropagation: true,
-        } as const;
-      }),
-    ).pipe(Scope.extend(scope));
+          );
 
-    yield* Layer.buildWithScope(
-      RpcServer.layer(PageBridgeRpcGroup, {
-        disableTracing: true,
-        concurrency: "unbounded",
-      }).pipe(
-        Layer.provide(handlersLayer),
-        Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
+          return {
+            disconnects,
+            send: (_clientId: number, message: FromServerEncoded) =>
+              Effect.sync(() => {
+                try {
+                  port.postMessage(message);
+                } catch (_error) {
+                  runDetachedTransportServerEffect(
+                    cleanup("postMessage-failed"),
+                    {
+                      onError: () => undefined,
+                    },
+                  );
+                }
+              }),
+            end: (_clientId: number) => Effect.void,
+            clientIds: Effect.sync(() => new Set(clientIds)),
+            initialMessage: Effect.succeed(Option.none()),
+            supportsAck: true,
+            supportsTransferables: false,
+            supportsSpanPropagation: true,
+          } as const;
+        }),
+      ).pipe(Scope.extend(scope));
+
+      yield* Layer.buildWithScope(
+        RpcServer.layer(PageBridgeRpcGroup, {
+          disableTracing: true,
+          concurrency: "unbounded",
+        }).pipe(
+          Layer.provide(handlersLayer),
+          Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
+        ),
+        scope,
+      );
+
+      return cleanup;
+    }).pipe(
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) ? cleanup("setup-failed") : Effect.void,
       ),
-      scope,
     );
-
-    return cleanup;
   });
 }
 
 export function setupPageApiBridge() {
   const sessions = new Map<MessagePort, PageBridgeSession>();
+  const pendingPorts = new Set<MessagePort>();
   let nextSessionId = 0;
 
   const cleanupAllSessions = (reason: string) =>
@@ -265,7 +282,25 @@ export function setupPageApiBridge() {
       },
     );
 
-  const onMessage = async (event: MessageEvent) => {
+  const initializeSession = (port: MessagePort, sessionId: number) =>
+    attachServerToPort(sessionId, port, sessions).pipe(
+      Effect.tap((cleanup) =>
+        Effect.sync(() => {
+          sessions.set(port, {
+            id: sessionId,
+            port,
+            cleanup,
+          });
+        }),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          pendingPorts.delete(port);
+        }),
+      ),
+    );
+
+  const onMessage = (event: MessageEvent) => {
     // `event.source` is only used as a local filter; authorization is enforced in background RPC.
     if (
       event.source !== window ||
@@ -276,33 +311,27 @@ export function setupPageApiBridge() {
     }
 
     const port = event.ports[0];
-    if (sessions.has(port)) {
+    if (sessions.has(port) || pendingPorts.has(port)) {
       return;
     }
 
     const sessionId = ++nextSessionId;
+    pendingPorts.add(port);
 
-    try {
-      const cleanup = await Effect.runPromise(
-        attachServerToPort(sessionId, port, sessions),
-      );
-      sessions.set(port, {
-        id: sessionId,
-        port,
-        cleanup,
-      });
-    } catch (error) {
-      console.warn("failed to initialize page bridge rpc", error);
-    }
+    runDetachedTransportServerEffect(initializeSession(port, sessionId), {
+      onError: (error) => {
+        console.warn("failed to initialize page bridge rpc", error);
+      },
+    });
   };
 
   window.addEventListener("message", onMessage);
   window.addEventListener(
     "pagehide",
     () => {
-      void Effect.runPromise(cleanupAllSessions("pagehide")).catch(
-        () => undefined,
-      );
+      runDetachedTransportServerEffect(cleanupAllSessions("pagehide"), {
+        onError: () => undefined,
+      });
     },
     { once: true },
   );

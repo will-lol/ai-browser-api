@@ -1,4 +1,4 @@
-export { createBridgeClient } from "./create-bridge-client";
+export { createBridgeClient, createBridgeClientEffect } from "./create-bridge-client";
 export type { BridgeClientApi } from "./client-api";
 export type {
   BridgeChatCallOptions,

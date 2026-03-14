@@ -13,8 +13,14 @@ import {
   type LanguageModelV3StreamPart,
 } from "@ai-sdk/provider";
 import * as Effect from "effect/Effect";
-import * as Stream from "effect/Stream";
 import type { BridgeConnection } from "./connection";
+import {
+  attachAbortEffect,
+  bufferReadableStreamPrefix,
+  effectStreamToReadableStream,
+  runClientTransport,
+  runDetachedClientTransport,
+} from "./transport-boundary";
 import {
   createAbortError,
   currentOrigin,
@@ -51,19 +57,17 @@ export function createLanguageModelAdapter(input: {
         throw createAbortError();
       }
 
-      const onAbort = () => {
-        void Effect.runPromise(
-          input.abortRequest({
-            requestId,
-            sessionID: requestId,
-          }),
-        ).catch(() => undefined);
-      };
-
-      abortSignal?.addEventListener("abort", onAbort, { once: true });
+      const cleanupAbort = attachAbortEffect({
+        signal: abortSignal,
+        effect: input.abortRequest({
+          requestId,
+          sessionID: requestId,
+        }),
+        onError: () => undefined,
+      });
 
       try {
-        const response = await Effect.runPromise(
+        const response = await runClientTransport(
           Effect.gen(function* () {
             if (abortSignal?.aborted) {
               return yield* Effect.fail(createAbortError());
@@ -97,7 +101,7 @@ export function createLanguageModelAdapter(input: {
         });
         throw normalized;
       } finally {
-        abortSignal?.removeEventListener("abort", onAbort);
+        cleanupAbort();
       }
     },
     async doStream(options) {
@@ -111,59 +115,39 @@ export function createLanguageModelAdapter(input: {
       }
 
       try {
-        const runtimeStream = await Effect.runPromise(
+        const runtimeStream = await effectStreamToReadableStream(
           Effect.gen(function* () {
             if (abortSignal?.aborted) {
               return yield* Effect.fail(createAbortError());
             }
 
             const current = yield* input.ensureConnection;
-            return yield* Effect.scoped(
-              Stream.toReadableStreamEffect(
-                current.client.modelDoStream({
-                  origin: currentOrigin(),
-                  requestId,
-                  sessionID: requestId,
-                  modelId,
-                  options: runtimeOptions,
-                }),
-              ),
-            );
+            return current.client.modelDoStream({
+              origin: currentOrigin(),
+              requestId,
+              sessionID: requestId,
+              modelId,
+              options: runtimeOptions,
+            });
           }),
         );
 
         const reader = runtimeStream.getReader();
-        const onAbort = () => {
-          void Effect.runPromise(
-            input.abortRequest({
-              requestId,
-              sessionID: requestId,
-            }),
-          ).catch(() => undefined);
-        };
+        const cleanupAbort = attachAbortEffect({
+          signal: abortSignal,
+          effect: input.abortRequest({
+            requestId,
+            sessionID: requestId,
+          }),
+          onError: () => undefined,
+        });
 
-        abortSignal?.addEventListener("abort", onAbort, { once: true });
-
-        const cleanup = () => {
-          abortSignal?.removeEventListener("abort", onAbort);
-        };
-
-        const bufferedParts = [] as Array<LanguageModelV3StreamPart>;
-        let streamFinishedDuringBootstrap = false;
-
-        while (true) {
-          const next = await reader.read();
-          if (next.done) {
-            streamFinishedDuringBootstrap = true;
-            break;
-          }
-
-          const part = fromRuntimeStreamPart(next.value);
-          bufferedParts.push(part);
-          if (!isBootstrapRuntimeStreamPart(part)) {
-            break;
-          }
-        }
+        const { buffered: bufferedParts, done: streamFinishedDuringBootstrap } =
+          await bufferReadableStreamPrefix({
+            reader,
+            map: (value) => fromRuntimeStreamPart(value),
+            keepBuffering: (part) => isBootstrapRuntimeStreamPart(part),
+          });
 
         let bufferedIndex = 0;
         let completed = false;
@@ -171,7 +155,7 @@ export function createLanguageModelAdapter(input: {
         const finishStream = () => {
           if (completed) return;
           completed = true;
-          cleanup();
+          cleanupAbort();
           logBridgeDebug("doStream.completed", {
             modelId,
             requestId,
@@ -200,9 +184,10 @@ export function createLanguageModelAdapter(input: {
                   controller.close();
                   return;
                 }
+
                 controller.enqueue(fromRuntimeStreamPart(next.value));
               } catch (error) {
-                cleanup();
+                cleanupAbort();
                 const normalized = normalizeModelCallError({
                   error,
                   operation: "stream",
@@ -224,13 +209,16 @@ export function createLanguageModelAdapter(input: {
                 });
                 await reader.cancel();
               } finally {
-                cleanup();
-                void Effect.runPromise(
+                cleanupAbort();
+                runDetachedClientTransport(
                   input.abortRequest({
                     requestId,
                     sessionID: requestId,
                   }),
-                ).catch(() => undefined);
+                  {
+                    onError: () => undefined,
+                  },
+                );
               }
             },
           }),

@@ -19,6 +19,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
 import { DEFAULT_TIMEOUT_MS } from "./shared";
+import { runDetachedClientTransport } from "./transport-boundary";
 import type { BridgeClientOptions } from "./types";
 
 export type PageBridgeClient = Effect.Effect.Success<
@@ -82,8 +83,7 @@ export function closeConnection(
   const disconnectReason =
     reason === "destroy" ? "client-destroy" : "stale-connection";
 
-  return Effect.tryPromise({
-    try: async () => {
+  return Effect.gen(function* () {
       const disconnectMessage: PageBridgePortControlMessage = {
         _tag: PAGE_BRIDGE_PORT_CONTROL_MESSAGE,
         type: "disconnect",
@@ -97,22 +97,16 @@ export function closeConnection(
         // ignored
       }
 
-      try {
-        await Effect.runPromise(
-          Scope.close(connection.scope, Exit.succeed(undefined)),
-        );
-      } catch {
-        // ignored
-      }
+      yield* Scope.close(connection.scope, Exit.succeed(undefined)).pipe(
+        Effect.catchAll(() => Effect.void),
+      );
 
       try {
         connection.port.close();
       } catch {
         // ignored
       }
-    },
-    catch: () => undefined,
-  }).pipe(Effect.orElseSucceed(() => undefined));
+  }).pipe(Effect.catchAll(() => Effect.void));
 }
 
 export function createConnection(
@@ -144,9 +138,9 @@ export function createConnection(
       const protocol = yield* RpcClient.Protocol.make((writeResponse) =>
         Effect.gen(function* () {
           const onMessage = (event: MessageEvent<FromServerEncoded>) => {
-            void Effect.runPromise(writeResponse(event.data)).catch(
-              () => undefined,
-            );
+            runDetachedClientTransport(writeResponse(event.data), {
+              onError: () => undefined,
+            });
           };
 
           runtimePort.addEventListener("message", onMessage);

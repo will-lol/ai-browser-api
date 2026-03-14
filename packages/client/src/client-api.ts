@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import type { BridgeConnection } from "./connection";
 import { createChatTransport } from "./chat-transport";
 import { currentOrigin } from "./shared";
+import { runClientTransport } from "./transport-boundary";
 import type {
   BridgeChatTransportOptions,
   BridgePermissionRequest,
@@ -16,16 +17,15 @@ import type {
 export function makeBridgeClientApi(input: {
   ensureConnection: Effect.Effect<BridgeConnection, RuntimeRpcError>;
   destroy: Effect.Effect<void, never>;
-  abortChatStream: (chatId: string) => Promise<void>;
+  abortChatStream: (chatId: string) => Effect.Effect<void, RuntimeRpcError>;
   createLanguageModel: (
     modelId: string,
     descriptor: BridgeModelDescriptorResponse,
   ) => LanguageModelV3;
   nextModelRequestId: () => string;
 }) {
-  console.log("makeBridgeClientApi");
   const listModels = () =>
-    Effect.runPromise(
+    runClientTransport(
       input.ensureConnection.pipe(
         Effect.flatMap((current) =>
           current.client.listModels({
@@ -37,7 +37,7 @@ export function makeBridgeClientApi(input: {
     );
 
   const requestPermission = (payload: BridgePermissionRequest) =>
-    Effect.runPromise(
+    runClientTransport(
       input.ensureConnection.pipe(
         Effect.flatMap((current) =>
           current.client.createPermissionRequest({
@@ -49,7 +49,7 @@ export function makeBridgeClientApi(input: {
     );
 
   const getModel = (modelId: string) =>
-    Effect.runPromise(
+    runClientTransport(
       Effect.gen(function* () {
         const requestId = input.nextModelRequestId();
         const current = yield* input.ensureConnection;
@@ -73,13 +73,12 @@ export function makeBridgeClientApi(input: {
       options,
     });
 
-  console.log("we've got it");
   return {
     listModels,
     getModel,
     getChatTransport,
     requestPermission,
-    close: () => Effect.runPromise(input.destroy),
+    close: () => runClientTransport(input.destroy),
   };
 }
 

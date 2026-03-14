@@ -25,6 +25,10 @@ import {
   RuntimeValidationError,
   type RuntimeRpcError,
 } from "@llm-bridge/contracts";
+import {
+  offerMailboxFromCallback,
+  runDetachedTransportServerEffect,
+} from "@/shared/rpc/transport-server-boundary";
 
 type RuntimePort = ReturnType<typeof browser.runtime.connect>;
 type RuntimeSender = RuntimePort["sender"];
@@ -245,9 +249,9 @@ function protocolForRole<Rpcs extends Rpc.Any>(
           }
         }
 
-        void Effect.runPromise(disconnects.offer(clientId)).catch(
-          () => undefined,
-        );
+        offerMailboxFromCallback(disconnects, clientId, {
+          onError: () => undefined,
+        });
       };
 
       const onConnect: Parameters<
@@ -277,7 +281,7 @@ function protocolForRole<Rpcs extends Rpc.Any>(
         const onMessage: Parameters<typeof port.onMessage.addListener>[0] = (
           payload: FromClientEncoded,
         ) => {
-          void Effect.runPromise(
+          runDetachedTransportServerEffect(
             options.policy
               .authorizeRequest({
                 allowedTags,
@@ -292,16 +296,19 @@ function protocolForRole<Rpcs extends Rpc.Any>(
                   }),
                 ),
               ),
-          ).catch(() => undefined);
+            {
+              onError: () => undefined,
+            },
+          );
         };
 
         const onDisconnect: Parameters<
           typeof port.onDisconnect.addListener
         >[0] = () => {
           cleanupSession(clientId, "port-disconnect");
-          void Effect.runPromise(disconnects.offer(clientId)).catch(
-            () => undefined,
-          );
+          offerMailboxFromCallback(disconnects, clientId, {
+            onError: () => undefined,
+          });
         };
 
         sessions.set(clientId, {

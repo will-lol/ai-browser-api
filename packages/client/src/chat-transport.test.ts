@@ -120,7 +120,7 @@ describe("createChatTransport", () => {
 
     const transport = createChatTransport({
       ensureConnection: Effect.succeed(connection),
-      abortChatStream: async () => undefined,
+      abortChatStream: () => Effect.void,
     });
 
     const result = await transport.reconnectToStream({
@@ -142,7 +142,7 @@ describe("createChatTransport", () => {
 
     const transport = createChatTransport({
       ensureConnection: Effect.succeed(connection),
-      abortChatStream: async () => undefined,
+      abortChatStream: () => Effect.void,
     });
 
     const result = await transport.reconnectToStream({
@@ -175,9 +175,10 @@ describe("createChatTransport", () => {
 
     const transport = createChatTransport({
       ensureConnection: Effect.succeed(connection),
-      abortChatStream: async (chatId) => {
-        abortCalls.push(chatId);
-      },
+      abortChatStream: (chatId) =>
+        Effect.sync(() => {
+          abortCalls.push(chatId);
+        }),
     });
 
     const canceledStream = await transport.sendMessages({
