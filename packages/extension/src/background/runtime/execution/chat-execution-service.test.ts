@@ -1,5 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APICallError } from "@ai-sdk/provider";
 import {
   RuntimeChatStreamNotFoundError,
@@ -36,8 +35,6 @@ let modelPermission: "allowed" | "denied" | "pending" = "allowed";
 let lastAbortSignal: AbortSignal | undefined;
 let queuedStreams: Array<ControlledUIStream> = [];
 let createdStreams: Array<ControlledUIStream> = [];
-const originalConsoleLog = console.log;
-const originalConsoleError = console.error;
 let prepareLanguageModelCallImpl: () => Effect.Effect<{
   languageModel: {
     specificationVersion: "v3";
@@ -88,9 +85,9 @@ function makeControlledUIStream(): ControlledUIStream {
   };
 }
 
-const validateMessagesMock = mock(async ({ messages }: { messages: Array<object> }) => messages);
-const convertMessagesMock = mock(async (messages: Array<object>) => messages as Array<never>);
-const streamTextMock = mock((input: { abortSignal: AbortSignal }) => {
+const validateMessagesMock = vi.fn(async ({ messages }: { messages: Array<object> }) => messages);
+const convertMessagesMock = vi.fn(async (messages: Array<object>) => messages as Array<never>);
+const streamTextMock = vi.fn((input: { abortSignal: AbortSignal }) => {
   lastAbortSignal = input.abortSignal;
   const controlled = queuedStreams.shift() ?? makeControlledUIStream();
   createdStreams.push(controlled);
@@ -102,14 +99,14 @@ const streamTextMock = mock((input: { abortSignal: AbortSignal }) => {
 
 const ai = await import("ai");
 
-mock.module("ai", () => ({
+vi.doMock("ai", () => ({
   ...ai,
   validateUIMessages: validateMessagesMock,
   convertToModelMessages: convertMessagesMock,
   streamText: streamTextMock,
 }));
 
-mock.module("@/background/runtime/execution/language-model-runtime", () => ({
+vi.doMock("@/background/runtime/execution/language-model-runtime", () => ({
   prepareRuntimeChatModelCall: () => prepareLanguageModelCallImpl(),
 }));
 
@@ -251,14 +248,12 @@ beforeEach(() => {
   validateMessagesMock.mockClear();
   convertMessagesMock.mockClear();
   streamTextMock.mockClear();
-  console.log = mock(() => undefined) as typeof console.log;
-  console.error = mock(() => undefined) as typeof console.error;
+  vi.spyOn(console, "log").mockImplementation(() => undefined);
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
-afterAll(() => {
-  console.log = originalConsoleLog;
-  console.error = originalConsoleError;
-  mock.restore();
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("chat-execution-service", () => {
@@ -360,7 +355,7 @@ describe("chat-execution-service", () => {
       await readNext(reader);
 
       const serializedLogs = JSON.stringify(
-        (console.log as ReturnType<typeof mock>).mock.calls,
+        vi.mocked(console.log).mock.calls,
       );
 
       expect(serializedLogs).toContain("send.started");

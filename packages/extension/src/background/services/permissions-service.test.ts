@@ -1,5 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PermissionsService, type AppRuntime } from "@llm-bridge/runtime-core";
 import type {
   RuntimeCreatePermissionRequestResponse,
@@ -55,7 +54,7 @@ let pendingRows: Array<PendingRow> = [];
 let modelRows = new Map<string, ModelRow>();
 let nextPendingId = 1;
 
-mock.module("@/background/storage/runtime-db", () => ({
+vi.doMock("@/background/storage/runtime-db", () => ({
   runtimeDb: {
     origins: {
       toArray: async () => originRows,
@@ -82,7 +81,7 @@ mock.module("@/background/storage/runtime-db", () => ({
   },
 }));
 
-mock.module("@/background/runtime/permissions", () => ({
+vi.doMock("@/background/runtime/permissions", () => ({
   getModelPermission: (origin: string, modelID: string) =>
     Effect.succeed(
       permissionRows.find(

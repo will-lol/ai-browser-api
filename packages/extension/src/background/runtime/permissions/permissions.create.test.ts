@@ -1,5 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 
 const MAX_PENDING_REQUESTS = 3;
@@ -75,13 +74,13 @@ function createCollection(rows: PendingRow[]) {
   };
 }
 
-mock.module("@/background/runtime/core/constants", () => ({
+vi.doMock("@/background/runtime/core/constants", () => ({
   MAX_PENDING_REQUESTS,
   MAX_PENDING_REQUESTS_PER_ORIGIN,
   PENDING_REQUEST_TIMEOUT_MS: 30_000,
 }));
 
-mock.module("@/background/storage/runtime-db", () => ({
+vi.doMock("@/background/storage/runtime-db", () => ({
   runtimeDb: {
     origins: {
       get: async (origin: string) => {
@@ -148,16 +147,16 @@ mock.module("@/background/storage/runtime-db", () => ({
   },
 }));
 
-mock.module("@/background/storage/runtime-db-types", () => ({
+vi.doMock("@/background/storage/runtime-db-types", () => ({
   runtimePermissionKey: (origin: string, modelId: string) =>
     `${origin}::${modelId}`,
 }));
 
-mock.module("@/background/storage/runtime-db-tx", () => ({
+vi.doMock("@/background/storage/runtime-db-tx", () => ({
   runTx: (_tables: unknown[], fn: () => Effect.Effect<unknown>) => fn(),
 }));
 
-mock.module("@/background/runtime/permissions/permission-targets", () => ({
+vi.doMock("@/background/runtime/permissions/permission-targets", () => ({
   resolveTrustedPermissionTargets: (modelIds: string[]) =>
     Effect.succeed(
       new Map(
@@ -169,7 +168,7 @@ mock.module("@/background/runtime/permissions/permission-targets", () => ({
     ),
 }));
 
-mock.module("@/background/runtime/core/util", () => ({
+vi.doMock("@/background/runtime/core/util", () => ({
   getModelCapabilities: (modelId: string) => [`cap:${modelId}`],
   isObject: (value: unknown): value is Record<string, unknown> =>
     !!value && typeof value === "object" && !Array.isArray(value),
@@ -244,10 +243,6 @@ beforeEach(() => {
   nowValue = 100;
   originsGetError = null;
   permissionsToArrayError = null;
-});
-
-afterAll(() => {
-  mock.restore();
 });
 
 describe("createPermissionRequest", () => {

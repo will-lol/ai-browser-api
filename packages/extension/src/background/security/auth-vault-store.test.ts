@@ -1,5 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 
 const authRows = new Map<
@@ -43,7 +42,7 @@ const vaultKeyRows = new Map<
 
 let nowValue = 100;
 
-mock.module("@/background/storage/runtime-db", () => ({
+vi.doMock("@/background/storage/runtime-db", () => ({
   runtimeDb: {
     auth: {
       get: async (providerID: string) => authRows.get(providerID),
@@ -94,11 +93,11 @@ mock.module("@/background/storage/runtime-db", () => ({
   },
 }));
 
-mock.module("@/background/storage/runtime-db-tx", () => ({
+vi.doMock("@/background/storage/runtime-db-tx", () => ({
   runTx: (_tables: unknown[], fn: () => Effect.Effect<unknown>) => fn(),
 }));
 
-mock.module("@/background/runtime/core/util", () => ({
+vi.doMock("@/background/runtime/core/util", () => ({
   now: () => {
     nowValue += 1;
     return nowValue;
@@ -147,10 +146,6 @@ beforeEach(() => {
   providerRows.clear();
   vaultKeyRows.clear();
   nowValue = 100;
-});
-
-afterAll(() => {
-  mock.restore();
 });
 
 describe("AuthVaultStore", () => {
@@ -234,9 +229,7 @@ describe("AuthVaultStore", () => {
       recordType: "oauth",
     });
 
-    const originalWarn = console.warn;
-    const warnMock = mock(() => undefined);
-    console.warn = warnMock;
+    const warnMock = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     try {
       const first = await Effect.runPromise(store.getAuth("broken_get"));
@@ -246,7 +239,7 @@ describe("AuthVaultStore", () => {
       expect(second).toBeUndefined();
       expect(warnMock).toHaveBeenCalledTimes(1);
     } finally {
-      console.warn = originalWarn;
+      warnMock.mockRestore();
     }
   });
 
@@ -281,9 +274,7 @@ describe("AuthVaultStore", () => {
       recordType: "api",
     });
 
-    const originalWarn = console.warn;
-    const warnMock = mock(() => undefined);
-    console.warn = warnMock;
+    const warnMock = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     try {
       const first = await Effect.runPromise(store.listAuth);
@@ -295,7 +286,7 @@ describe("AuthVaultStore", () => {
       expect(second).not.toHaveProperty("broken_list");
       expect(warnMock).toHaveBeenCalledTimes(1);
     } finally {
-      console.warn = originalWarn;
+      warnMock.mockRestore();
     }
   });
 
@@ -322,9 +313,7 @@ describe("AuthVaultStore", () => {
       recordType: "oauth",
     });
 
-    const originalWarn = console.warn;
-    const warnMock = mock(() => undefined);
-    console.warn = warnMock;
+    const warnMock = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     try {
       const stored = await Effect.runPromise(
@@ -346,7 +335,7 @@ describe("AuthVaultStore", () => {
       });
       expect(warnMock).toHaveBeenCalledTimes(1);
     } finally {
-      console.warn = originalWarn;
+      warnMock.mockRestore();
     }
   });
 });

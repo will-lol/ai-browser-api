@@ -1,5 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import {
   createAuthStoreSpies,
@@ -54,7 +53,7 @@ describe("resolveOpenAIExecutionState", () => {
   });
 
   beforeEach(() => {
-    console.warn = mock(() => undefined);
+    console.warn = vi.fn(() => undefined);
   });
 
   afterEach(() => {
@@ -64,7 +63,7 @@ describe("resolveOpenAIExecutionState", () => {
 
   it("uses refreshed account id for header and persisted auth", async () => {
     const { authStore, setCalls } = createAuthStoreSpies();
-    globalThis.fetch = mock(
+    globalThis.fetch = vi.fn(
       async () =>
         new Response(
           JSON.stringify({
@@ -112,7 +111,7 @@ describe("resolveOpenAIExecutionState", () => {
 
   it("keeps prior account id when refreshed token has no claim", async () => {
     const { authStore, setCalls } = createAuthStoreSpies();
-    globalThis.fetch = mock(
+    globalThis.fetch = vi.fn(
       async () =>
         new Response(
           JSON.stringify({
@@ -157,7 +156,7 @@ describe("resolveOpenAIExecutionState", () => {
 
   it("omits header and warns when account id remains missing after refresh", async () => {
     const { authStore, setCalls } = createAuthStoreSpies();
-    globalThis.fetch = mock(
+    globalThis.fetch = vi.fn(
       async () =>
         new Response(
           JSON.stringify({
@@ -200,7 +199,7 @@ describe("resolveOpenAIExecutionState", () => {
 
   it("keeps existing behavior when refresh is not needed", async () => {
     const { authStore, setCalls } = createAuthStoreSpies();
-    const fetchMock = mock(async () => {
+    const fetchMock = vi.fn(async () => {
       throw new Error("fetch should not be called");
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;

@@ -1,18 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APICallError } from "@ai-sdk/provider";
 import { RuntimeUpstreamServiceError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 
-const getAuthMock = mock((_providerID?: string) => ({
+const getAuthMock = vi.fn((_providerID?: string) => ({
   type: "api" as const,
   key: "token-1",
 }));
-const setAuthMock = mock((_providerID?: string, _value?: unknown) => undefined);
-const removeAuthMock = mock((_providerID?: string) => undefined);
+const setAuthMock = vi.fn((_providerID?: string, _value?: unknown) => undefined);
+const removeAuthMock = vi.fn((_providerID?: string) => undefined);
 
-const getProviderMock = mock(async () => ({
+const getProviderMock = vi.fn(async () => ({
   id: "openai",
   name: "OpenAI",
   source: "models.dev" as const,
@@ -21,7 +20,7 @@ const getProviderMock = mock(async () => ({
   options: {},
 }));
 
-const getModelMock = mock(async () => ({
+const getModelMock = vi.fn(async () => ({
   id: "openai/gpt-4o-mini",
   providerID: "openai",
   name: "GPT-4o mini",
@@ -68,7 +67,7 @@ const getModelMock = mock(async () => ({
   },
 }));
 
-const doGenerateMock = mock(async () => {
+const doGenerateMock = vi.fn(async () => {
   throw new APICallError({
     message: "Rate limited",
     url: "https://api.openai.com/v1/responses",
@@ -81,7 +80,7 @@ const doGenerateMock = mock(async () => {
   });
 });
 
-const doStreamMock = mock(async (): Promise<{ stream: ReadableStream<unknown> }> => {
+const doStreamMock = vi.fn(async (): Promise<{ stream: ReadableStream<unknown> }> => {
   throw new APICallError({
     message: "Overloaded",
     url: "https://api.openai.com/v1/responses",
@@ -96,11 +95,9 @@ const doStreamMock = mock(async (): Promise<{ stream: ReadableStream<unknown> }>
 
 let supportedUrlsValue: Record<string, RegExp[]> = {};
 let supportedUrlsError: Error | null = null;
-const originalConsoleLog = console.log;
-const originalConsoleError = console.error;
 
 const adapter = {
-  createModel: mock(() =>
+  createModel: vi.fn(() =>
     Effect.succeed({
       provider: "openai",
       modelId: "gpt-4o-mini",
@@ -123,7 +120,7 @@ type LanguageModelRuntimeModule =
 let languageModelRuntimeModule: LanguageModelRuntimeModule;
 
 function installLanguageModelRuntimeMocks() {
-  mock.module("@/background/runtime/auth/auth-store", () => ({
+  vi.doMock("@/background/runtime/auth/auth-store", () => ({
     getAuth: () => Effect.sync(() => getAuthMock()),
     setAuth: (providerID: string, value: unknown) =>
       Effect.sync(() => setAuthMock(providerID, value)),
@@ -132,17 +129,17 @@ function installLanguageModelRuntimeMocks() {
     runSecurityEffect: <A>(effect: Effect.Effect<A>) => Effect.runPromise(effect),
   }));
 
-  mock.module("@/background/runtime/catalog/provider-registry", () => ({
+  vi.doMock("@/background/runtime/catalog/provider-registry", () => ({
     getProvider: () => Effect.promise(() => getProviderMock()),
     getModel: () => Effect.promise(() => getModelMock()),
-    listModelRows: mock(() => Effect.succeed([])),
-    listProviderRows: mock(() => Effect.succeed([])),
-    ensureProviderCatalog: mock(() => Effect.void),
-    refreshProviderCatalog: mock(() => Effect.succeed(Date.now())),
-    refreshProviderCatalogForProvider: mock(() => Effect.void),
+    listModelRows: vi.fn(() => Effect.succeed([])),
+    listProviderRows: vi.fn(() => Effect.succeed([])),
+    ensureProviderCatalog: vi.fn(() => Effect.void),
+    refreshProviderCatalog: vi.fn(() => Effect.succeed(Date.now())),
+    refreshProviderCatalogForProvider: vi.fn(() => Effect.void),
   }));
 
-  mock.module("@/background/runtime/providers/adapters", () => ({
+  vi.doMock("@/background/runtime/providers/adapters", () => ({
     resolveAdapterForProvider: () => adapter,
     resolveAdapterForModel: () => adapter,
     parseAdapterStoredAuth: () => ({
@@ -160,6 +157,7 @@ async function loadLanguageModelRuntimeModule() {
 }
 
 beforeEach(async () => {
+  vi.resetModules();
   getAuthMock.mockClear();
   setAuthMock.mockClear();
   removeAuthMock.mockClear();
@@ -170,15 +168,17 @@ beforeEach(async () => {
   adapter.createModel.mockClear();
   supportedUrlsValue = {};
   supportedUrlsError = null;
-  console.log = mock(() => undefined) as typeof console.log;
-  console.error = mock(() => undefined) as typeof console.error;
+  vi.spyOn(console, "log").mockImplementation(() => undefined);
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
   languageModelRuntimeModule = await loadLanguageModelRuntimeModule();
 });
 
 afterEach(() => {
-  console.log = originalConsoleLog;
-  console.error = originalConsoleError;
-  mock.restore();
+  vi.doUnmock("@/background/runtime/auth/auth-store");
+  vi.doUnmock("@/background/runtime/catalog/provider-registry");
+  vi.doUnmock("@/background/runtime/providers/adapters");
+  vi.restoreAllMocks();
+  vi.resetModules();
 });
 
 describe("language-model-runtime error normalization", () => {
@@ -400,8 +400,8 @@ describe("language-model-runtime error normalization", () => {
     );
 
     const serializedLogs = JSON.stringify([
-      ...(console.log as ReturnType<typeof mock>).mock.calls,
-      ...(console.error as ReturnType<typeof mock>).mock.calls,
+      ...vi.mocked(console.log).mock.calls,
+      ...vi.mocked(console.error).mock.calls,
     ]);
 
     expect(serializedLogs).not.toContain("super secret prompt");

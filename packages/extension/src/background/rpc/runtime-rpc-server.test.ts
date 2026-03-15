@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FromClientEncoded } from "@effect/rpc/RpcMessage";
 import {
   RUNTIME_ADMIN_RPC_PORT_NAME,
@@ -42,7 +41,7 @@ type FakeRuntimePort = {
 
 const onConnectListeners = new Set<(port: FakeRuntimePort) => void>();
 
-mock.module("@wxt-dev/browser", () => ({
+vi.doMock("@wxt-dev/browser", () => ({
   browser: {
     runtime: {
       id: EXTENSION_ID,
@@ -220,10 +219,6 @@ async function waitFor(
 
 beforeEach(() => {
   onConnectListeners.clear();
-});
-
-afterAll(() => {
-  mock.restore();
 });
 
 describe("runtime rpc server policy", () => {

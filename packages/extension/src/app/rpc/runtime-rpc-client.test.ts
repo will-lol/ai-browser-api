@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { describe, it, vi } from "vitest";
 import type { RuntimeValidationError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 
@@ -8,7 +7,7 @@ const ensureClient: Effect.Effect<never, RuntimeValidationError> = Effect.die(
   "unused",
 );
 
-mock.module("@/shared/rpc/runtime-rpc-client-core", () => ({
+vi.doMock("@/shared/rpc/runtime-rpc-client-core", () => ({
   makeRuntimeRpcClientCore: () => ({
     ensureClient,
   }),

@@ -9,8 +9,7 @@ import type { BridgeChatTransportOptions } from "@llm-bridge/client";
 import * as Effect from "effect/Effect";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
-import { afterEach, beforeEach, describe, it } from "vitest";
-import { mock } from "./test-utils/vitest-compat";
+import { afterEach, beforeEach, describe, it, vi } from "vitest";
 import { useEffect } from "react";
 
 type FakeModelSummary = {
@@ -198,12 +197,17 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  mock.restore();
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
+  vi.doUnmock("@llm-bridge/client");
+  vi.resetModules();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe("client-react hooks", () => {
   it("creates one client per provider and closes it on unmount", async () => {
-    mock.module("@llm-bridge/client", () => ({
+    vi.doMock("@llm-bridge/client", () => ({
       createBridgeClient: async () => {
         createClientCalls += 1;
         return createFakeClient();
@@ -237,7 +241,7 @@ describe("client-react hooks", () => {
   });
 
   it("streams models and loads model resources through public client methods", async () => {
-    mock.module("@llm-bridge/client", () => ({
+    vi.doMock("@llm-bridge/client", () => ({
       createBridgeClient: async () => {
         createClientCalls += 1;
         return createFakeClient();
@@ -275,7 +279,7 @@ describe("client-react hooks", () => {
   });
 
   it("reactively updates the model list without manual refresh", async () => {
-    mock.module("@llm-bridge/client", () => ({
+    vi.doMock("@llm-bridge/client", () => ({
       createBridgeClient: async () => {
         createClientCalls += 1;
         return createFakeClient();
@@ -327,7 +331,7 @@ describe("client-react hooks", () => {
   it("surfaces model stream failures through useBridgeModels", async () => {
     streamModelsError = new Error("models failed");
 
-    mock.module("@llm-bridge/client", () => ({
+    vi.doMock("@llm-bridge/client", () => ({
       createBridgeClient: async () => {
         createClientCalls += 1;
         return createFakeClient();
@@ -363,7 +367,7 @@ describe("client-react hooks", () => {
   it("mounts before readiness and sends through the ready transport once available", async () => {
     const deferredClient = createDeferred<FakeClient>();
 
-    mock.module("@llm-bridge/client", () => ({
+    vi.doMock("@llm-bridge/client", () => ({
       createBridgeClient: async () => {
         createClientCalls += 1;
         return deferredClient.promise;
@@ -428,7 +432,7 @@ describe("client-react hooks", () => {
   it("reports bridge readiness state alongside the chat helpers", async () => {
     const deferredClient = createDeferred<FakeClient>();
 
-    mock.module("@llm-bridge/client", () => ({
+    vi.doMock("@llm-bridge/client", () => ({
       createBridgeClient: async () => {
         createClientCalls += 1;
         return deferredClient.promise;
@@ -474,7 +478,7 @@ describe("client-react hooks", () => {
   it("returns the unavailable error when sending before the bridge is ready", async () => {
     const deferredClient = createDeferred<FakeClient>();
 
-    mock.module("@llm-bridge/client", () => ({
+    vi.doMock("@llm-bridge/client", () => ({
       createBridgeClient: async () => {
         createClientCalls += 1;
         return deferredClient.promise;
@@ -520,7 +524,7 @@ describe("client-react hooks", () => {
   });
 
   it("passes transportOptions through and preserves chat state across rerenders", async () => {
-    mock.module("@llm-bridge/client", () => ({
+    vi.doMock("@llm-bridge/client", () => ({
       createBridgeClient: async () => {
         createClientCalls += 1;
         return createFakeClient();
@@ -585,7 +589,7 @@ describe("client-react hooks", () => {
   });
 
   it("requests permission through the public client API only", async () => {
-    mock.module("@llm-bridge/client", () => ({
+    vi.doMock("@llm-bridge/client", () => ({
       createBridgeClient: async () => {
         createClientCalls += 1;
         return createFakeClient();

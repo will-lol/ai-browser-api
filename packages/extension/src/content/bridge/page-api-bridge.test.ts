@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FromClientEncoded } from "@effect/rpc/RpcMessage";
 import {
   PAGE_BRIDGE_INIT_MESSAGE,
@@ -12,7 +11,7 @@ import * as Stream from "effect/Stream";
 const listModelsCalls: Array<Record<string, unknown>> = [];
 const streamModelsCalls: Array<Record<string, unknown>> = [];
 
-mock.module("@/content/bridge/runtime-public-rpc-client", () => ({
+vi.doMock("@/content/bridge/runtime-public-rpc-client", () => ({
   getRuntimePublicRPC: () => ({
     listModels: (input: Record<string, unknown>) =>
       Effect.sync(() => {
@@ -237,7 +236,6 @@ afterAll(() => {
     configurable: true,
     value: originalDocument,
   });
-  mock.restore();
 });
 
 describe("setupPageApiBridge", () => {

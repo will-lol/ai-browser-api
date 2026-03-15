@@ -1,5 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 
 let configRow:
@@ -9,7 +8,7 @@ let configRow:
     }
   | undefined;
 
-mock.module("@/background/storage/runtime-db", () => ({
+vi.doMock("@/background/storage/runtime-db", () => ({
   runtimeDb: {
     config: {
       get: async (_id: string) => configRow,
@@ -21,10 +20,6 @@ const { getRuntimeConfig } = await import("./config-store");
 
 beforeEach(() => {
   configRow = undefined;
-});
-
-afterAll(() => {
-  mock.restore();
 });
 
 describe("getRuntimeConfig", () => {

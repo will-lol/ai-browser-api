@@ -1,5 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 
 const vaultKeyRows = new Map<
@@ -14,8 +13,8 @@ const vaultKeyRows = new Map<
   }
 >();
 
-const getMock = mock(async (id: string) => vaultKeyRows.get(id));
-const putMock = mock(
+const getMock = vi.fn(async (id: string) => vaultKeyRows.get(id));
+const putMock = vi.fn(
   async (row: {
     id: "auth-master-key";
     key: unknown;
@@ -28,7 +27,7 @@ const putMock = mock(
   },
 );
 
-mock.module("@/background/storage/runtime-db", () => ({
+vi.doMock("@/background/storage/runtime-db", () => ({
   runtimeDb: {
     vaultKeys: {
       get: getMock,
@@ -61,10 +60,6 @@ beforeEach(() => {
   vaultKeyRows.clear();
   getMock.mockClear();
   putMock.mockClear();
-});
-
-afterAll(() => {
-  mock.restore();
 });
 
 describe("makeVaultKeyProvider", () => {

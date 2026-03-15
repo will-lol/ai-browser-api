@@ -1,5 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CatalogService,
   PermissionsService,
@@ -28,16 +27,16 @@ const tabUpdatedListeners = new Set<
 >();
 const windowFocusChangedListeners = new Set<() => void>();
 
-const setBadgeBackgroundColorMock = mock(async (_input: { color: string }) => {});
-const setBadgeTextMock = mock(async (_input: { text: string }) => {});
-const setIconMock = mock(
+const setBadgeBackgroundColorMock = vi.fn(async (_input: { color: string }) => {});
+const setBadgeTextMock = vi.fn(async (_input: { text: string }) => {});
+const setIconMock = vi.fn(
   async (
     _input:
       | { imageData: Record<number, ImageData> }
       | { path: Record<number, string> },
   ) => {},
 );
-const queryTabsMock = mock(
+const queryTabsMock = vi.fn(
   async () =>
     activeTabUrl
       ? [
@@ -52,7 +51,7 @@ const queryTabsMock = mock(
 let activeTabUrl: string | undefined = undefined;
 let shouldFailContext = false;
 
-mock.module("@wxt-dev/browser", () => ({
+vi.doMock("@wxt-dev/browser", () => ({
   browser: {
     runtime: {
       getURL: (path: string) => `chrome-extension://test${path}`,
@@ -106,14 +105,14 @@ mock.module("@wxt-dev/browser", () => ({
   },
 }));
 
-const fetchMock = mock(async (_input: string) => ({
+const fetchMock = vi.fn(async (_input: string) => ({
   blob: async () => new Blob(["icon"]),
 }));
-const createImageBitmapMock = mock(async (_blob: Blob) => ({
+const createImageBitmapMock = vi.fn(async (_blob: Blob) => ({
   width: 32,
   height: 32,
 }));
-const warnMock = mock((_message?: unknown, _details?: unknown) => {});
+const warnMock = vi.fn((_message?: unknown, _details?: unknown) => {});
 
 const originalFetch = globalThis.fetch;
 const originalImageData = Reflect.get(globalThis, "ImageData");
@@ -407,7 +406,6 @@ afterAll(() => {
   Reflect.set(globalThis, "createImageBitmap", originalCreateImageBitmap);
   Reflect.set(globalThis, "OffscreenCanvas", originalOffscreenCanvas);
   Reflect.set(console, "warn", originalConsoleWarn);
-  mock.restore();
 });
 
 describe("ToolbarProjectionLive", () => {

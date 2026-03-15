@@ -1,5 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 
 const CONNECTED_MODEL_ID = "openai/gpt-4o-mini";
@@ -26,15 +25,15 @@ const providerRowsById = new Map<
   }
 >();
 
-const modelsBulkGetMock = mock(async (modelIds: string[]) =>
+const modelsBulkGetMock = vi.fn(async (modelIds: string[]) =>
   modelIds.map((modelId) => modelRowsById.get(modelId)),
 );
 
-const providersBulkGetMock = mock(async (providerIds: string[]) =>
+const providersBulkGetMock = vi.fn(async (providerIds: string[]) =>
   providerIds.map((providerId) => providerRowsById.get(providerId)),
 );
 
-mock.module("@/background/storage/runtime-db", () => ({
+vi.doMock("@/background/storage/runtime-db", () => ({
   runtimeDb: {
     models: {
       bulkGet: modelsBulkGetMock,
@@ -52,10 +51,6 @@ beforeEach(() => {
   providerRowsById.clear();
   modelsBulkGetMock.mockClear();
   providersBulkGetMock.mockClear();
-});
-
-afterAll(() => {
-  mock.restore();
 });
 
 describe("permission target resolution", () => {

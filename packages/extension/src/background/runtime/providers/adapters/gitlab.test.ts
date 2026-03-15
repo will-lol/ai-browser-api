@@ -1,5 +1,4 @@
-import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import { gitlabAdapter } from "@/background/runtime/providers/adapters/gitlab";
 import type { AdapterAuthorizeContext } from "@/background/runtime/providers/adapters/types";
@@ -99,7 +98,7 @@ describe("gitlabAdapter", () => {
 
   it("authorizes GitLab OAuth through the adapter method surface", async () => {
     const oauthMethod = await getAuthMethod("oauth");
-    globalThis.fetch = mock(async (url: RequestInfo | URL) => {
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
       expect(String(url)).toBe("https://gitlab.example.com/oauth/token");
       return new Response(
         JSON.stringify({
@@ -136,7 +135,7 @@ describe("gitlabAdapter", () => {
 
   it("validates a GitLab personal access token through the adapter method surface", async () => {
     const patMethod = await getAuthMethod("pat");
-    globalThis.fetch = mock(async (url: RequestInfo | URL) => {
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
       expect(String(url)).toBe("https://gitlab.com/api/v4/user");
       return new Response(null, {
         status: 200,
@@ -164,7 +163,7 @@ describe("gitlabAdapter", () => {
 
   it("returns a typed auth failure when GitLab PAT validation fails", async () => {
     const patMethod = await getAuthMethod("pat");
-    globalThis.fetch = mock(
+    globalThis.fetch = vi.fn(
       async () =>
         new Response(null, {
           status: 401,

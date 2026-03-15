@@ -1,5 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CatalogService, type AppRuntime } from "@llm-bridge/runtime-core";
 import type { RuntimeProviderSummary } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
@@ -30,12 +29,12 @@ type ModelRow = {
 let providerRows: Array<ProviderRow> = [];
 let modelRows: Array<ModelRow> = [];
 
-mock.module("@/background/runtime/catalog/provider-registry-query", () => ({
+vi.doMock("@/background/runtime/catalog/provider-registry-query", () => ({
   listProviderRows: () => Effect.succeed(providerRows),
   listModelRows: () => Effect.succeed(modelRows),
 }));
 
-mock.module("@/background/runtime/catalog/provider-registry-refresh", () => ({
+vi.doMock("@/background/runtime/catalog/provider-registry-refresh", () => ({
   ensureProviderCatalog: () => Effect.void,
   refreshProviderCatalog: () => Effect.void,
   refreshProviderCatalogForProvider: () => Effect.void,

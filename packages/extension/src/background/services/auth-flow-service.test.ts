@@ -1,5 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   RuntimeValidationError,
   type RuntimeAuthFlowSnapshot,
@@ -30,14 +29,14 @@ const authMethods: ReadonlyArray<RuntimeAuthMethod> = [
 
 const windowRemovedListeners = new Set<(windowId: number) => void>();
 let nextWindowId = 101;
-const createWindowMock = mock(async () => ({
+const createWindowMock = vi.fn(async () => ({
   id: nextWindowId++,
 }));
-const updateWindowMock = mock(async (windowId: number) => ({
+const updateWindowMock = vi.fn(async (windowId: number) => ({
   id: windowId,
 }));
 
-mock.module("@wxt-dev/browser", () => ({
+vi.doMock("@wxt-dev/browser", () => ({
   browser: {
     runtime: {
       getURL: (path: string) => `chrome-extension://test${path}`,
@@ -73,7 +72,7 @@ let startProviderAuthImpl: (input: {
     connected: true as const,
   });
 
-mock.module("@/background/runtime/auth/provider-auth", () => ({
+vi.doMock("@/background/runtime/auth/provider-auth", () => ({
   listProviderAuthMethods: () => Effect.succeed(authMethods),
   startProviderAuth: (input: Parameters<typeof startProviderAuthImpl>[0]) =>
     startProviderAuthImpl(input),
@@ -185,10 +184,6 @@ beforeEach(() => {
       methodID: input.methodID,
       connected: true as const,
     });
-});
-
-afterAll(() => {
-  mock.restore();
 });
 
 describe("auth-flow-service", () => {

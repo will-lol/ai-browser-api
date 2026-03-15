@@ -1,6 +1,5 @@
 import Dexie from "dexie";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -17,7 +16,7 @@ let transactionImpl: (
   fn: () => Promise<unknown>,
 ) => Promise<unknown> = (_mode, _tables, fn) => withCurrentTransaction(fn);
 
-mock.module("@/background/storage/runtime-db", () => ({
+vi.doMock("@/background/storage/runtime-db", () => ({
   runtimeDb: {
     transaction: (
       mode: "r" | "rw",
@@ -66,26 +65,20 @@ function waitForDrainTick() {
 }
 
 async function withMutedWarnings<T>(
-  fn: (warnMock: ReturnType<typeof mock>) => Promise<T>,
+  fn: (warnMock: ReturnType<typeof vi.fn>) => Promise<T>,
 ) {
-  const originalWarn = console.warn;
-  const warnMock = mock(() => undefined);
-  console.warn = warnMock;
+  const warnMock = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
   try {
     return await fn(warnMock);
   } finally {
-    console.warn = originalWarn;
+    warnMock.mockRestore();
   }
 }
 
 beforeEach(() => {
   transactionCalls.length = 0;
   transactionImpl = (_mode, _tables, fn) => withCurrentTransaction(fn);
-});
-
-afterAll(() => {
-  mock.restore();
 });
 
 describe("runTx", () => {

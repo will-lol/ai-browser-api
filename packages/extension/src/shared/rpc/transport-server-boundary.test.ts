@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { describe, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Mailbox from "effect/Mailbox";
 import {
@@ -8,9 +7,6 @@ import {
   offerMailboxFromCallback,
   runDetachedTransportServerEffect,
 } from "./transport-server-boundary";
-
-const warnMock = mock((_message?: unknown, _details?: unknown) => undefined);
-const originalWarn = console.warn;
 
 async function waitFor(
   predicate: () => boolean,
@@ -27,12 +23,6 @@ async function waitFor(
 
   throw new Error("Timed out waiting for condition");
 }
-
-afterEach(() => {
-  warnMock.mockClear();
-  console.warn = originalWarn;
-});
-
 describe("transport-server-boundary", () => {
   it("routes detached failures through the provided handler", async () => {
     const failure = await new Promise<unknown>((resolve) => {
@@ -76,13 +66,17 @@ describe("transport-server-boundary", () => {
   });
 
   it("tolerates offering into a shutdown mailbox", async () => {
-    console.warn = warnMock;
+    const warnMock = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const mailbox = await Effect.runPromise(Mailbox.make<number>());
-    await Effect.runPromise(mailbox.shutdown);
+    try {
+      await Effect.runPromise(mailbox.shutdown);
 
-    offerMailboxFromCallback(mailbox, 7);
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      offerMailboxFromCallback(mailbox, 7);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    assert.equal(warnMock.mock.calls.length, 0);
+      assert.equal(warnMock.mock.calls.length, 0);
+    } finally {
+      warnMock.mockRestore();
+    }
   });
 });

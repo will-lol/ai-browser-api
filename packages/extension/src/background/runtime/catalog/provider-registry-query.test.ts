@@ -1,5 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeInternalError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import type {
@@ -11,14 +10,14 @@ import { runtimeModelKey } from "@/background/storage/runtime-db-types";
 const providerRowsById = new Map<string, RuntimeDbProvider>();
 const modelRowsById = new Map<string, RuntimeDbModel>();
 
-const ensureProviderCatalogMock = mock(() => Effect.void);
-const providersToArrayMock = mock(async () => Array.from(providerRowsById.values()));
-const providersGetMock = mock(async (providerId: string) =>
+const ensureProviderCatalogMock = vi.fn(() => Effect.void);
+const providersToArrayMock = vi.fn(async () => Array.from(providerRowsById.values()));
+const providersGetMock = vi.fn(async (providerId: string) =>
   providerRowsById.get(providerId),
 );
-const modelsToArrayMock = mock(async () => Array.from(modelRowsById.values()));
-const modelsGetMock = mock(async (id: string) => modelRowsById.get(id));
-const modelsWhereMock = mock((_field: string) => ({
+const modelsToArrayMock = vi.fn(async () => Array.from(modelRowsById.values()));
+const modelsGetMock = vi.fn(async (id: string) => modelRowsById.get(id));
+const modelsWhereMock = vi.fn((_field: string) => ({
   equals: (providerId: string) => ({
     toArray: async () =>
       Array.from(modelRowsById.values()).filter(
@@ -33,7 +32,7 @@ const modelsWhereMock = mock((_field: string) => ({
   }),
 }));
 
-mock.module("@/background/storage/runtime-db", () => ({
+vi.doMock("@/background/storage/runtime-db", () => ({
   runtimeDb: {
     providers: {
       toArray: providersToArrayMock,
@@ -174,10 +173,6 @@ beforeEach(() => {
         ),
     }),
   }));
-});
-
-afterAll(() => {
-  mock.restore();
 });
 
 describe("provider-registry-query", () => {

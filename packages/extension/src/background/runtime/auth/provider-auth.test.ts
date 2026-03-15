@@ -1,5 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mock } from "@/test-utils/vitest-compat";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   RuntimeAuthProviderError,
   type RuntimeRpcError,
@@ -59,11 +58,11 @@ type ProviderAuthModule = typeof import("./provider-auth");
 let providerAuthModule: ProviderAuthModule;
 
 function installProviderAuthMocks() {
-  mock.module("@/background/security/runtime-security", () => ({
+  vi.doMock("@/background/security/runtime-security", () => ({
     provideRuntimeSecurity: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect,
   }));
 
-  mock.module("@/background/runtime/catalog/models-dev", () => ({
+  vi.doMock("@/background/runtime/catalog/models-dev", () => ({
     getModelsDevData: () =>
       Effect.succeed({
         openai: {
@@ -73,13 +72,13 @@ function installProviderAuthMocks() {
       }),
   }));
 
-  mock.module("@/background/runtime/providers/adapters", () => ({
+  vi.doMock("@/background/runtime/providers/adapters", () => ({
     resolveAdapterForProvider: () => adapter,
     resolveAdapterForModel: () => adapter,
     parseAdapterStoredAuth: (auth: AuthResult) => auth,
   }));
 
-  mock.module("@/background/runtime/catalog/provider-registry", () => ({
+  vi.doMock("@/background/runtime/catalog/provider-registry", () => ({
     getProvider: () => Effect.succeed(provider),
     getModel: () => Effect.die("unused"),
     listModelRows: () => Effect.succeed([]),
@@ -89,7 +88,7 @@ function installProviderAuthMocks() {
     refreshProviderCatalogForProvider: () => Effect.void,
   }));
 
-  mock.module("@/background/runtime/auth/auth-store", () => ({
+  vi.doMock("@/background/runtime/auth/auth-store", () => ({
     getAuth: () => Effect.succeed(storedAuth),
     setAuth: (providerID: string, result: AuthResult) =>
       Effect.sync(() => {
@@ -112,6 +111,7 @@ async function loadProviderAuthModule() {
 }
 
 beforeEach(async () => {
+  vi.resetModules();
   storedAuth = undefined;
   persistedAuth = [];
   instructions = [];
@@ -126,7 +126,13 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  mock.restore();
+  vi.doUnmock("@/background/security/runtime-security");
+  vi.doUnmock("@/background/runtime/catalog/models-dev");
+  vi.doUnmock("@/background/runtime/providers/adapters");
+  vi.doUnmock("@/background/runtime/catalog/provider-registry");
+  vi.doUnmock("@/background/runtime/auth/auth-store");
+  vi.restoreAllMocks();
+  vi.resetModules();
 });
 
 describe("provider-auth", () => {
