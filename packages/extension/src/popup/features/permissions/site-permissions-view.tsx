@@ -147,7 +147,7 @@ export function SitePermissionsView({
     );
   }
 
-  if (dataState.isLoading || data == null) {
+  if (data == null) {
     console.log(dataState, data);
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">

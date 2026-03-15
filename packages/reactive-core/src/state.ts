@@ -38,6 +38,7 @@ function toFailureValue<Value, Error>(
 export function toReactiveQueryState<Value>(
   result: ReactiveAtomResult<Value, unknown>,
 ): ReactiveQueryState<Value> {
+  console.log(result);
   if (Result.isInitial(result)) {
     return {
       status: "loading",
@@ -83,9 +84,9 @@ export function toReactiveQueryState<Value>(
 
 type StateValue<T> = T extends ReactiveQueryState<infer Value> ? Value : never;
 
-function canCombineStates<T extends Record<string, ReactiveQueryState<unknown>>>(
-  states: T,
-) {
+function canCombineStates<
+  T extends Record<string, ReactiveQueryState<unknown>>,
+>(states: T) {
   return Object.values(states).every((state) => state.value !== null);
 }
 
@@ -97,7 +98,9 @@ function combineStateValues<
   }
 
   const combined = {} as { [Key in keyof T]: StateValue<T[Key]> };
-  for (const [key, state] of Object.entries(states) as Array<[keyof T, T[keyof T]]>) {
+  for (const [key, state] of Object.entries(states) as Array<
+    [keyof T, T[keyof T]]
+  >) {
     combined[key] = state.value as StateValue<T[keyof T]>;
   }
   return combined;
@@ -105,9 +108,7 @@ function combineStateValues<
 
 export function combineQueryStates<
   T extends Record<string, ReactiveQueryState<unknown>>,
->(
-  states: T,
-): ReactiveQueryState<{ [Key in keyof T]: StateValue<T[Key]> }> {
+>(states: T): ReactiveQueryState<{ [Key in keyof T]: StateValue<T[Key]> }> {
   const firstError = Object.values(states).find((state) => state.hasError);
   if (firstError) {
     return {
