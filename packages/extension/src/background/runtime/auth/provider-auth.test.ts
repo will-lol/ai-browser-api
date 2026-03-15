@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import {
   RuntimeAuthProviderError,
   type RuntimeRpcError,
@@ -53,46 +53,64 @@ const adapter: AIAdapter = {
   createModel: () => Effect.die("unused"),
 };
 
-mock.module("@/background/security/runtime-security", () => ({
-  provideRuntimeSecurity: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect,
-}));
+type ProviderAuthModule = typeof import("./provider-auth");
 
-mock.module("@/background/runtime/catalog/models-dev", () => ({
-  getModelsDevData: () =>
-    Effect.succeed({
-      openai: {
-        name: "OpenAI",
-        models: {},
-      },
-    }),
-}));
+let providerAuthModule: ProviderAuthModule;
 
-mock.module("@/background/runtime/providers/adapters", () => ({
-  resolveAdapterForProvider: () => adapter,
-}));
+function installProviderAuthMocks() {
+  mock.module("@/background/security/runtime-security", () => ({
+    provideRuntimeSecurity: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect,
+  }));
 
-mock.module("@/background/runtime/catalog/provider-registry", () => ({
-  getProvider: () => Effect.succeed(provider),
-}));
+  mock.module("@/background/runtime/catalog/models-dev", () => ({
+    getModelsDevData: () =>
+      Effect.succeed({
+        openai: {
+          name: "OpenAI",
+          models: {},
+        },
+      }),
+  }));
 
-mock.module("@/background/runtime/auth/auth-store", () => ({
-  getAuth: () => Effect.succeed(storedAuth),
-  setAuth: (providerID: string, result: AuthResult) =>
-    Effect.sync(() => {
-      persistedAuth.push({ providerID, result });
-      storedAuth = {
-        ...result,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      } as AuthRecord;
-    }),
-  removeAuth: () => Effect.void,
-}));
+  mock.module("@/background/runtime/providers/adapters", () => ({
+    resolveAdapterForProvider: () => adapter,
+    resolveAdapterForModel: () => adapter,
+    parseAdapterStoredAuth: (auth: AuthResult) => auth,
+  }));
 
-const { listProviderAuthMethods, startProviderAuth } =
-  await import("./provider-auth");
+  mock.module("@/background/runtime/catalog/provider-registry", () => ({
+    getProvider: () => Effect.succeed(provider),
+    getModel: () => Effect.die("unused"),
+    listModelRows: () => Effect.succeed([]),
+    listProviderRows: () => Effect.succeed([]),
+    ensureProviderCatalog: () => Effect.void,
+    refreshProviderCatalog: () => Effect.succeed(Date.now()),
+    refreshProviderCatalogForProvider: () => Effect.void,
+  }));
 
-beforeEach(() => {
+  mock.module("@/background/runtime/auth/auth-store", () => ({
+    getAuth: () => Effect.succeed(storedAuth),
+    setAuth: (providerID: string, result: AuthResult) =>
+      Effect.sync(() => {
+        persistedAuth.push({ providerID, result });
+        storedAuth = {
+          ...result,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        } as AuthRecord;
+      }),
+    removeAuth: () => Effect.void,
+    runSecurityEffect: <A, E>(effect: Effect.Effect<A, E>) =>
+      Effect.runPromise(effect),
+  }));
+}
+
+async function loadProviderAuthModule() {
+  installProviderAuthMocks();
+  return import("./provider-auth");
+}
+
+beforeEach(async () => {
   storedAuth = undefined;
   persistedAuth = [];
   instructions = [];
@@ -103,15 +121,18 @@ beforeEach(() => {
       methodID: "apikey",
       methodType: "apikey",
     });
+  providerAuthModule = await loadProviderAuthModule();
 });
 
-afterAll(() => {
+afterEach(() => {
   mock.restore();
 });
 
 describe("provider-auth", () => {
   it("lists runtime auth methods from an Effect-based adapter", async () => {
-    const methods = await Effect.runPromise(listProviderAuthMethods("openai"));
+    const methods = await Effect.runPromise(
+      providerAuthModule.listProviderAuthMethods("openai"),
+    );
 
     expect(methods).toEqual([
       {
@@ -125,7 +146,7 @@ describe("provider-auth", () => {
 
   it("persists auth after successful authorization", async () => {
     const result = await Effect.runPromise(
-      startProviderAuth({
+      providerAuthModule.startProviderAuth({
         providerID: "openai",
         methodID: "oauth",
       }),
@@ -167,7 +188,7 @@ describe("provider-auth", () => {
       );
 
     await Effect.runPromise(
-      startProviderAuth({
+      providerAuthModule.startProviderAuth({
         providerID: "openai",
         methodID: "oauth",
         onInstruction: (instruction) =>
@@ -198,7 +219,7 @@ describe("provider-auth", () => {
 
     const result = await Effect.runPromise(
       Effect.either(
-        startProviderAuth({
+        providerAuthModule.startProviderAuth({
           providerID: "openai",
           methodID: "oauth",
         }),
@@ -219,7 +240,7 @@ describe("provider-auth", () => {
 
     const result = await Effect.runPromise(
       Effect.either(
-        startProviderAuth({
+        providerAuthModule.startProviderAuth({
           providerID: "openai",
           methodID: "oauth",
         }),

@@ -6,7 +6,6 @@ import {
   type RuntimeModelCallOptions,
   type RuntimeModelDescriptor,
   type RuntimeRpcError,
-  type RuntimeStreamPart,
 } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";

@@ -1,20 +1,10 @@
 import * as RpcGroup from "@effect/rpc/RpcGroup";
 import {
-  RuntimeCancelProviderAuthFlowRpc,
-  RuntimeDisconnectProviderRpc,
-  RuntimeGetProviderAuthFlowRpc,
-  RuntimeOpenProviderAuthWindowRpc,
-  RuntimeStartProviderAuthFlowRpc,
-  RuntimeStreamProviderAuthFlowRpc,
   RuntimeAuthRpcGroup,
 } from "./runtime-rpc.auth";
 import {
   RuntimeCatalogRpcGroup,
-  RuntimeListConnectedModelsRpc,
   RuntimeListModelsRpc,
-  RuntimeListProvidersRpc,
-  RuntimeStreamModelsRpc,
-  RuntimeStreamProvidersRpc,
 } from "./runtime-rpc.catalog";
 import {
   RuntimeAbortChatStreamRpc,
@@ -28,17 +18,9 @@ import {
 } from "./runtime-rpc.execution";
 import {
   RuntimeCreatePermissionRequestRpc,
-  RuntimeDismissPermissionRequestRpc,
   RuntimeGetOriginStateRpc,
   RuntimeListPendingRpc,
-  RuntimeListPermissionsRpc,
   RuntimePermissionsRpcGroup,
-  RuntimeResolvePermissionRequestRpc,
-  RuntimeSetModelPermissionRpc,
-  RuntimeSetOriginEnabledRpc,
-  RuntimeStreamOriginStateRpc,
-  RuntimeStreamPendingRpc,
-  RuntimeStreamPermissionsRpc,
 } from "./runtime-rpc.permissions";
 
 export const RUNTIME_PUBLIC_RPC_PORT_NAME = "llm-bridge-runtime-public-rpc-v1";

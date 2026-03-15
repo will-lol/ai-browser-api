@@ -7,9 +7,16 @@ import type { RuntimeRpcClientConnection } from "./runtime-rpc-client-core";
 export const RUNTIME_RPC_CONNECTION_INVALIDATED_MESSAGE =
   "Runtime connection was destroyed while connecting";
 
+type IsStreamRpc<Current extends Rpc.Any> =
+  [Rpc.SuccessSchema<Current>] extends [
+    RpcSchema.Stream<infer _Success, infer _StreamError>,
+  ]
+    ? true
+    : false;
+
 export type UnaryRpcTag<Rpcs extends Rpc.Any> = Rpcs extends infer Current
   ? Current extends Rpc.Any
-    ? Rpc.SuccessSchema<Current> extends RpcSchema.Stream<any, any>
+    ? IsStreamRpc<Current> extends true
       ? never
       : Current["_tag"]
     : never
@@ -17,7 +24,7 @@ export type UnaryRpcTag<Rpcs extends Rpc.Any> = Rpcs extends infer Current
 
 export type StreamRpcTag<Rpcs extends Rpc.Any> = Rpcs extends infer Current
   ? Current extends Rpc.Any
-    ? Rpc.SuccessSchema<Current> extends RpcSchema.Stream<any, any>
+    ? IsStreamRpc<Current> extends true
       ? Current["_tag"]
       : never
     : never
@@ -75,6 +82,48 @@ type BoundRpcMethod<
   Key extends Rpcs["_tag"],
 > = BoundRpcMethodForCurrent<Rpc.ExtractTag<Rpcs, Key>, E>;
 
+type UnaryBoundRpcMethod<
+  Rpcs extends Rpc.Any,
+  E,
+  Key extends UnaryRpcTag<Rpcs>,
+> = Extract<
+  BoundRpcMethod<Rpcs, E, Key>,
+  (
+    payload: Rpc.PayloadConstructor<Rpc.ExtractTag<Rpcs, Key>>,
+  ) => Effect.Effect<unknown, unknown, unknown>
+>;
+
+type StreamBoundRpcMethod<
+  Rpcs extends Rpc.Any,
+  E,
+  Key extends StreamRpcTag<Rpcs>,
+> = Extract<
+  BoundRpcMethod<Rpcs, E, Key>,
+  (
+    payload: Rpc.PayloadConstructor<Rpc.ExtractTag<Rpcs, Key>>,
+  ) => Stream.Stream<unknown, unknown, unknown>
+>;
+
+type UnaryClientMethod<
+  Rpcs extends Rpc.Any,
+  Key extends UnaryRpcTag<Rpcs>,
+> = Extract<
+  RuntimeRpcClientConnection<Rpcs>[Key],
+  (
+    payload: Rpc.PayloadConstructor<Rpc.ExtractTag<Rpcs, Key>>,
+  ) => Effect.Effect<unknown, unknown, unknown>
+>;
+
+type StreamClientMethod<
+  Rpcs extends Rpc.Any,
+  Key extends StreamRpcTag<Rpcs>,
+> = Extract<
+  RuntimeRpcClientConnection<Rpcs>[Key],
+  (
+    payload: Rpc.PayloadConstructor<Rpc.ExtractTag<Rpcs, Key>>,
+  ) => Stream.Stream<unknown, unknown, unknown>
+>;
+
 export function bindRuntimeRpcUnaryMethodByKey<
   Rpcs extends Rpc.Any,
   E,
@@ -82,15 +131,11 @@ export function bindRuntimeRpcUnaryMethodByKey<
 >(
   ensureClient: Effect.Effect<RuntimeRpcClientConnection<Rpcs>, E>,
   key: Key,
-): BoundRpcMethod<Rpcs, E, Key> {
+): UnaryBoundRpcMethod<Rpcs, E, Key> {
   return ((payload: Rpc.PayloadConstructor<Rpc.ExtractTag<Rpcs, Key>>) =>
     Effect.flatMap(ensureClient, (client) =>
-      (
-        client[key] as (
-          input: Rpc.PayloadConstructor<Rpc.ExtractTag<Rpcs, Key>>,
-        ) => Effect.Effect<any, any, any>
-      )(payload),
-    )) as BoundRpcMethod<Rpcs, E, Key>;
+      (client[key] as UnaryClientMethod<Rpcs, Key>)(payload),
+    )) as UnaryBoundRpcMethod<Rpcs, E, Key>;
 }
 
 export function bindRuntimeRpcStreamMethodByKey<
@@ -100,15 +145,11 @@ export function bindRuntimeRpcStreamMethodByKey<
 >(
   ensureClient: Effect.Effect<RuntimeRpcClientConnection<Rpcs>, E>,
   key: Key,
-): BoundRpcMethod<Rpcs, E, Key> {
+): StreamBoundRpcMethod<Rpcs, E, Key> {
   return ((payload: Rpc.PayloadConstructor<Rpc.ExtractTag<Rpcs, Key>>) =>
     Stream.unwrap(
       Effect.map(ensureClient, (client) =>
-        (
-          client[key] as (
-            input: Rpc.PayloadConstructor<Rpc.ExtractTag<Rpcs, Key>>,
-          ) => Stream.Stream<any, any, any>
-        )(payload),
+        (client[key] as StreamClientMethod<Rpcs, Key>)(payload),
       ),
-    )) as BoundRpcMethod<Rpcs, E, Key>;
+    )) as StreamBoundRpcMethod<Rpcs, E, Key>;
 }

@@ -33,6 +33,8 @@ type FakeRpcs = RpcGroup.Rpcs<typeof FakeRpcGroup>;
 
 describe("runtime rpc client method helpers", () => {
   it("binds unary and stream methods by key", async () => {
+    assert.equal(FakeRpcGroup.requests.size, 2);
+
     const calls: Array<string> = [];
     const client = {
       ping: (payload) =>

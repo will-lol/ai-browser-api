@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { APICallError } from "@ai-sdk/provider";
 import { RuntimeUpstreamServiceError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
@@ -113,41 +113,49 @@ const adapter = {
   ),
 };
 
-mock.module("@/background/runtime/auth/auth-store", () => ({
-  getAuth: () => Effect.sync(() => getAuthMock()),
-  setAuth: (providerID: string, value: unknown) =>
-    Effect.sync(() => setAuthMock(providerID, value)),
-  removeAuth: (providerID: string) =>
-    Effect.sync(() => removeAuthMock(providerID)),
-  runSecurityEffect: <A>(effect: Effect.Effect<A>) => Effect.runPromise(effect),
-}));
+type LanguageModelRuntimeModule =
+  typeof import("@/background/runtime/execution/language-model-runtime");
 
-mock.module("@/background/runtime/catalog/provider-registry", () => ({
-  getProvider: () => Effect.promise(() => getProviderMock()),
-  getModel: () => Effect.promise(() => getModelMock()),
-  listModelRows: mock(() => Effect.succeed([])),
-  listProviderRows: mock(() => Effect.succeed([])),
-  ensureProviderCatalog: mock(() => Effect.void),
-  refreshProviderCatalog: mock(() => Effect.succeed(Date.now())),
-  refreshProviderCatalogForProvider: mock(() => Effect.void),
-}));
+let languageModelRuntimeModule: LanguageModelRuntimeModule;
 
-mock.module("@/background/runtime/providers/adapters", () => ({
-  resolveAdapterForModel: () => adapter,
-  parseAdapterStoredAuth: () => ({
-    type: "api" as const,
-    key: "token-1",
-    methodID: "apikey",
-    methodType: "apikey",
-  }),
-}));
+function installLanguageModelRuntimeMocks() {
+  mock.module("@/background/runtime/auth/auth-store", () => ({
+    getAuth: () => Effect.sync(() => getAuthMock()),
+    setAuth: (providerID: string, value: unknown) =>
+      Effect.sync(() => setAuthMock(providerID, value)),
+    removeAuth: (providerID: string) =>
+      Effect.sync(() => removeAuthMock(providerID)),
+    runSecurityEffect: <A>(effect: Effect.Effect<A>) => Effect.runPromise(effect),
+  }));
 
-const { runLanguageModelGenerate, runLanguageModelStream } =
-  await import("@/background/runtime/execution/language-model-runtime");
-const { getRuntimeModelDescriptor } =
-  await import("@/background/runtime/execution/language-model-runtime");
+  mock.module("@/background/runtime/catalog/provider-registry", () => ({
+    getProvider: () => Effect.promise(() => getProviderMock()),
+    getModel: () => Effect.promise(() => getModelMock()),
+    listModelRows: mock(() => Effect.succeed([])),
+    listProviderRows: mock(() => Effect.succeed([])),
+    ensureProviderCatalog: mock(() => Effect.void),
+    refreshProviderCatalog: mock(() => Effect.succeed(Date.now())),
+    refreshProviderCatalogForProvider: mock(() => Effect.void),
+  }));
 
-beforeEach(() => {
+  mock.module("@/background/runtime/providers/adapters", () => ({
+    resolveAdapterForProvider: () => adapter,
+    resolveAdapterForModel: () => adapter,
+    parseAdapterStoredAuth: () => ({
+      type: "api" as const,
+      key: "token-1",
+      methodID: "apikey",
+      methodType: "apikey",
+    }),
+  }));
+}
+
+async function loadLanguageModelRuntimeModule() {
+  installLanguageModelRuntimeMocks();
+  return import("@/background/runtime/execution/language-model-runtime");
+}
+
+beforeEach(async () => {
   getAuthMock.mockClear();
   setAuthMock.mockClear();
   removeAuthMock.mockClear();
@@ -158,9 +166,10 @@ beforeEach(() => {
   adapter.createModel.mockClear();
   supportedUrlsValue = {};
   supportedUrlsError = null;
+  languageModelRuntimeModule = await loadLanguageModelRuntimeModule();
 });
 
-afterAll(() => {
+afterEach(() => {
   mock.restore();
 });
 
@@ -171,7 +180,7 @@ describe("language-model-runtime error normalization", () => {
     };
 
     const result = await Effect.runPromise(
-      getRuntimeModelDescriptor({
+      languageModelRuntimeModule.getRuntimeModelDescriptor({
         modelID: "openai/gpt-4o-mini",
         origin: "https://example.test",
         sessionID: "session-1",
@@ -200,7 +209,7 @@ describe("language-model-runtime error normalization", () => {
 
     const result = await Effect.runPromise(
       Effect.either(
-        getRuntimeModelDescriptor({
+        languageModelRuntimeModule.getRuntimeModelDescriptor({
           modelID: "openai/gpt-4o-mini",
           origin: "https://example.test",
           sessionID: "session-1",
@@ -228,7 +237,7 @@ describe("language-model-runtime error normalization", () => {
   it("wraps generate provider failures as RuntimeUpstreamServiceError", async () => {
     const result = await Effect.runPromise(
       Effect.either(
-        runLanguageModelGenerate({
+        languageModelRuntimeModule.runLanguageModelGenerate({
           modelID: "openai/gpt-4o-mini",
           origin: "https://example.test",
           sessionID: "session-1",
@@ -264,7 +273,7 @@ describe("language-model-runtime error normalization", () => {
   it("wraps stream provider failures as RuntimeUpstreamServiceError", async () => {
     const result = await Effect.runPromise(
       Effect.either(
-        runLanguageModelStream({
+        languageModelRuntimeModule.runLanguageModelStream({
           modelID: "openai/gpt-4o-mini",
           origin: "https://example.test",
           sessionID: "session-1",
@@ -324,7 +333,7 @@ describe("language-model-runtime error normalization", () => {
     const result = await Effect.runPromise(
       Effect.either(
         Effect.flatMap(
-          runLanguageModelStream({
+          languageModelRuntimeModule.runLanguageModelStream({
             modelID: "openai/gpt-4o-mini",
             origin: "https://example.test",
             sessionID: "session-1",
