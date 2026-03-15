@@ -13,6 +13,11 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { PENDING_REQUEST_TIMEOUT_MS } from "@/background/runtime/core/constants";
+import {
+  replaceIfChanged,
+  sameArray,
+  sameMap,
+} from "@/background/services/service-snapshot-utils";
 import { runtimeDb } from "@/background/storage/runtime-db";
 import {
   createPermissionRequest,
@@ -35,36 +40,6 @@ type PermissionsSnapshot = {
     ReadonlyArray<RuntimePendingRequest>
   >;
 };
-
-function sameArray<A>(
-  left: ReadonlyArray<A>,
-  right: ReadonlyArray<A>,
-  sameValue: (left: A, right: A) => boolean,
-) {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => sameValue(value, right[index]!))
-  );
-}
-
-function sameMap<K, V>(
-  left: ReadonlyMap<K, V>,
-  right: ReadonlyMap<K, V>,
-  sameValue: (left: V, right: V) => boolean,
-) {
-  if (left.size !== right.size) {
-    return false;
-  }
-
-  for (const [key, leftValue] of left.entries()) {
-    const rightValue = right.get(key);
-    if (rightValue === undefined || !sameValue(leftValue, rightValue)) {
-      return false;
-    }
-  }
-
-  return true;
-}
 
 function sameOriginState(left: RuntimeOriginState, right: RuntimeOriginState) {
   return left.origin === right.origin && left.enabled === right.enabled;
@@ -256,11 +231,10 @@ export const PermissionsServiceLive = Layer.effect(
         pendingByOrigin: pendingMap,
       } satisfies PermissionsSnapshot;
 
-      yield* SubscriptionRef.modify(snapshotRef, (current) =>
-        samePermissionsSnapshot(current, nextSnapshot)
-          ? [undefined, current]
-          : [undefined, nextSnapshot],
-      );
+      yield* SubscriptionRef.modify(snapshotRef, (current) => [
+        undefined,
+        replaceIfChanged(current, nextSnapshot, samePermissionsSnapshot),
+      ]);
     });
 
     const getOrCreateWaiter = (requestId: string) =>

@@ -1,165 +1,137 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "bun:test";
 import * as Effect from "effect/Effect";
+import {
+  createAuthStoreSpies,
+  makeRuntimeAdapterContext,
+} from "@/background/runtime/providers/adapters/adapter-test-utils";
 import {
   resolveGeminiProjectContext,
   resolveGoogleExecutionState,
 } from "@/background/runtime/providers/adapters/google";
 import { rewriteGeminiCodeAssistRequest } from "@/background/runtime/providers/adapters/gemini-code-assist-transport";
-import type { RuntimeAdapterContext } from "@/background/runtime/providers/adapters/types";
 
-function createContext(): Omit<RuntimeAdapterContext, "auth" | "authStore"> {
-  return {
-    providerID: "google",
-    modelID: "gemini-2.5-pro",
-    origin: "https://example.test",
-    sessionID: "session-1",
-    requestID: "request-1",
-    provider: {
-      id: "google",
-      name: "Google",
-      source: "models.dev",
-      env: ["GOOGLE_API_KEY"],
-      connected: true,
-      options: {},
+const googleContext = makeRuntimeAdapterContext({
+  providerID: "google",
+  providerName: "Google",
+  providerEnv: ["GOOGLE_API_KEY"],
+  modelID: "gemini-2.5-pro",
+  modelName: "Gemini 2.5 Pro",
+  modelURL: "https://generativelanguage.googleapis.com",
+  modelNpm: "@ai-sdk/google",
+  capabilities: {
+    temperature: true,
+    reasoning: true,
+    attachment: true,
+    toolcall: true,
+    input: {
+      text: true,
+      audio: false,
+      image: true,
+      video: false,
+      pdf: false,
     },
-    model: {
-      id: "gemini-2.5-pro",
-      providerID: "google",
-      name: "Gemini 2.5 Pro",
-      status: "active",
-      api: {
-        id: "gemini-2.5-pro",
-        url: "https://generativelanguage.googleapis.com",
-        npm: "@ai-sdk/google",
-      },
-      cost: {
-        input: 0,
-        output: 0,
-        cache: {
-          read: 0,
-          write: 0,
-        },
-      },
-      limit: {
-        context: 1,
-        output: 1,
-      },
-      options: {},
-      headers: {},
-      capabilities: {
-        temperature: true,
-        reasoning: true,
-        attachment: true,
-        toolcall: true,
-        input: {
-          text: true,
-          audio: false,
-          image: true,
-          video: false,
-          pdf: false,
-        },
-        output: {
-          text: true,
-          audio: false,
-          image: false,
-          video: false,
-          pdf: false,
-        },
-      },
+    output: {
+      text: true,
+      audio: false,
+      image: false,
+      video: false,
+      pdf: false,
     },
-    runtime: {
-      now: () => Date.now(),
-    },
-  };
-}
+  },
+});
 
 describe("resolveGeminiProjectContext", () => {
   it("uses configured project without loading managed project", async () => {
     let loadCalls = 0;
     let onboardCalls = 0;
 
-    const result = await Effect.runPromise(resolveGeminiProjectContext(
-      "access-token",
-      {
-        projectId: "configured-project",
-        managedProjectId: "managed-project",
-      },
-      {
-        loadCodeAssist: async () => {
-          loadCalls += 1;
-          return null;
+    const result = await Effect.runPromise(
+      resolveGeminiProjectContext(
+        "access-token",
+        {
+          projectId: "configured-project",
+          managedProjectId: "managed-project",
         },
-        onboardCodeAssist: async () => {
-          onboardCalls += 1;
-          return undefined;
+        {
+          loadCodeAssist: async () => {
+            loadCalls += 1;
+            return null;
+          },
+          onboardCodeAssist: async () => {
+            onboardCalls += 1;
+            return undefined;
+          },
         },
-      },
-    ));
+      ),
+    );
 
-    assert.deepEqual(result, {
+    expect(result).toEqual({
       projectId: "configured-project",
       managedProjectId: "managed-project",
     });
-    assert.equal(loadCalls, 0);
-    assert.equal(onboardCalls, 0);
+    expect(loadCalls).toBe(0);
+    expect(onboardCalls).toBe(0);
   });
 
   it("discovers managed project from loadCodeAssist", async () => {
     let onboardCalls = 0;
 
-    const result = await Effect.runPromise(resolveGeminiProjectContext(
-      "access-token",
-      {},
-      {
-        loadCodeAssist: async () => ({
-          cloudaicompanionProject: { id: "managed-project-123" },
-        }),
-        onboardCodeAssist: async () => {
-          onboardCalls += 1;
-          return undefined;
+    const result = await Effect.runPromise(
+      resolveGeminiProjectContext(
+        "access-token",
+        {},
+        {
+          loadCodeAssist: async () => ({
+            cloudaicompanionProject: { id: "managed-project-123" },
+          }),
+          onboardCodeAssist: async () => {
+            onboardCalls += 1;
+            return undefined;
+          },
         },
-      },
-    ));
+      ),
+    );
 
-    assert.deepEqual(result, {
+    expect(result).toEqual({
       projectId: "managed-project-123",
       managedProjectId: "managed-project-123",
     });
-    assert.equal(onboardCalls, 0);
+    expect(onboardCalls).toBe(0);
   });
 
   it("runs onboarding flow when no project is available", async () => {
     let onboardTier: string | undefined;
     let onboardProjectId: string | undefined;
 
-    const result = await Effect.runPromise(resolveGeminiProjectContext(
-      "access-token",
-      {},
-      {
-        loadCodeAssist: async () => ({
-          allowedTiers: [{ id: "free-tier" }],
-        }),
-        onboardCodeAssist: async (_token, tierId, projectId) => {
-          onboardTier = tierId;
-          onboardProjectId = projectId;
-          return "managed-project-456";
+    const result = await Effect.runPromise(
+      resolveGeminiProjectContext(
+        "access-token",
+        {},
+        {
+          loadCodeAssist: async () => ({
+            allowedTiers: [{ id: "free-tier" }],
+          }),
+          onboardCodeAssist: async (_token, tierId, projectId) => {
+            onboardTier = tierId;
+            onboardProjectId = projectId;
+            return "managed-project-456";
+          },
         },
-      },
-    ));
+      ),
+    );
 
-    assert.equal(onboardTier, "free-tier");
-    assert.equal(onboardProjectId, undefined);
-    assert.deepEqual(result, {
+    expect(onboardTier).toBe("free-tier");
+    expect(onboardProjectId).toBeUndefined();
+    expect(result).toEqual({
       projectId: "managed-project-456",
       managedProjectId: "managed-project-456",
     });
   });
 
   it("fails with actionable error when project cannot be resolved", async () => {
-    await assert.rejects(
-      () =>
-        Effect.runPromise(resolveGeminiProjectContext(
+    await expect(
+      Effect.runPromise(
+        resolveGeminiProjectContext(
           "access-token",
           {},
           {
@@ -174,68 +146,65 @@ describe("resolveGeminiProjectContext", () => {
             }),
             onboardCodeAssist: async () => undefined,
           },
-        )),
-      /Google Gemini requires a Google Cloud project/,
-    );
+        ),
+      ),
+    ).rejects.toThrow(/Google Gemini requires a Google Cloud project/);
   });
 });
 
 describe("resolveGoogleExecutionState", () => {
   it("returns oauth execution headers including Authorization", async () => {
-    const setAuthCalls: unknown[] = [];
-    const output = await Effect.runPromise(resolveGoogleExecutionState({
-      ...createContext(),
-      auth: {
-        type: "oauth",
-        methodID: "oauth",
-        methodType: "oauth",
-        access: "oauth-access",
-        refresh: "oauth-refresh",
-        expiresAt: Date.now() + 5 * 60_000,
-        createdAt: Date.now() - 1_000,
-        updatedAt: Date.now() - 1_000,
-        metadata: {
-          projectId: "configured-project",
+    const { authStore, setCalls } = createAuthStoreSpies();
+    const output = await Effect.runPromise(
+      resolveGoogleExecutionState({
+        ...googleContext,
+        auth: {
+          type: "oauth",
+          methodID: "oauth",
+          methodType: "oauth",
+          access: "oauth-access",
+          refresh: "oauth-refresh",
+          expiresAt: Date.now() + 5 * 60_000,
+          createdAt: Date.now() - 1_000,
+          updatedAt: Date.now() - 1_000,
+          metadata: {
+            projectId: "configured-project",
+          },
         },
-      },
-      authStore: {
-        get: () => Effect.succeed(undefined),
-        set: (auth) => Effect.sync(() => {
-          setAuthCalls.push(auth);
-        }),
-        remove: () => Effect.void,
-      },
-    }));
+        authStore,
+      }),
+    );
 
-    assert.equal(output.kind, "oauth");
-    assert.equal(output.apiKey, "oauth-access");
-    assert.equal(output.headers.Authorization, "Bearer oauth-access");
-    assert.equal(output.projectId, "configured-project");
-    assert.equal(setAuthCalls.length, 0);
+    expect(output.kind).toBe("oauth");
+    expect(output.apiKey).toBe("oauth-access");
+    expect(new Headers(output.headers).get("authorization")).toBe(
+      "Bearer oauth-access",
+    );
+    expect(output.projectId).toBe("configured-project");
+    expect(setCalls).toHaveLength(0);
   });
 
   it("provides headers that let code-assist request rewriting proceed", async () => {
-    const execution = await Effect.runPromise(resolveGoogleExecutionState({
-      ...createContext(),
-      auth: {
-        type: "oauth",
-        methodID: "oauth",
-        methodType: "oauth",
-        access: "oauth-access",
-        refresh: "oauth-refresh",
-        expiresAt: Date.now() + 5 * 60_000,
-        createdAt: Date.now() - 1_000,
-        updatedAt: Date.now() - 1_000,
-        metadata: {
-          projectId: "configured-project",
+    const { authStore } = createAuthStoreSpies();
+    const execution = await Effect.runPromise(
+      resolveGoogleExecutionState({
+        ...googleContext,
+        auth: {
+          type: "oauth",
+          methodID: "oauth",
+          methodType: "oauth",
+          access: "oauth-access",
+          refresh: "oauth-refresh",
+          expiresAt: Date.now() + 5 * 60_000,
+          createdAt: Date.now() - 1_000,
+          updatedAt: Date.now() - 1_000,
+          metadata: {
+            projectId: "configured-project",
+          },
         },
-      },
-      authStore: {
-        get: () => Effect.succeed(undefined),
-        set: () => Effect.void,
-        remove: () => Effect.void,
-      },
-    }));
+        authStore,
+      }),
+    );
 
     const rewritten = await rewriteGeminiCodeAssistRequest(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
@@ -256,8 +225,8 @@ describe("resolveGoogleExecutionState", () => {
       },
     );
 
-    assert.ok(rewritten);
-    const headers = new Headers(rewritten.init.headers);
-    assert.equal(headers.get("authorization"), "Bearer oauth-access");
+    expect(rewritten).toBeTruthy();
+    const headers = new Headers(rewritten?.init.headers);
+    expect(headers.get("authorization")).toBe("Bearer oauth-access");
   });
 });

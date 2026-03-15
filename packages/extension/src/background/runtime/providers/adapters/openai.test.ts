@@ -8,8 +8,11 @@ import {
   mock,
 } from "bun:test";
 import * as Effect from "effect/Effect";
+import {
+  createAuthStoreSpies,
+  makeRuntimeAdapterContext,
+} from "@/background/runtime/providers/adapters/adapter-test-utils";
 import { resolveOpenAIExecutionState } from "@/background/runtime/providers/adapters/openai";
-import type { RuntimeAdapterContext } from "@/background/runtime/providers/adapters/types";
 
 function makeJwt(claims: Record<string, unknown>) {
   const encode = (value: unknown) =>
@@ -17,76 +20,39 @@ function makeJwt(claims: Record<string, unknown>) {
   return `${encode({ alg: "none", typ: "JWT" })}.${encode(claims)}.`;
 }
 
-function createContext(): Omit<RuntimeAdapterContext, "auth" | "authStore"> {
-  return {
-    providerID: "openai",
-    modelID: "gpt-4o-mini",
-    origin: "https://example.test",
-    sessionID: "session-1",
-    requestID: "request-1",
-    provider: {
-      id: "openai",
-      name: "OpenAI",
-      source: "models.dev",
-      env: ["OPENAI_API_KEY"],
-      connected: true,
-      options: {},
+const openAIContext = makeRuntimeAdapterContext({
+  providerID: "openai",
+  providerName: "OpenAI",
+  providerEnv: ["OPENAI_API_KEY"],
+  modelID: "gpt-4o-mini",
+  modelName: "GPT-4o mini",
+  modelURL: "https://api.openai.com/v1",
+  modelNpm: "@ai-sdk/openai",
+  capabilities: {
+    temperature: true,
+    reasoning: false,
+    attachment: false,
+    toolcall: true,
+    input: {
+      text: true,
+      audio: false,
+      image: false,
+      video: false,
+      pdf: false,
     },
-    model: {
-      id: "gpt-4o-mini",
-      providerID: "openai",
-      name: "GPT-4o mini",
-      status: "active",
-      api: {
-        id: "gpt-4o-mini",
-        url: "https://api.openai.com/v1",
-        npm: "@ai-sdk/openai",
-      },
-      cost: {
-        input: 0,
-        output: 0,
-        cache: {
-          read: 0,
-          write: 0,
-        },
-      },
-      limit: {
-        context: 1,
-        output: 1,
-      },
-      options: {},
-      headers: {},
-      capabilities: {
-        temperature: true,
-        reasoning: false,
-        attachment: false,
-        toolcall: true,
-        input: {
-          text: true,
-          audio: false,
-          image: false,
-          video: false,
-          pdf: false,
-        },
-        output: {
-          text: true,
-          audio: false,
-          image: false,
-          video: false,
-          pdf: false,
-        },
-      },
+    output: {
+      text: true,
+      audio: false,
+      image: false,
+      video: false,
+      pdf: false,
     },
-    runtime: {
-      now: () => Date.now(),
-    },
-  };
-}
+  },
+});
 
 describe("resolveOpenAIExecutionState", () => {
   const originalFetch = globalThis.fetch;
   const originalWarn = console.warn;
-  const setAuthMock = mock((_auth: unknown) => undefined);
 
   afterAll(() => {
     globalThis.fetch = originalFetch;
@@ -94,7 +60,6 @@ describe("resolveOpenAIExecutionState", () => {
   });
 
   beforeEach(() => {
-    setAuthMock.mockClear();
     console.warn = mock(() => undefined);
   });
 
@@ -104,6 +69,7 @@ describe("resolveOpenAIExecutionState", () => {
   });
 
   it("uses refreshed account id for header and persisted auth", async () => {
+    const { authStore, setCalls } = createAuthStoreSpies();
     globalThis.fetch = mock(
       async () =>
         new Response(
@@ -120,40 +86,38 @@ describe("resolveOpenAIExecutionState", () => {
         ),
     ) as unknown as typeof fetch;
 
-    const output = await Effect.runPromise(resolveOpenAIExecutionState({
-      ...createContext(),
-      auth: {
-        type: "oauth",
-        methodID: "oauth-device",
-        methodType: "oauth",
-        access: "stale-access",
-        refresh: "stale-refresh",
-        expiresAt: Date.now() - 1_000,
-        accountId: "acct-old",
-        metadata: { accountId: "acct-old" },
-        createdAt: Date.now() - 10_000,
-        updatedAt: Date.now() - 10_000,
-      },
-      authStore: {
-        get: () => Effect.succeed(undefined),
-        set: (auth) => Effect.sync(() => setAuthMock(auth)),
-        remove: () => Effect.void,
-      },
-    }));
+    const output = await Effect.runPromise(
+      resolveOpenAIExecutionState({
+        ...openAIContext,
+        auth: {
+          type: "oauth",
+          methodID: "oauth-device",
+          methodType: "oauth",
+          access: "stale-access",
+          refresh: "stale-refresh",
+          expiresAt: Date.now() - 1_000,
+          accountId: "acct-old",
+          metadata: { accountId: "acct-old" },
+          createdAt: Date.now() - 10_000,
+          updatedAt: Date.now() - 10_000,
+        },
+        authStore,
+      }),
+    );
 
     expect(output.apiKey).toBe("refreshed-access");
-    const headers = output.headers as Record<string, string | undefined>;
-    expect(headers["chatgpt-account-id"]).toBe("acct-new");
-
-    expect(setAuthMock).toHaveBeenCalledTimes(1);
-    const payload = setAuthMock.mock.calls[0]?.[0] as
-      | { accountId?: string; metadata?: { accountId?: string } }
-      | undefined;
-    expect(payload?.accountId).toBe("acct-new");
-    expect(payload?.metadata).toEqual({ accountId: "acct-new" });
+    expect(new Headers(output.headers).get("chatgpt-account-id")).toBe(
+      "acct-new",
+    );
+    expect(setCalls).toHaveLength(1);
+    expect(setCalls[0]).toMatchObject({
+      accountId: "acct-new",
+      metadata: { accountId: "acct-new" },
+    });
   });
 
   it("keeps prior account id when refreshed token has no claim", async () => {
+    const { authStore, setCalls } = createAuthStoreSpies();
     globalThis.fetch = mock(
       async () =>
         new Response(
@@ -169,37 +133,36 @@ describe("resolveOpenAIExecutionState", () => {
         ),
     ) as unknown as typeof fetch;
 
-    const output = await Effect.runPromise(resolveOpenAIExecutionState({
-      ...createContext(),
-      auth: {
-        type: "oauth",
-        methodID: "oauth-device",
-        methodType: "oauth",
-        access: "stale-access",
-        refresh: "stale-refresh",
-        expiresAt: Date.now() - 1_000,
-        accountId: "acct-existing",
-        metadata: { accountId: "acct-existing" },
-        createdAt: Date.now() - 10_000,
-        updatedAt: Date.now() - 10_000,
-      },
-      authStore: {
-        get: () => Effect.succeed(undefined),
-        set: (auth) => Effect.sync(() => setAuthMock(auth)),
-        remove: () => Effect.void,
-      },
-    }));
+    const output = await Effect.runPromise(
+      resolveOpenAIExecutionState({
+        ...openAIContext,
+        auth: {
+          type: "oauth",
+          methodID: "oauth-device",
+          methodType: "oauth",
+          access: "stale-access",
+          refresh: "stale-refresh",
+          expiresAt: Date.now() - 1_000,
+          accountId: "acct-existing",
+          metadata: { accountId: "acct-existing" },
+          createdAt: Date.now() - 10_000,
+          updatedAt: Date.now() - 10_000,
+        },
+        authStore,
+      }),
+    );
 
-    const headers = output.headers as Record<string, string | undefined>;
-    expect(headers["chatgpt-account-id"]).toBe("acct-existing");
-    const payload = setAuthMock.mock.calls[0]?.[0] as
-      | { accountId?: string; metadata?: { accountId?: string } }
-      | undefined;
-    expect(payload?.accountId).toBe("acct-existing");
-    expect(payload?.metadata).toEqual({ accountId: "acct-existing" });
+    expect(new Headers(output.headers).get("chatgpt-account-id")).toBe(
+      "acct-existing",
+    );
+    expect(setCalls[0]).toMatchObject({
+      accountId: "acct-existing",
+      metadata: { accountId: "acct-existing" },
+    });
   });
 
   it("omits header and warns when account id remains missing after refresh", async () => {
+    const { authStore, setCalls } = createAuthStoreSpies();
     globalThis.fetch = mock(
       async () =>
         new Response(
@@ -215,68 +178,64 @@ describe("resolveOpenAIExecutionState", () => {
         ),
     ) as unknown as typeof fetch;
 
-    const output = await Effect.runPromise(resolveOpenAIExecutionState({
-      ...createContext(),
-      auth: {
-        type: "oauth",
-        methodID: "oauth-device",
-        methodType: "oauth",
-        access: "stale-access",
-        refresh: "stale-refresh",
-        expiresAt: Date.now() - 1_000,
-        createdAt: Date.now() - 10_000,
-        updatedAt: Date.now() - 10_000,
-      },
-      authStore: {
-        get: () => Effect.succeed(undefined),
-        set: (auth) => Effect.sync(() => setAuthMock(auth)),
-        remove: () => Effect.void,
-      },
-    }));
+    const output = await Effect.runPromise(
+      resolveOpenAIExecutionState({
+        ...openAIContext,
+        auth: {
+          type: "oauth",
+          methodID: "oauth-device",
+          methodType: "oauth",
+          access: "stale-access",
+          refresh: "stale-refresh",
+          expiresAt: Date.now() - 1_000,
+          createdAt: Date.now() - 10_000,
+          updatedAt: Date.now() - 10_000,
+        },
+        authStore,
+      }),
+    );
 
-    const headers = output.headers as Record<string, string | undefined>;
-    expect(headers["chatgpt-account-id"]).toBeUndefined();
-    expect(setAuthMock).toHaveBeenCalledTimes(1);
-    const payload = setAuthMock.mock.calls[0]?.[0] as
-      | { accountId?: string; metadata?: { accountId?: string } }
-      | undefined;
-    expect(payload?.accountId).toBeUndefined();
-    expect(payload?.metadata).toBeUndefined();
+    expect(new Headers(output.headers).get("chatgpt-account-id")).toBeNull();
+    expect(setCalls).toHaveLength(1);
+    expect(setCalls[0]).toMatchObject({
+      accountId: undefined,
+      metadata: undefined,
+    });
     expect(console.warn).toHaveBeenCalledTimes(1);
   });
 
   it("keeps existing behavior when refresh is not needed", async () => {
+    const { authStore, setCalls } = createAuthStoreSpies();
     const fetchMock = mock(async () => {
       throw new Error("fetch should not be called");
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const output = await Effect.runPromise(resolveOpenAIExecutionState({
-      ...createContext(),
-      auth: {
-        type: "oauth",
-        methodID: "oauth-device",
-        methodType: "oauth",
-        access: "current-access",
-        refresh: "refresh-token",
-        expiresAt: Date.now() + 30 * 60_000,
-        accountId: "acct-steady",
-        metadata: { accountId: "acct-steady" },
-        createdAt: Date.now() - 10_000,
-        updatedAt: Date.now() - 10_000,
-      },
-      authStore: {
-        get: () => Effect.succeed(undefined),
-        set: (auth) => Effect.sync(() => setAuthMock(auth)),
-        remove: () => Effect.void,
-      },
-    }));
+    const output = await Effect.runPromise(
+      resolveOpenAIExecutionState({
+        ...openAIContext,
+        auth: {
+          type: "oauth",
+          methodID: "oauth-device",
+          methodType: "oauth",
+          access: "current-access",
+          refresh: "refresh-token",
+          expiresAt: Date.now() + 30 * 60_000,
+          accountId: "acct-steady",
+          metadata: { accountId: "acct-steady" },
+          createdAt: Date.now() - 10_000,
+          updatedAt: Date.now() - 10_000,
+        },
+        authStore,
+      }),
+    );
 
     expect(output.apiKey).toBe("current-access");
-    const headers = output.headers as Record<string, string | undefined>;
-    expect(headers["chatgpt-account-id"]).toBe("acct-steady");
+    expect(new Headers(output.headers).get("chatgpt-account-id")).toBe(
+      "acct-steady",
+    );
     expect(fetchMock).toHaveBeenCalledTimes(0);
-    expect(setAuthMock).toHaveBeenCalledTimes(0);
+    expect(setCalls).toHaveLength(0);
     expect(console.warn).toHaveBeenCalledTimes(0);
   });
 });

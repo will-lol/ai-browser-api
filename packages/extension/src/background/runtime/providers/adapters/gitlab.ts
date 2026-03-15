@@ -1,13 +1,11 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { decodeSchemaOrUndefined } from "@/background/runtime/core/effect-schema";
+import { createAdapterErrorFactory } from "./adapter-errors";
+import { parseOptionalTrimmedString } from "./provider-options";
 import { defineAuthSchema } from "./schema";
 import type { AIAdapter, AdapterAuthorizeContext } from "./types";
 import {
-  isRuntimeRpcError,
-  RuntimeAuthProviderError,
   RuntimeInternalError,
-  RuntimeUpstreamServiceError,
   RuntimeValidationError,
 } from "@llm-bridge/contracts";
 import {
@@ -22,6 +20,17 @@ const CLIENT_ID =
 const GITLAB_COM_URL = "https://gitlab.com";
 const OAUTH_SCOPES = ["api"];
 const GITLAB_PROVIDER_ID = "gitlab";
+const {
+  authProviderError: gitlabAuthProviderError,
+  upstreamError: gitlabUpstreamError,
+  toAdapterError: toGitLabError,
+  readResponseDetail: readGitLabResponseDetail,
+  decodeResponseJson,
+} = createAdapterErrorFactory({
+  providerID: GITLAB_PROVIDER_ID,
+  defaultUpstreamMessage: "GitLab authentication request failed.",
+  logLabel: "[adapter:gitlab]",
+});
 
 const gitLabTokenResponseSchema = Schema.Struct({
   access_token: Schema.String,
@@ -32,92 +41,52 @@ const gitLabTokenResponseSchema = Schema.Struct({
 const optionalAuthStringSchema = Schema.Union(Schema.String, Schema.Undefined);
 const requiredAuthStringSchema = Schema.String.pipe(Schema.minLength(1));
 
-function gitlabUpstreamError(input: {
-  operation: string;
-  statusCode: number;
-  detail?: string;
-}) {
-  console.error("[adapter:gitlab] upstream auth request failed", {
-    operation: input.operation,
-    statusCode: input.statusCode,
-    detail: input.detail?.slice(0, 500),
-  });
-
-  return new RuntimeUpstreamServiceError({
-    providerID: GITLAB_PROVIDER_ID,
-    operation: input.operation,
-    statusCode: input.statusCode,
-    retryable:
-      input.statusCode >= 500 ||
-      input.statusCode === 429 ||
-      input.statusCode === 408,
-    message: "GitLab authentication request failed.",
-  });
-}
-
-function gitlabAuthProviderError(input: {
-  operation: string;
-  message: string;
-  retryable?: boolean;
-}) {
-  return new RuntimeAuthProviderError({
-    providerID: GITLAB_PROVIDER_ID,
-    operation: input.operation,
-    retryable: input.retryable ?? false,
-    message: input.message,
-  });
-}
-
 function exchangeAuthorizationCode(
   instanceUrl: string,
   code: string,
   codeVerifier: string,
   redirectUri: string,
 ) {
-  return Effect.tryPromise({
-    try: async () => {
-      const response = await fetch(`${instanceUrl}/oauth/token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-        },
-        body: new URLSearchParams({
-          client_id: CLIENT_ID,
-          code,
-          grant_type: "authorization_code",
-          redirect_uri: redirectUri,
-          code_verifier: codeVerifier,
-        }).toString(),
-      });
+  return Effect.gen(function* () {
+    const response = yield* Effect.tryPromise({
+      try: () =>
+        fetch(`${instanceUrl}/oauth/token`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+          },
+          body: new URLSearchParams({
+            client_id: CLIENT_ID,
+            code,
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri,
+            code_verifier: codeVerifier,
+          }).toString(),
+        }),
+      catch: (error) => toGitLabError("oauth.exchangeAuthorizationCode", error),
+    });
 
-      if (!response.ok) {
-        const detail = await response.text().catch(() => "");
-        throw gitlabUpstreamError({
+    if (!response.ok) {
+      const detail = yield* readGitLabResponseDetail(
+        response,
+        "oauth.exchangeAuthorizationCode.detail",
+      );
+      return yield* Effect.fail(
+        gitlabUpstreamError({
           operation: "oauth.exchangeAuthorizationCode",
           statusCode: response.status,
           detail,
-        });
-      }
+        }),
+      );
+    }
 
-      const payload = await response.json().catch(() => undefined);
-      const result = decodeSchemaOrUndefined(gitLabTokenResponseSchema, payload);
-      if (!result) {
-        throw gitlabAuthProviderError({
-          operation: "oauth.exchangeAuthorizationCode.parse",
-          message: "GitLab OAuth token response was invalid.",
-        });
-      }
-
-      return result;
-    },
-    catch: (error) =>
-      isRuntimeRpcError(error)
-        ? error
-        : gitlabAuthProviderError({
-            operation: "oauth.exchangeAuthorizationCode",
-            message: error instanceof Error ? error.message : String(error),
-          }),
+    return yield* decodeResponseJson({
+      response,
+      schema: gitLabTokenResponseSchema,
+      operation: "oauth.exchangeAuthorizationCode.parse",
+      invalidMessage: "GitLab OAuth token response was invalid.",
+    });
   });
 }
 
@@ -126,28 +95,17 @@ function authorizeGitLabOAuth(
 ) {
   return Effect.gen(function* () {
     const instanceUrl = normalizeInstanceUrl(
-      input.values.instanceUrl?.trim() || GITLAB_COM_URL,
+      parseOptionalTrimmedString(input.values.instanceUrl) || GITLAB_COM_URL,
     );
     const redirectUri = yield* Effect.try({
       try: () =>
         input.oauth.getRedirectURL(
           buildExtensionRedirectPath(input.providerID, "oauth"),
         ),
-      catch: (error) =>
-        isRuntimeRpcError(error)
-          ? error
-          : gitlabAuthProviderError({
-              operation: "oauth.getRedirectURL",
-              message: error instanceof Error ? error.message : String(error),
-            }),
+      catch: (error) => toGitLabError("oauth.getRedirectURL", error),
     });
     const pkce = yield* generatePKCE().pipe(
-      Effect.mapError((error) =>
-        gitlabAuthProviderError({
-          operation: "oauth.generatePKCE",
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      ),
+      Effect.mapError((error) => toGitLabError("oauth.generatePKCE", error)),
     );
     const state = generateState();
 
@@ -210,9 +168,9 @@ function authorizeGitLabPat(
 ) {
   return Effect.gen(function* () {
     const instanceUrl = normalizeInstanceUrl(
-      input.values.instanceUrl?.trim() || GITLAB_COM_URL,
+      parseOptionalTrimmedString(input.values.instanceUrl) || GITLAB_COM_URL,
     );
-    const token = input.values.token?.trim();
+    const token = parseOptionalTrimmedString(input.values.token);
     if (!token) {
       return yield* new RuntimeValidationError({
         message: "GitLab personal access token is required",
@@ -226,11 +184,7 @@ function authorizeGitLabPat(
             Authorization: `Bearer ${token}`,
           },
         }),
-      catch: (error) =>
-        gitlabAuthProviderError({
-          operation: "pat.validate",
-          message: error instanceof Error ? error.message : String(error),
-        }),
+      catch: (error) => toGitLabError("pat.validate", error),
     });
 
     if (!response.ok) {
@@ -311,7 +265,8 @@ export const gitlabAdapter: AIAdapter = {
     return Effect.fail(
       new RuntimeInternalError({
         operation: "adapter.createModel",
-        message: "GitLab model execution is not supported in the browser runtime.",
+        message:
+          "GitLab model execution is not supported in the browser runtime.",
       }),
     );
   },

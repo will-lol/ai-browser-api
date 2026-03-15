@@ -4,20 +4,27 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
-  RuntimeAuthProviderError,
   type RuntimeRpcError,
-  RuntimeUpstreamServiceError,
   RuntimeValidationError,
-  isRuntimeRpcError,
 } from "@llm-bridge/contracts";
 import { wrapLanguageModelCallOptionsBoundary } from "@/background/runtime/interop/ai-sdk-interop";
-import { parseOptionalMetadataObject } from "./auth-metadata";
+import { createAdapterErrorFactory } from "./adapter-errors";
+import { shouldRefreshAccessToken } from "./auth-execution";
+import {
+  parseOptionalMetadataObject,
+  parseOptionalMetadataString,
+  shallowEqualMetadata,
+} from "./auth-metadata";
 import {
   createGeminiCodeAssistFetch,
   GEMINI_CODE_ASSIST_HEADERS,
 } from "./gemini-code-assist-transport";
 import { createApiKeyMethod } from "./generic-factory";
 import { parseProviderOptions } from "./provider-options";
+import {
+  baseProviderOptionsSchema,
+  buildGoogleSettings,
+} from "./provider-sdk-settings";
 import { defineAuthSchema } from "./schema";
 import { mergeModelHeaders } from "./factory-language-model";
 import type {
@@ -28,7 +35,10 @@ import type {
 } from "./types";
 import type { AuthRecord } from "@/background/runtime/auth/auth-store";
 import { waitForOAuthCallback } from "@/background/runtime/auth/oauth-browser-callback-util";
-import { generatePKCE, generateState } from "@/background/runtime/auth/oauth-util";
+import {
+  generatePKCE,
+  generateState,
+} from "@/background/runtime/auth/oauth-util";
 import type { ProviderInfo } from "@/background/runtime/catalog/provider-registry";
 import { decodeSchemaOrUndefined } from "@/background/runtime/core/effect-schema";
 
@@ -52,6 +62,16 @@ const ONBOARD_POLL_DELAY_MS = 3_000;
 const GEMINI_PROJECT_REQUIRED_MESSAGE =
   "Google Gemini requires a Google Cloud project. Enable the Gemini for Google Cloud API on a project you control, then reconnect and set projectId in the Google OAuth form if needed.";
 const GOOGLE_PROVIDER_ID = "google";
+const {
+  authProviderError: googleAuthProviderError,
+  upstreamError: googleUpstreamError,
+  toAdapterError: toGoogleError,
+  readResponseDetail: readGoogleResponseDetail,
+  decodeResponseJson,
+} = createAdapterErrorFactory({
+  providerID: GOOGLE_PROVIDER_ID,
+  defaultUpstreamMessage: "Google authentication request failed.",
+});
 
 type LoadCodeAssistPayload = {
   cloudaicompanionProject?: unknown;
@@ -79,15 +99,6 @@ type GoogleAuthMetadata = {
   projectId?: string;
   managedProjectId?: string;
 };
-
-const googleProviderOptionsSchema = Schema.Struct({
-  baseURL: Schema.optional(Schema.String),
-  name: Schema.optional(Schema.String),
-});
-
-type GoogleProviderOptions = Schema.Schema.Type<
-  typeof googleProviderOptionsSchema
->;
 
 const googleAuthMetadataSchema = Schema.Struct({
   email: Schema.optional(Schema.String),
@@ -174,91 +185,18 @@ function getGeminiClientSecret() {
   return GEMINI_CLIENT_SECRET;
 }
 
-function googleAuthProviderError(input: {
-  operation: string;
-  message: string;
-  retryable?: boolean;
-}) {
-  return new RuntimeAuthProviderError({
-    providerID: GOOGLE_PROVIDER_ID,
-    operation: input.operation,
-    retryable: input.retryable ?? false,
-    message: input.message,
-  });
-}
-
-function googleUpstreamError(input: {
-  operation: string;
-  statusCode: number;
-  detail?: string;
-}) {
-  return new RuntimeUpstreamServiceError({
-    providerID: GOOGLE_PROVIDER_ID,
-    operation: input.operation,
-    statusCode: input.statusCode,
-    retryable:
-      input.statusCode >= 500 ||
-      input.statusCode === 429 ||
-      input.statusCode === 408,
-    message: input.detail
-      ? `Google authentication request failed: ${input.detail.slice(0, 300)}`
-      : "Google authentication request failed.",
-  });
-}
-
-function toGoogleError(operation: string, error: unknown) {
-  if (isRuntimeRpcError(error)) {
-    return error;
-  }
-
-  return googleAuthProviderError({
-    operation,
-    message: error instanceof Error ? error.message : String(error),
-  });
-}
-
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
   return String(error);
 }
 
-function readMetadataValue(value: unknown) {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function buildGoogleSettings(input: {
-  providerID: string;
-  providerOptions: GoogleProviderOptions;
-  headers?: Record<string, string>;
-  execution: GoogleExecutionState;
-}): Parameters<typeof createGoogleGenerativeAI>[0] {
-  return {
-    baseURL:
-      readMetadataValue(input.execution.baseURL) ??
-      input.providerOptions.baseURL,
-    apiKey:
-      readMetadataValue(input.execution.apiKey) ??
-      (input.execution.kind === "oauth"
-        ? "gemini-oauth-placeholder"
-        : undefined),
-    headers: {
-      ...(input.headers ?? {}),
-      ...input.execution.headers,
-    },
-    fetch: input.execution.fetch,
-    name: input.providerOptions.name ?? input.providerID,
-  };
-}
-
 function normalizeProjectId(value: unknown): string | undefined {
   if (typeof value === "string") {
-    return readMetadataValue(value);
+    return parseOptionalMetadataString(value);
   }
 
   if (value && typeof value === "object" && "id" in value) {
-    return readMetadataValue((value as { id?: unknown }).id);
+    return parseOptionalMetadataString((value as { id?: unknown }).id);
   }
 
   return undefined;
@@ -302,7 +240,7 @@ function buildIneligibleTierMessage(
   if (!Array.isArray(tiers) || tiers.length === 0) return undefined;
 
   const reasons = tiers
-    .map((tier) => readMetadataValue(tier?.reasonMessage))
+    .map((tier) => parseOptionalMetadataString(tier?.reasonMessage))
     .filter((value): value is string => Boolean(value));
 
   if (reasons.length === 0) return undefined;
@@ -316,25 +254,6 @@ function buildProjectResolutionError(
   return reason
     ? `${GEMINI_PROJECT_REQUIRED_MESSAGE} ${reason}`
     : GEMINI_PROJECT_REQUIRED_MESSAGE;
-}
-
-function isRecordEqual(left?: GoogleAuthMetadata, right?: GoogleAuthMetadata) {
-  const leftEntries = Object.entries(left ?? {}).sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
-  const rightEntries = Object.entries(right ?? {}).sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
-
-  if (leftEntries.length !== rightEntries.length) return false;
-  for (let index = 0; index < leftEntries.length; index += 1) {
-    const [leftKey, leftValue] = leftEntries[index] ?? [];
-    const [rightKey, rightValue] = rightEntries[index] ?? [];
-    if (leftKey !== rightKey) return false;
-    if (leftValue !== rightValue) return false;
-  }
-
-  return true;
 }
 
 function buildPersistedMetadata(input: {
@@ -385,7 +304,9 @@ function waitForGeminiOAuthCallback(signal?: AbortSignal) {
       "Timed out waiting for Gemini OAuth callback on http://localhost:8085/oauth2callback.",
     registerListenerErrorPrefix:
       "Failed to register Gemini OAuth callback listener",
-  }).pipe(Effect.mapError((error) => toGoogleError("oauth.waitForCallback", error)));
+  }).pipe(
+    Effect.mapError((error) => toGoogleError("oauth.waitForCallback", error)),
+  );
 }
 
 function exchangeAuthorizationCode(
@@ -415,35 +336,28 @@ function exchangeAuthorizationCode(
     });
 
     if (!response.ok) {
-      const detail = yield* Effect.tryPromise({
-        try: () => response.text().catch(() => ""),
-        catch: (error) =>
-          toGoogleError("oauth.exchangeAuthorizationCode.detail", error),
-      }).pipe(Effect.catchAll(() => Effect.succeed("")));
+      const detail = yield* readGoogleResponseDetail(
+        response,
+        "oauth.exchangeAuthorizationCode.detail",
+      );
       return yield* Effect.fail(
         googleUpstreamError({
           operation: "oauth.exchangeAuthorizationCode",
           statusCode: response.status,
           detail,
+          message: detail
+            ? `Google authentication request failed: ${detail.slice(0, 300)}`
+            : "Google authentication request failed.",
         }),
       );
     }
 
-    const payload = yield* Effect.tryPromise({
-      try: () => response.json().catch(() => undefined),
-      catch: (error) => toGoogleError("oauth.exchangeAuthorizationCode", error),
+    return yield* decodeResponseJson({
+      response,
+      schema: googleTokenResponseSchema,
+      operation: "oauth.exchangeAuthorizationCode.parse",
+      invalidMessage: "Gemini OAuth exchange returned an invalid response.",
     });
-    const result = decodeSchemaOrUndefined(googleTokenResponseSchema, payload);
-    if (!result) {
-      return yield* Effect.fail(
-        googleAuthProviderError({
-          operation: "oauth.exchangeAuthorizationCode.parse",
-          message: "Gemini OAuth exchange returned an invalid response.",
-        }),
-      );
-    }
-
-    return result;
   });
 }
 
@@ -467,53 +381,54 @@ function refreshAccessToken(refreshToken: string, clientSecret: string) {
     });
 
     if (!response.ok) {
-      const detail = yield* Effect.tryPromise({
-        try: () => response.text().catch(() => ""),
-        catch: (error) => toGoogleError("oauth.refreshAccessToken.detail", error),
-      }).pipe(Effect.catchAll(() => Effect.succeed("")));
+      const detail = yield* readGoogleResponseDetail(
+        response,
+        "oauth.refreshAccessToken.detail",
+      );
       return yield* Effect.fail(
         googleUpstreamError({
           operation: "oauth.refreshAccessToken",
           statusCode: response.status,
           detail,
+          message: detail
+            ? `Google authentication request failed: ${detail.slice(0, 300)}`
+            : "Google authentication request failed.",
         }),
       );
     }
 
-    const payload = yield* Effect.tryPromise({
-      try: () => response.json().catch(() => undefined),
-      catch: (error) => toGoogleError("oauth.refreshAccessToken", error),
+    return yield* decodeResponseJson({
+      response,
+      schema: googleTokenResponseSchema,
+      operation: "oauth.refreshAccessToken.parse",
+      invalidMessage: "Gemini token refresh returned an invalid response.",
     });
-    const result = decodeSchemaOrUndefined(googleTokenResponseSchema, payload);
-    if (!result) {
-      return yield* Effect.fail(
-        googleAuthProviderError({
-          operation: "oauth.refreshAccessToken.parse",
-          message: "Gemini token refresh returned an invalid response.",
-        }),
-      );
-    }
-
-    return result;
   });
 }
 
 function resolveUserEmail(accessToken: string) {
-  return Effect.tryPromise({
-    try: async () => {
-      const response = await fetch(
-        "https://www.googleapis.com/oauth2/v1/userinfo?alt=json",
-        {
+  return Effect.gen(function* () {
+    const response = yield* Effect.tryPromise({
+      try: () =>
+        fetch("https://www.googleapis.com/oauth2/v1/userinfo?alt=json", {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
-        },
-      );
-      if (!response.ok) return undefined;
-      const payload = await response.json().catch(() => undefined);
-      return decodeSchemaOrUndefined(googleUserInfoSchema, payload)?.email;
-    },
-    catch: (error) => toGoogleError("oauth.resolveUserEmail", error),
+        }),
+      catch: (error) => toGoogleError("oauth.resolveUserEmail", error),
+    });
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const payload = yield* decodeResponseJson({
+      response,
+      schema: googleUserInfoSchema,
+      operation: "oauth.resolveUserEmail.parse",
+      invalidMessage: "Google user info response was invalid.",
+    }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+
+    return payload?.email;
   }).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
 }
 
@@ -650,8 +565,12 @@ export function resolveGeminiProjectContext(
   },
 ): Effect.Effect<GeminiProjectContextResult, RuntimeRpcError> {
   return Effect.gen(function* () {
-    const configuredProjectId = readMetadataValue(metadata?.projectId);
-    const managedProjectId = readMetadataValue(metadata?.managedProjectId);
+    const configuredProjectId = parseOptionalMetadataString(
+      metadata?.projectId,
+    );
+    const managedProjectId = parseOptionalMetadataString(
+      metadata?.managedProjectId,
+    );
 
     if (configuredProjectId) {
       return {
@@ -689,7 +608,7 @@ export function resolveGeminiProjectContext(
       };
     }
 
-    const currentTierId = readMetadataValue(loaded.currentTier?.id);
+    const currentTierId = parseOptionalMetadataString(loaded.currentTier?.id);
     if (currentTierId) {
       return yield* Effect.fail(
         new RuntimeValidationError({
@@ -699,7 +618,7 @@ export function resolveGeminiProjectContext(
     }
 
     const tier = pickAllowedTier(loaded.allowedTiers);
-    const tierId = readMetadataValue(tier.id) ?? LEGACY_TIER_ID;
+    const tierId = parseOptionalMetadataString(tier.id) ?? LEGACY_TIER_ID;
 
     if (tierId !== FREE_TIER_ID && !configuredProjectId) {
       return yield* Effect.fail(
@@ -847,9 +766,7 @@ function authorizeGeminiOAuth(
   });
 }
 
-export function resolveGoogleExecutionState(
-  context: RuntimeAdapterContext,
-){
+export function resolveGoogleExecutionState(context: RuntimeAdapterContext) {
   return Effect.gen(function* () {
     const auth = normalizeGoogleAuth(context.auth);
 
@@ -875,7 +792,10 @@ export function resolveGoogleExecutionState(
     let refresh = auth.refresh;
     let expiresAt = auth.expiresAt;
 
-    if (refresh && (!expiresAt || expiresAt <= context.runtime.now() + 60_000)) {
+    if (
+      refresh &&
+      shouldRefreshAccessToken(context.runtime.now(), expiresAt, access)
+    ) {
       const clientSecret = yield* Effect.try({
         try: () => getGeminiClientSecret(),
         catch: (error) => toGoogleError("oauth.clientSecret", error),
@@ -901,9 +821,11 @@ export function resolveGoogleExecutionState(
     }
 
     const metadata = auth.metadata ?? {};
-    const projectId = readMetadataValue(metadata.projectId);
-    const email = readMetadataValue(metadata.email);
-    let managedProjectId = readMetadataValue(metadata.managedProjectId);
+    const projectId = parseOptionalMetadataString(metadata.projectId);
+    const email = parseOptionalMetadataString(metadata.email);
+    let managedProjectId = parseOptionalMetadataString(
+      metadata.managedProjectId,
+    );
     let effectiveProjectId = projectId ?? managedProjectId;
     let projectResolutionError: string | undefined;
 
@@ -937,7 +859,7 @@ export function resolveGoogleExecutionState(
       access !== auth.access ||
       refresh !== auth.refresh ||
       expiresAt !== auth.expiresAt ||
-      !isRecordEqual(auth.metadata, nextMetadata);
+      !shallowEqualMetadata(auth.metadata, nextMetadata);
 
     if (shouldPersistAuth) {
       yield* context.authStore.set({
@@ -1032,7 +954,7 @@ export const googleAdapter: AIAdapter = {
   createModel(context) {
     return Effect.gen(function* () {
       const providerOptions = parseProviderOptions(
-        googleProviderOptionsSchema,
+        baseProviderOptionsSchema,
         context.provider.options,
       );
       const execution = yield* resolveGoogleExecutionState(context);
@@ -1045,10 +967,15 @@ export const googleAdapter: AIAdapter = {
 
       const provider = createGoogleGenerativeAI(
         buildGoogleSettings({
-          providerID: context.providerID,
+          provider: context.provider,
+          model: context.model,
           providerOptions,
-          headers: context.model.headers,
-          execution,
+          baseURL: execution.baseURL,
+          apiKey: execution.apiKey,
+          headers: execution.headers,
+          fetch: execution.fetch,
+          oauthPlaceholderApiKey:
+            execution.kind === "oauth" ? "gemini-oauth-placeholder" : undefined,
         }),
       );
       const baseModel = provider.languageModel(context.model.api.id);

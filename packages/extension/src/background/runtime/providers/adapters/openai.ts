@@ -3,16 +3,16 @@ import type { LanguageModelV3CallOptions } from "@ai-sdk/provider";
 import { createOpenAI } from "@ai-sdk/openai";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import {
-  isRuntimeRpcError,
-  RuntimeAuthProviderError,
-  RuntimeUpstreamServiceError,
-  RuntimeValidationError,
-} from "@llm-bridge/contracts";
+import { RuntimeValidationError } from "@llm-bridge/contracts";
 import { wrapLanguageModelCallOptionsBoundary } from "@/background/runtime/interop/ai-sdk-interop";
-import { decodeSchemaOrUndefined } from "@/background/runtime/core/effect-schema";
+import { createAdapterErrorFactory } from "./adapter-errors";
+import { shouldRefreshAccessToken } from "./auth-execution";
 import { parseOptionalMetadataObject } from "./auth-metadata";
 import { parseProviderOptions } from "./provider-options";
+import {
+  buildOpenAISettings,
+  openAIProviderOptionsSchema,
+} from "./provider-sdk-settings";
 import { createApiKeyMethod } from "./generic-factory";
 import {
   mergeModelHeaders,
@@ -29,7 +29,11 @@ import {
   waitForOAuthCallback,
   type OAuthWebRequestOnBeforeRequest,
 } from "@/background/runtime/auth/oauth-browser-callback-util";
-import { generatePKCE, generateState, sleep } from "@/background/runtime/auth/oauth-util";
+import {
+  generatePKCE,
+  generateState,
+  sleep,
+} from "@/background/runtime/auth/oauth-util";
 import type {
   ProviderInfo,
   ProviderModelInfo,
@@ -44,6 +48,18 @@ const CODEX_CALLBACK_TIMEOUT_MS = 90_000;
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3_000;
 const CODEX_DEFAULT_INSTRUCTIONS = "Follow the user's instructions.";
 const CODEX_PROVIDER_ID = "openai";
+const {
+  authProviderError: codexAuthProviderError,
+  upstreamError: codexUpstreamError,
+  toAdapterError: toOpenAIError,
+  failIfAborted: throwIfAborted,
+  readResponseDetail: readOpenAIResponseDetail,
+  decodeResponseJson,
+} = createAdapterErrorFactory({
+  providerID: CODEX_PROVIDER_ID,
+  defaultUpstreamMessage: "OpenAI authentication request failed.",
+  logLabel: "[adapter:openai]",
+});
 
 type TokenResponse = {
   id_token?: string;
@@ -55,17 +71,6 @@ type TokenResponse = {
 type OpenAIAuthMetadata = {
   accountId?: string;
 };
-
-const openAIProviderOptionsSchema = Schema.Struct({
-  baseURL: Schema.optional(Schema.String),
-  name: Schema.optional(Schema.String),
-  organization: Schema.optional(Schema.String),
-  project: Schema.optional(Schema.String),
-});
-
-type OpenAIProviderOptions = Schema.Schema.Type<
-  typeof openAIProviderOptionsSchema
->;
 
 const openAIAuthMetadataSchema = Schema.Struct({
   accountId: Schema.optional(Schema.String),
@@ -101,17 +106,6 @@ function parseOpenAIAuthMetadata(
   return parseOptionalMetadataObject(openAIAuthMetadataSchema, auth?.metadata);
 }
 
-function toOpenAIError(operation: string, error: unknown) {
-  if (isRuntimeRpcError(error)) {
-    return error;
-  }
-
-  return codexAuthProviderError({
-    operation,
-    message: error instanceof Error ? error.message : String(error),
-  });
-}
-
 function normalizeOpenAIAuth(
   auth?: AuthRecord,
 ): AuthRecord<OpenAIAuthMetadata> | undefined {
@@ -129,76 +123,16 @@ function normalizeOpenAIAuth(
   };
 }
 
-function parseOpenAIJson<
-  TSchema extends Schema.Schema.AnyNoContext,
->(input: {
+function parseOpenAIJson<TSchema extends Schema.Schema.AnyNoContext>(input: {
   response: Response;
   schema: TSchema;
   operation: string;
 }) {
-  return Effect.tryPromise({
-    try: async () => {
-      const payload = await input.response.json().catch(() => undefined);
-      const result = decodeSchemaOrUndefined(input.schema, payload);
-      if (result) return result;
-
-      throw codexAuthProviderError({
-        operation: input.operation,
-        message: "OpenAI authentication response was invalid.",
-      });
-    },
-    catch: (error) => toOpenAIError(input.operation, error),
-  });
-}
-
-function throwIfAborted(signal?: AbortSignal) {
-  if (!signal?.aborted) {
-    return Effect.void;
-  }
-
-  return Effect.fail(
-    new RuntimeAuthProviderError({
-      providerID: CODEX_PROVIDER_ID,
-      operation: "auth.abort",
-      retryable: true,
-      message: "Authentication canceled.",
-    }),
-  );
-}
-
-function codexUpstreamError(input: {
-  operation: string;
-  statusCode: number;
-  detail?: string;
-}) {
-  console.error("[adapter:openai] upstream auth request failed", {
+  return decodeResponseJson({
+    response: input.response,
+    schema: input.schema,
     operation: input.operation,
-    statusCode: input.statusCode,
-    detail: input.detail?.slice(0, 500),
-  });
-
-  return new RuntimeUpstreamServiceError({
-    providerID: CODEX_PROVIDER_ID,
-    operation: input.operation,
-    statusCode: input.statusCode,
-    retryable:
-      input.statusCode >= 500 ||
-      input.statusCode === 429 ||
-      input.statusCode === 408,
-    message: "OpenAI authentication request failed.",
-  });
-}
-
-function codexAuthProviderError(input: {
-  operation: string;
-  message: string;
-  retryable?: boolean;
-}) {
-  return new RuntimeAuthProviderError({
-    providerID: CODEX_PROVIDER_ID,
-    operation: input.operation,
-    retryable: input.retryable ?? false,
-    message: input.message,
+    invalidMessage: "OpenAI authentication response was invalid.",
   });
 }
 
@@ -266,29 +200,6 @@ function buildCodexDeviceInstruction(input: {
   };
 }
 
-function buildOpenAISettings(input: {
-  providerID: string;
-  providerOptions: OpenAIProviderOptions;
-  headers?: Record<string, string>;
-  baseURL?: string;
-  apiKey?: string;
-  extraHeaders?: Record<string, string>;
-  fetch?: typeof fetch;
-}): Parameters<typeof createOpenAI>[0] {
-  return {
-    baseURL: input.baseURL ?? input.providerOptions.baseURL,
-    apiKey: input.apiKey,
-    headers: {
-      ...(input.headers ?? {}),
-      ...(input.extraHeaders ?? {}),
-    },
-    fetch: input.fetch,
-    name: input.providerOptions.name ?? input.providerID,
-    organization: input.providerOptions.organization,
-    project: input.providerOptions.project,
-  };
-}
-
 function buildCodexBrowserInstruction(input: {
   url: string;
   autoOpened: boolean;
@@ -344,7 +255,9 @@ function waitForCodexOAuthCallback(
       "Timed out waiting for Codex OAuth callback on http://localhost:1455/auth/callback.",
     registerListenerErrorPrefix:
       "Failed to register Codex OAuth callback listener",
-  }).pipe(Effect.mapError((error) => toOpenAIError("oauth.waitForCallback", error)));
+  }).pipe(
+    Effect.mapError((error) => toOpenAIError("oauth.waitForCallback", error)),
+  );
 }
 
 function exchangeCodeForTokens(
@@ -372,10 +285,10 @@ function exchangeCodeForTokens(
     });
 
     if (!response.ok) {
-      const detail = yield* Effect.tryPromise({
-        try: () => response.text().catch(() => ""),
-        catch: (error) => toOpenAIError("oauth.exchangeCodeForTokens.detail", error),
-      }).pipe(Effect.catchAll(() => Effect.succeed("")));
+      const detail = yield* readOpenAIResponseDetail(
+        response,
+        "oauth.exchangeCodeForTokens.detail",
+      );
       return yield* Effect.fail(
         codexUpstreamError({
           operation: "oauth.exchangeCodeForTokens",
@@ -412,10 +325,10 @@ function refreshAccessToken(refreshToken: string) {
     });
 
     if (!response.ok) {
-      const detail = yield* Effect.tryPromise({
-        try: () => response.text().catch(() => ""),
-        catch: (error) => toOpenAIError("oauth.refreshAccessToken.detail", error),
-      }).pipe(Effect.catchAll(() => Effect.succeed("")));
+      const detail = yield* readOpenAIResponseDetail(
+        response,
+        "oauth.refreshAccessToken.detail",
+      );
       return yield* Effect.fail(
         codexUpstreamError({
           operation: "oauth.refreshAccessToken",
@@ -539,10 +452,10 @@ function authorizeDevice(input: AdapterAuthorizeContext) {
     });
 
     if (!response.ok) {
-      const detail = yield* Effect.tryPromise({
-        try: () => response.text().catch(() => ""),
-        catch: (error) => toOpenAIError("oauth.authorizeDevice.start.detail", error),
-      });
+      const detail = yield* readOpenAIResponseDetail(
+        response,
+        "oauth.authorizeDevice.start.detail",
+      );
       return yield* Effect.fail(
         codexUpstreamError({
           operation: "oauth.authorizeDevice.start",
@@ -629,11 +542,10 @@ function authorizeDevice(input: AdapterAuthorizeContext) {
         });
 
         if (!tokenResponse.ok) {
-          const detail = yield* Effect.tryPromise({
-            try: () => tokenResponse.text().catch(() => ""),
-            catch: (error) =>
-              toOpenAIError("oauth.authorizeDevice.exchangeToken.detail", error),
-          }).pipe(Effect.catchAll(() => Effect.succeed("")));
+          const detail = yield* readOpenAIResponseDetail(
+            tokenResponse,
+            "oauth.authorizeDevice.exchangeToken.detail",
+          );
           return yield* Effect.fail(
             codexUpstreamError({
               operation: "oauth.authorizeDevice.exchangeToken",
@@ -661,12 +573,14 @@ function authorizeDevice(input: AdapterAuthorizeContext) {
         };
       }
 
-      if (tokenPollResponse.status !== 403 && tokenPollResponse.status !== 404) {
-        const detail = yield* Effect.tryPromise({
-          try: () => tokenPollResponse.text().catch(() => ""),
-          catch: (error) =>
-            toOpenAIError("oauth.authorizeDevice.poll.detail", error),
-        }).pipe(Effect.catchAll(() => Effect.succeed("")));
+      if (
+        tokenPollResponse.status !== 403 &&
+        tokenPollResponse.status !== 404
+      ) {
+        const detail = yield* readOpenAIResponseDetail(
+          tokenPollResponse,
+          "oauth.authorizeDevice.poll.detail",
+        );
         return yield* Effect.fail(
           codexUpstreamError({
             operation: "oauth.authorizeDevice.poll",
@@ -677,7 +591,9 @@ function authorizeDevice(input: AdapterAuthorizeContext) {
       }
 
       yield* sleep(intervalMs + OAUTH_POLLING_SAFETY_MARGIN_MS).pipe(
-        Effect.mapError((error) => toOpenAIError("oauth.authorizeDevice.sleep", error)),
+        Effect.mapError((error) =>
+          toOpenAIError("oauth.authorizeDevice.sleep", error),
+        ),
       );
       yield* throwIfAborted(input.signal);
     }
@@ -794,9 +710,7 @@ function buildCodexOAuthProvider(provider: ProviderInfo) {
   };
 }
 
-export function resolveOpenAIExecutionState(
-  context: RuntimeAdapterContext,
-) {
+export function resolveOpenAIExecutionState(context: RuntimeAdapterContext) {
   return Effect.gen(function* () {
     const auth = normalizeOpenAIAuth(context.auth);
 
@@ -821,7 +735,10 @@ export function resolveOpenAIExecutionState(
     let expiresAt = auth.expiresAt;
     let effectiveAccountId = auth.accountId ?? auth.metadata?.accountId;
 
-    if (refresh && (!expiresAt || expiresAt <= context.runtime.now() + 60_000)) {
+    if (
+      refresh &&
+      shouldRefreshAccessToken(context.runtime.now(), expiresAt, access)
+    ) {
       const refreshed = yield* refreshAccessToken(refresh);
       effectiveAccountId = extractAccountId(refreshed) ?? effectiveAccountId;
       access = refreshed.access_token;
@@ -919,12 +836,12 @@ export const openaiAdapter: AIAdapter = {
       const execution = yield* resolveOpenAIExecutionState(context);
       const provider = createOpenAI(
         buildOpenAISettings({
-          providerID: context.providerID,
+          provider: context.provider,
+          model: context.model,
           providerOptions,
-          headers: context.model.headers,
           baseURL: execution.baseURL,
           apiKey: execution.apiKey,
-          extraHeaders: execution.headers,
+          headers: execution.headers,
         }),
       );
       const baseModel = provider.responses(context.model.api.id);

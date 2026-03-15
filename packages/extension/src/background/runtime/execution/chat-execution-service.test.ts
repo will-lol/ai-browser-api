@@ -9,23 +9,19 @@ import {
   type RuntimeRpcError,
 } from "@llm-bridge/contracts";
 import {
-  AuthFlowService,
-  CatalogService,
   ChatExecutionService,
   MetaService,
-  ModelExecutionService,
   PermissionsService,
   type AppRuntime,
-  type AuthFlowServiceApi,
-  type CatalogServiceApi,
   type MetaServiceApi,
-  type ModelExecutionServiceApi,
   type PermissionsServiceApi,
 } from "@llm-bridge/runtime-core";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Stream from "effect/Stream";
+import { makeUnusedRuntimeLayer } from "@/background/test-utils/runtime-service-stubs";
+import { waitForCondition } from "@/background/test-utils/wait-for";
 
 type ControlledUIStream = {
   readonly stream: ReadableStream<object>;
@@ -181,52 +177,24 @@ function makeMetaLayer() {
   return Layer.succeed(MetaService, meta);
 }
 
-function makeUnusedRuntimeLayer() {
-  const catalog: CatalogServiceApi = {
-    ensureCatalog: () => Effect.die("unused"),
-    refreshCatalog: () => Effect.die("unused"),
-    refreshCatalogForProvider: () => Effect.die("unused"),
-    listProviders: () => Effect.die("unused"),
-    streamProviders: () => Stream.empty,
-    listModels: () => Effect.die("unused"),
-    streamModels: () => Stream.empty,
-  };
-
-  const authFlow: AuthFlowServiceApi = {
-    openProviderAuthWindow: () => Effect.die("unused"),
-    getProviderAuthFlow: () => Effect.die("unused"),
-    streamProviderAuthFlow: () => Stream.empty,
-    startProviderAuthFlow: () => Effect.die("unused"),
-    cancelProviderAuthFlow: () => Effect.die("unused"),
-    disconnectProvider: () => Effect.die("unused"),
-  };
-
-  const modelExecution: ModelExecutionServiceApi = {
-    acquireModel: () => Effect.die("unused"),
-    generateModel: () => Effect.die("unused"),
-    streamModel: () => Effect.die("unused"),
-  };
-
-  return Layer.mergeAll(
-    Layer.succeed(CatalogService, catalog),
-    Layer.succeed(AuthFlowService, authFlow),
-    Layer.succeed(ModelExecutionService, modelExecution),
+function makeRuntime(): ManagedRuntime.ManagedRuntime<AppRuntime, unknown> {
+  const baseLayer = Layer.mergeAll(
+    makePermissionsLayer(),
+    makeMetaLayer(),
   );
-}
-
-function makeRuntime() {
-  return ManagedRuntime.make(
-    Layer.mergeAll(
-      makeUnusedRuntimeLayer(),
-      makePermissionsLayer(),
-      makeMetaLayer(),
-      ChatExecutionServiceLive,
-    ),
+  const chatExecutionLayer = ChatExecutionServiceLive.pipe(
+    Layer.provide(baseLayer),
   );
+  const liveLayer = Layer.merge(baseLayer, chatExecutionLayer);
+  const stubsLayer = makeUnusedRuntimeLayer({
+    omit: ["permissions", "meta", "chatExecution"] as const,
+  }).pipe(Layer.provide(liveLayer));
+
+  return ManagedRuntime.make(Layer.merge(liveLayer, stubsLayer));
 }
 
 async function openChatReader(
-  runtime: ManagedRuntime.ManagedRuntime<AppRuntime, never>,
+  runtime: ManagedRuntime.ManagedRuntime<AppRuntime, unknown>,
   effect: Effect.Effect<
     Stream.Stream<object, RuntimeRpcError>,
     RuntimeRpcError,
@@ -251,20 +219,6 @@ async function readNext<A>(
       setTimeout(() => reject(new Error("Timed out reading chat stream")), timeoutMs),
     ),
   ]);
-}
-
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs = 500,
-): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (predicate()) {
-      return;
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  }
-  throw new Error("Timed out waiting for condition");
 }
 
 beforeEach(() => {
@@ -444,7 +398,10 @@ describe("chat-execution-service", () => {
         ),
       );
 
-      await waitFor(() => firstSignal?.aborted === true);
+      await waitForCondition(() => firstSignal?.aborted === true, {
+        timeoutMs: 500,
+        intervalMs: 0,
+      });
       expect(await readNext(firstReader)).toEqual({
         done: true,
         value: undefined,
@@ -495,7 +452,10 @@ describe("chat-execution-service", () => {
       });
 
       await secondReader.cancel();
-      await waitFor(() => activeSignal?.aborted === true);
+      await waitForCondition(() => activeSignal?.aborted === true, {
+        timeoutMs: 500,
+        intervalMs: 0,
+      });
 
       const result = await runtime.runPromise(
         Effect.either(
@@ -541,7 +501,10 @@ describe("chat-execution-service", () => {
         ),
       );
 
-      await waitFor(() => activeSignal?.aborted === true);
+      await waitForCondition(() => activeSignal?.aborted === true, {
+        timeoutMs: 500,
+        intervalMs: 0,
+      });
       expect(await readNext(reader)).toEqual({
         done: true,
         value: undefined,

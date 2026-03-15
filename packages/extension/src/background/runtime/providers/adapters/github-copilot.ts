@@ -1,18 +1,19 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import {
-  RuntimeAuthProviderError,
-  RuntimeUpstreamServiceError,
-  isRuntimeRpcError,
-} from "@llm-bridge/contracts";
 import { wrapLanguageModelCallOptionsBoundary } from "@/background/runtime/interop/ai-sdk-interop";
+import { createAdapterErrorFactory } from "./adapter-errors";
+import { shouldRefreshAccessToken } from "./auth-execution";
 import { mergeModelHeaders } from "./factory-language-model";
 import { parseOptionalMetadataObject } from "./auth-metadata";
 import {
   parseOptionalTrimmedString,
   parseProviderOptions,
 } from "./provider-options";
+import {
+  baseProviderOptionsSchema,
+  buildOpenAICompatibleSettings,
+} from "./provider-sdk-settings";
 import { defineAuthSchema } from "./schema";
 import type {
   AIAdapter,
@@ -24,7 +25,6 @@ import { browser } from "@wxt-dev/browser";
 import type { AuthRecord } from "@/background/runtime/auth/auth-store";
 import { normalizeDomain, sleep } from "@/background/runtime/auth/oauth-util";
 import { isObject } from "@/background/runtime/core/util";
-import { decodeSchemaOrUndefined } from "@/background/runtime/core/effect-schema";
 
 const COPILOT_HEADERS = {
   "User-Agent": "GitHubCopilotChat/0.35.0",
@@ -35,19 +35,21 @@ const COPILOT_HEADERS = {
 const CLIENT_ID = "Iv1.b507a08c87ecfe98";
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3_000;
 const COPILOT_PROVIDER_ID = "github-copilot";
+const {
+  authProviderError: copilotAuthProviderError,
+  upstreamError: copilotUpstreamError,
+  toAdapterError: toCopilotError,
+  failIfAborted: throwIfAborted,
+  readResponseDetail: readCopilotResponseDetail,
+  decodeResponseJson,
+} = createAdapterErrorFactory({
+  providerID: COPILOT_PROVIDER_ID,
+  defaultUpstreamMessage: "Copilot request failed.",
+});
 
 type CopilotAuthMetadata = {
   enterpriseUrl?: string;
 };
-
-const copilotProviderOptionsSchema = Schema.Struct({
-  baseURL: Schema.optional(Schema.String),
-  name: Schema.optional(Schema.String),
-});
-
-type CopilotProviderOptions = Schema.Schema.Type<
-  typeof copilotProviderOptionsSchema
->;
 
 const copilotAuthMetadataSchema = Schema.Struct({
   enterpriseUrl: Schema.optional(Schema.String),
@@ -91,61 +93,10 @@ const RESPONSES_API_ALTERNATE_INPUT_TYPES = new Set([
   "reasoning",
 ]);
 
-function copilotAuthProviderError(input: {
-  operation: string;
-  message: string;
-  retryable?: boolean;
-}) {
-  return new RuntimeAuthProviderError({
-    providerID: COPILOT_PROVIDER_ID,
-    operation: input.operation,
-    retryable: input.retryable ?? false,
-    message: input.message,
-  });
-}
-
-function copilotUpstreamError(input: {
-  operation: string;
-  statusCode: number;
-  detail?: string;
-}) {
-  return new RuntimeUpstreamServiceError({
-    providerID: COPILOT_PROVIDER_ID,
-    operation: input.operation,
-    statusCode: input.statusCode,
-    retryable:
-      input.statusCode >= 500 ||
-      input.statusCode === 429 ||
-      input.statusCode === 408,
-    message: input.detail
-      ? `Copilot request failed: ${input.detail.slice(0, 300)}`
-      : "Copilot request failed.",
-  });
-}
-
-function toCopilotError(operation: string, error: unknown) {
-  if (isRuntimeRpcError(error)) {
-    return error;
-  }
-
-  return copilotAuthProviderError({
-    operation,
-    message: error instanceof Error ? error.message : String(error),
-  });
-}
-
-function throwIfAborted(signal?: AbortSignal) {
-  if (!signal?.aborted) {
-    return Effect.void;
-  }
-
-  return Effect.fail(
-    copilotAuthProviderError({
-      operation: "auth.abort",
-      message: "Authentication canceled",
-      retryable: true,
-    }),
-  );
+function copilotRequestFailedMessage(detail?: string) {
+  return detail
+    ? `Copilot request failed: ${detail.slice(0, 300)}`
+    : "Copilot request failed.";
 }
 
 function getUrls(domain: string) {
@@ -153,28 +104,6 @@ function getUrls(domain: string) {
     deviceCodeURL: `https://${domain}/login/device/code`,
     accessTokenURL: `https://${domain}/login/oauth/access_token`,
     copilotApiKeyURL: `https://api.${domain}/copilot_internal/v2/token`,
-  };
-}
-
-function buildCopilotSettings(input: {
-  providerID: string;
-  providerOptions: CopilotProviderOptions;
-  modelURL: string;
-  modelHeaders?: Record<string, string>;
-  baseURL?: string;
-  apiKey?: string;
-  extraHeaders?: Record<string, string>;
-  fetch?: typeof fetch;
-}): Parameters<typeof createOpenAICompatible>[0] {
-  return {
-    baseURL: input.baseURL || input.providerOptions.baseURL || input.modelURL,
-    apiKey: input.apiKey,
-    headers: {
-      ...(input.modelHeaders ?? {}),
-      ...(input.extraHeaders ?? {}),
-    },
-    fetch: input.fetch,
-    name: input.providerOptions.name || input.providerID,
   };
 }
 
@@ -250,16 +179,6 @@ function buildVerificationUrl(input: {
   }
 }
 
-function shouldRefreshCopilotAccessToken(input: {
-  access?: string;
-  expiresAt?: number;
-  now: number;
-}) {
-  if (!input.access) return true;
-  if (!input.expiresAt) return true;
-  return input.expiresAt <= input.now + 60_000;
-}
-
 function normalizeCopilotAuth(
   auth?: AuthRecord,
 ): AuthRecord<CopilotAuthMetadata> | undefined {
@@ -275,17 +194,16 @@ function normalizeCopilotAuth(
   };
 }
 
-function parseCopilotJson<
-  TSchema extends Schema.Schema.AnyNoContext,
->(input: { response: Response; schema: TSchema; message: string }) {
-  return Effect.tryPromise({
-    try: async () => {
-      const payload = await input.response.json().catch(() => undefined);
-      const result = decodeSchemaOrUndefined(input.schema, payload);
-      if (result) return result;
-      throw new Error(input.message);
-    },
-    catch: (error) => toCopilotError("parseJson", error),
+function parseCopilotJson<TSchema extends Schema.Schema.AnyNoContext>(input: {
+  response: Response;
+  schema: TSchema;
+  message: string;
+}) {
+  return decodeResponseJson({
+    response: input.response,
+    schema: input.schema,
+    operation: "parseJson",
+    invalidMessage: input.message,
   });
 }
 
@@ -325,15 +243,16 @@ function authorizeCopilotDevice(
     });
 
     if (!deviceResponse.ok) {
-      const detail = yield* Effect.tryPromise({
-        try: () => deviceResponse.text().catch(() => ""),
-        catch: (error) => toCopilotError("oauth.device.start.detail", error),
-      }).pipe(Effect.catchAll(() => Effect.succeed("")));
+      const detail = yield* readCopilotResponseDetail(
+        deviceResponse,
+        "oauth.device.start.detail",
+      );
       return yield* Effect.fail(
         copilotUpstreamError({
           operation: "oauth.device.start",
           statusCode: deviceResponse.status,
           detail,
+          message: copilotRequestFailedMessage(detail),
         }),
       );
     }
@@ -378,7 +297,11 @@ function authorizeCopilotDevice(
     let intervalSeconds = Math.max(deviceData.interval || 5, 1);
 
     while (Date.now() < deadline) {
-      yield* throwIfAborted(input.signal);
+      yield* throwIfAborted(input.signal, {
+        operation: "auth.abort",
+        message: "Authentication canceled",
+        retryable: true,
+      });
       const response = yield* Effect.tryPromise({
         try: () =>
           fetch(urls.accessTokenURL, {
@@ -398,15 +321,16 @@ function authorizeCopilotDevice(
       });
 
       if (!response.ok) {
-        const detail = yield* Effect.tryPromise({
-          try: () => response.text().catch(() => ""),
-          catch: (error) => toCopilotError("oauth.device.poll.detail", error),
-        }).pipe(Effect.catchAll(() => Effect.succeed("")));
+        const detail = yield* readCopilotResponseDetail(
+          response,
+          "oauth.device.poll.detail",
+        );
         return yield* Effect.fail(
           copilotUpstreamError({
             operation: "oauth.device.poll",
             statusCode: response.status,
             detail,
+            message: copilotRequestFailedMessage(detail),
           }),
         );
       }
@@ -433,9 +357,15 @@ function authorizeCopilotDevice(
         yield* sleep(
           intervalSeconds * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS,
         ).pipe(
-          Effect.mapError((error) => toCopilotError("oauth.device.sleep", error)),
+          Effect.mapError((error) =>
+            toCopilotError("oauth.device.sleep", error),
+          ),
         );
-        yield* throwIfAborted(input.signal);
+        yield* throwIfAborted(input.signal, {
+          operation: "auth.abort",
+          message: "Authentication canceled",
+          retryable: true,
+        });
         continue;
       }
 
@@ -447,9 +377,15 @@ function authorizeCopilotDevice(
         yield* sleep(
           intervalSeconds * 1000 + OAUTH_POLLING_SAFETY_MARGIN_MS,
         ).pipe(
-          Effect.mapError((error) => toCopilotError("oauth.device.sleep", error)),
+          Effect.mapError((error) =>
+            toCopilotError("oauth.device.sleep", error),
+          ),
         );
-        yield* throwIfAborted(input.signal);
+        yield* throwIfAborted(input.signal, {
+          operation: "auth.abort",
+          message: "Authentication canceled",
+          retryable: true,
+        });
         continue;
       }
 
@@ -471,9 +407,7 @@ function authorizeCopilotDevice(
   });
 }
 
-export function resolveCopilotExecutionState(
-  context: RuntimeAdapterContext,
-) {
+export function resolveCopilotExecutionState(context: RuntimeAdapterContext) {
   return Effect.gen(function* () {
     const auth = normalizeCopilotAuth(context.auth);
 
@@ -492,7 +426,9 @@ export function resolveCopilotExecutionState(
     }
 
     const enterpriseUrl = auth.metadata?.enterpriseUrl;
-    const domain = enterpriseUrl ? normalizeDomain(enterpriseUrl) : "github.com";
+    const domain = enterpriseUrl
+      ? normalizeDomain(enterpriseUrl)
+      : "github.com";
     const baseURL = enterpriseUrl
       ? `https://copilot-api.${normalizeDomain(enterpriseUrl)}`
       : "https://api.githubcopilot.com";
@@ -503,11 +439,7 @@ export function resolveCopilotExecutionState(
     const expiresAt = auth.expiresAt;
 
     if (
-      shouldRefreshCopilotAccessToken({
-        access,
-        expiresAt,
-        now: context.runtime.now(),
-      }) &&
+      shouldRefreshAccessToken(context.runtime.now(), expiresAt, access) &&
       refresh
     ) {
       const response = yield* Effect.tryPromise({
@@ -523,15 +455,16 @@ export function resolveCopilotExecutionState(
       });
 
       if (!response.ok) {
-        const detail = yield* Effect.tryPromise({
-          try: () => response.text().catch(() => ""),
-          catch: (error) => toCopilotError("oauth.refresh.detail", error),
-        }).pipe(Effect.catchAll(() => Effect.succeed("")));
+        const detail = yield* readCopilotResponseDetail(
+          response,
+          "oauth.refresh.detail",
+        );
         return yield* Effect.fail(
           copilotUpstreamError({
             operation: "oauth.refresh",
             statusCode: response.status,
             detail,
+            message: copilotRequestFailedMessage(detail),
           }),
         );
       }
@@ -665,16 +598,15 @@ export const githubCopilotAdapter: AIAdapter = {
   createModel(context) {
     return Effect.gen(function* () {
       const providerOptions = parseProviderOptions(
-        copilotProviderOptionsSchema,
+        baseProviderOptionsSchema,
         context.provider.options,
       );
       const execution = yield* resolveCopilotExecutionState(context);
       const provider = createOpenAICompatible(
-        buildCopilotSettings({
-          providerID: context.providerID,
+        buildOpenAICompatibleSettings({
+          provider: context.provider,
+          model: context.model,
           providerOptions,
-          modelURL: context.model.api.url,
-          modelHeaders: context.model.headers,
           baseURL: execution.baseURL,
           apiKey: execution.apiKey,
         }),

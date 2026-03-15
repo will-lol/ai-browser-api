@@ -1,18 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import {
-  AuthFlowService,
-  CatalogService,
-  ChatExecutionService,
-  MetaService,
-  ModelExecutionService,
-  PermissionsService,
-} from "@llm-bridge/runtime-core";
+import { CatalogService, type AppRuntime } from "@llm-bridge/runtime-core";
 import type { RuntimeProviderSummary } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Stream from "effect/Stream";
+import { makeUnusedRuntimeLayer } from "@/background/test-utils/runtime-service-stubs";
+import { waitForCondition } from "@/background/test-utils/wait-for";
 
 type ProviderRow = {
   id: string;
@@ -47,56 +42,13 @@ mock.module("@/background/runtime/catalog/provider-registry-refresh", () => ({
 
 const { CatalogServiceLive } = await import("./catalog-service");
 
-function makeUnusedRuntimeLayer() {
-  return Layer.mergeAll(
-    Layer.succeed(PermissionsService, {
-      getOriginState: () => Effect.die("unused"),
-      streamOriginState: () => Stream.empty,
-      listPermissions: () => Effect.die("unused"),
-      streamPermissions: () => Stream.empty,
-      getModelPermission: () => Effect.die("unused"),
-      setOriginEnabled: () => Effect.die("unused"),
-      setModelPermission: () => Effect.die("unused"),
-      createPermissionRequest: () => Effect.die("unused"),
-      resolvePermissionRequest: () => Effect.die("unused"),
-      dismissPermissionRequest: () => Effect.die("unused"),
-      listPending: () => Effect.die("unused"),
-      streamPending: () => Stream.empty,
-      waitForPermissionDecision: () => Effect.die("unused"),
-      streamOriginStates: () => Stream.empty,
-      streamPermissionsMap: () => Stream.empty,
-      streamPendingMap: () => Stream.empty,
-    }),
-    Layer.succeed(AuthFlowService, {
-      openProviderAuthWindow: () => Effect.die("unused"),
-      getProviderAuthFlow: () => Effect.die("unused"),
-      streamProviderAuthFlow: () => Stream.empty,
-      startProviderAuthFlow: () => Effect.die("unused"),
-      cancelProviderAuthFlow: () => Effect.die("unused"),
-      disconnectProvider: () => Effect.die("unused"),
-    }),
-    Layer.succeed(MetaService, {
-      parseProviderModel: () => ({
-        providerID: "unused",
-        modelID: "unused",
-      }),
-      resolvePermissionTarget: () => Effect.die("unused"),
-    }),
-    Layer.succeed(ModelExecutionService, {
-      acquireModel: () => Effect.die("unused"),
-      generateModel: () => Effect.die("unused"),
-      streamModel: () => Effect.die("unused"),
-    }),
-    Layer.succeed(ChatExecutionService, {
-      sendMessages: () => Effect.die("unused"),
-      reconnectStream: () => Effect.die("unused"),
-      abortStream: () => Effect.die("unused"),
-    }),
-  );
-}
+function makeRuntime(): ManagedRuntime.ManagedRuntime<AppRuntime, unknown> {
+  const liveLayer = CatalogServiceLive;
+  const stubsLayer = makeUnusedRuntimeLayer({
+    omit: ["catalog"] as const,
+  }).pipe(Layer.provide(liveLayer));
 
-function makeRuntime() {
-  return ManagedRuntime.make(Layer.mergeAll(CatalogServiceLive, makeUnusedRuntimeLayer()));
+  return ManagedRuntime.make(Layer.merge(liveLayer, stubsLayer));
 }
 
 async function getCatalogService(
@@ -105,20 +57,6 @@ async function getCatalogService(
   return runtime.runPromise(Effect.gen(function* () {
     return yield* CatalogService;
   }));
-}
-
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs = 250,
-): Promise<void> {
-  const start = Date.now();
-
-  while (!predicate()) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error("Timed out waiting for condition");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
 }
 
 describe("CatalogServiceLive", () => {
@@ -166,7 +104,7 @@ describe("CatalogServiceLive", () => {
       ),
     );
 
-    await waitFor(() => updates.length === 1);
+    await waitForCondition(() => updates.length === 1);
 
     providerRows = [
       ...providerRows,
@@ -191,7 +129,7 @@ describe("CatalogServiceLive", () => {
     ];
 
     await runtime.runPromise(service.refreshCatalog());
-    await waitFor(() => updates.length === 2);
+    await waitForCondition(() => updates.length === 2);
 
     expect(updates[0]).toEqual([
       {
@@ -240,7 +178,7 @@ describe("CatalogServiceLive", () => {
       ),
     );
 
-    await waitFor(() => updates.length === 1);
+    await waitForCondition(() => updates.length === 1);
     await runtime.runPromise(service.refreshCatalog());
     await new Promise((resolve) => setTimeout(resolve, 25));
 
@@ -271,7 +209,7 @@ describe("CatalogServiceLive", () => {
       ),
     );
 
-    await waitFor(() => updates.length === 1);
+    await waitForCondition(() => updates.length === 1);
 
     providerRows = [
       {

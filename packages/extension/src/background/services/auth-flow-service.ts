@@ -27,6 +27,7 @@ import {
   startProviderAuth,
 } from "@/background/runtime/auth/provider-auth";
 import type { RuntimeAuthMethod } from "@/background/runtime/providers/adapters/types";
+import { replaceMapEntryIfChanged } from "@/background/services/service-snapshot-utils";
 
 const AUTH_FLOW_WINDOW_WIDTH = 420;
 const AUTH_FLOW_WINDOW_HEIGHT = 640;
@@ -252,18 +253,22 @@ export const AuthFlowServiceLive = Layer.scoped(
 
         const previous = current.get(flow.providerID)?.result;
         flow.updatedAt = Date.now();
-        const result = snapshot(flow);
+        const nextSnapshot = {
+          providerID: flow.providerID,
+          result: snapshot(flow),
+        } satisfies AuthFlowStateSnapshot;
+        const next = replaceMapEntryIfChanged(
+          current,
+          flow.providerID,
+          nextSnapshot,
+          (left, right) => sameSnapshotPayload(left.result, right.result),
+        );
 
-        if (previous && sameSnapshotPayload(previous, result)) {
+        if (next === current && previous) {
           flow.updatedAt = previous.updatedAt;
           return [undefined, current] as const;
         }
 
-        const next = new Map(current);
-        next.set(flow.providerID, {
-          providerID: flow.providerID,
-          result,
-        });
         return [undefined, next] as const;
       });
 

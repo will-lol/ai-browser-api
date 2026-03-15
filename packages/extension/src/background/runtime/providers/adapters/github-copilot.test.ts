@@ -1,124 +1,88 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "bun:test";
 import * as Effect from "effect/Effect";
+import {
+  createAuthStoreSpies,
+  makeRuntimeAdapterContext,
+} from "@/background/runtime/providers/adapters/adapter-test-utils";
 import { resolveCopilotExecutionState } from "@/background/runtime/providers/adapters/github-copilot";
-import type { RuntimeAdapterContext } from "@/background/runtime/providers/adapters/types";
 
-function createContext(): Omit<RuntimeAdapterContext, "auth" | "authStore"> {
-  return {
-    providerID: "github-copilot",
-    modelID: "gpt-4o",
-    origin: "https://example.test",
-    sessionID: "session-1",
-    requestID: "request-1",
-    provider: {
-      id: "github-copilot",
-      name: "GitHub Copilot",
-      source: "models.dev",
-      env: ["GITHUB_TOKEN"],
-      connected: true,
-      options: {},
+const copilotContext = makeRuntimeAdapterContext({
+  providerID: "github-copilot",
+  providerName: "GitHub Copilot",
+  providerEnv: ["GITHUB_TOKEN"],
+  modelID: "gpt-4o",
+  modelName: "GPT-4o",
+  modelURL: "https://api.githubcopilot.com",
+  modelNpm: "@ai-sdk/github-copilot",
+  capabilities: {
+    temperature: true,
+    reasoning: false,
+    attachment: false,
+    toolcall: true,
+    input: {
+      text: true,
+      audio: false,
+      image: false,
+      video: false,
+      pdf: false,
     },
-    model: {
-      id: "gpt-4o",
-      providerID: "github-copilot",
-      name: "GPT-4o",
-      status: "active",
-      api: {
-        id: "gpt-4o",
-        url: "https://api.githubcopilot.com",
-        npm: "@ai-sdk/github-copilot",
-      },
-      cost: {
-        input: 0,
-        output: 0,
-        cache: {
-          read: 0,
-          write: 0,
-        },
-      },
-      limit: {
-        context: 1,
-        output: 1,
-      },
-      options: {},
-      headers: {},
-      capabilities: {
-        temperature: true,
-        reasoning: false,
-        attachment: false,
-        toolcall: true,
-        input: {
-          text: true,
-          audio: false,
-          image: false,
-          video: false,
-          pdf: false,
-        },
-        output: {
-          text: true,
-          audio: false,
-          image: false,
-          video: false,
-          pdf: false,
-        },
-      },
+    output: {
+      text: true,
+      audio: false,
+      image: false,
+      video: false,
+      pdf: false,
     },
-    runtime: {
-      now: () => Date.now(),
-    },
-  };
-}
+  },
+});
 
 describe("resolveCopilotExecutionState", () => {
   it("returns github.com copilot bearer settings with default base url", async () => {
-    const output = await Effect.runPromise(resolveCopilotExecutionState({
-      ...createContext(),
-      auth: {
-        type: "oauth",
-        methodID: "oauth-device",
-        methodType: "oauth",
-        access: "access-token",
-        refresh: "refresh-token",
-        expiresAt: Date.now() + 5 * 60_000,
-        createdAt: Date.now() - 1_000,
-        updatedAt: Date.now() - 1_000,
-      },
-      authStore: {
-        get: () => Effect.succeed(undefined),
-        set: () => Effect.void,
-        remove: () => Effect.void,
-      },
-    }));
+    const { authStore } = createAuthStoreSpies();
+    const output = await Effect.runPromise(
+      resolveCopilotExecutionState({
+        ...copilotContext,
+        auth: {
+          type: "oauth",
+          methodID: "oauth-device",
+          methodType: "oauth",
+          access: "access-token",
+          refresh: "refresh-token",
+          expiresAt: Date.now() + 5 * 60_000,
+          createdAt: Date.now() - 1_000,
+          updatedAt: Date.now() - 1_000,
+        },
+        authStore,
+      }),
+    );
 
-    assert.equal(output.apiKey, "access-token");
-    assert.equal(output.baseURL, "https://api.githubcopilot.com");
+    expect(output.apiKey).toBe("access-token");
+    expect(output.baseURL).toBe("https://api.githubcopilot.com");
   });
 
   it("returns enterprise copilot settings for enterprise metadata", async () => {
-    const output = await Effect.runPromise(resolveCopilotExecutionState({
-      ...createContext(),
-      auth: {
-        type: "oauth",
-        methodID: "oauth-device",
-        methodType: "oauth",
-        access: "enterprise-access-token",
-        refresh: "enterprise-refresh-token",
-        expiresAt: Date.now() + 5 * 60_000,
-        createdAt: Date.now() - 1_000,
-        updatedAt: Date.now() - 1_000,
-        metadata: {
-          enterpriseUrl: "https://company.ghe.com",
+    const { authStore } = createAuthStoreSpies();
+    const output = await Effect.runPromise(
+      resolveCopilotExecutionState({
+        ...copilotContext,
+        auth: {
+          type: "oauth",
+          methodID: "oauth-device",
+          methodType: "oauth",
+          access: "enterprise-access-token",
+          refresh: "enterprise-refresh-token",
+          expiresAt: Date.now() + 5 * 60_000,
+          createdAt: Date.now() - 1_000,
+          updatedAt: Date.now() - 1_000,
+          metadata: {
+            enterpriseUrl: "https://company.ghe.com",
+          },
         },
-      },
-      authStore: {
-        get: () => Effect.succeed(undefined),
-        set: () => Effect.void,
-        remove: () => Effect.void,
-      },
-    }));
+        authStore,
+      }),
+    );
 
-    assert.equal(output.apiKey, "enterprise-access-token");
-    assert.equal(output.baseURL, "https://copilot-api.company.ghe.com");
+    expect(output.apiKey).toBe("enterprise-access-token");
+    expect(output.baseURL).toBe("https://copilot-api.company.ghe.com");
   });
 });

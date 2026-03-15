@@ -19,6 +19,16 @@ import { RuntimeInternalError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { parseProviderOptions } from "./provider-options";
+import {
+  baseProviderOptionsSchema,
+  buildGoogleSettings,
+  buildOpenAICompatibleSettings,
+  buildOpenAISettings,
+  openAICompatibleProviderOptionsSchema,
+  openAIProviderOptionsSchema,
+  type BaseProviderOptions,
+  type ProviderSdkSettingsInput,
+} from "./provider-sdk-settings";
 import { defineAuthSchema } from "./schema";
 import type {
   AIAdapter,
@@ -26,35 +36,6 @@ import type {
   AuthMethodDefinition,
   RuntimeAdapterContext,
 } from "./types";
-import type {
-  ProviderModelInfo,
-  ProviderRuntimeInfo,
-} from "@/background/runtime/catalog/provider-registry";
-
-const baseProviderOptionsSchema = Schema.Struct({
-  baseURL: Schema.optional(Schema.String),
-  name: Schema.optional(Schema.String),
-});
-
-const openAICompatibleProviderOptionsSchema = Schema.Struct({
-  baseURL: Schema.optional(Schema.String),
-  name: Schema.optional(Schema.String),
-  queryParams: Schema.optional(
-    Schema.Record({
-      key: Schema.String,
-      value: Schema.String,
-    }),
-  ),
-  includeUsage: Schema.optional(Schema.Boolean),
-  supportsStructuredOutputs: Schema.optional(Schema.Boolean),
-});
-
-const openAIProviderOptionsSchema = Schema.Struct({
-  baseURL: Schema.optional(Schema.String),
-  name: Schema.optional(Schema.String),
-  organization: Schema.optional(Schema.String),
-  project: Schema.optional(Schema.String),
-});
 
 const azureProviderOptionsSchema = Schema.Struct({
   baseURL: Schema.optional(Schema.String),
@@ -79,13 +60,6 @@ const gatewayProviderOptionsSchema = Schema.Struct({
   metadataCacheRefreshMillis: Schema.optional(Schema.Number),
 });
 
-type BaseProviderOptions = Schema.Schema.Type<typeof baseProviderOptionsSchema>;
-type OpenAICompatibleProviderOptions = Schema.Schema.Type<
-  typeof openAICompatibleProviderOptionsSchema
->;
-type OpenAIProviderOptions = Schema.Schema.Type<
-  typeof openAIProviderOptionsSchema
->;
 type AzureProviderOptions = Schema.Schema.Type<
   typeof azureProviderOptionsSchema
 >;
@@ -96,15 +70,8 @@ type GatewayProviderOptions = Schema.Schema.Type<
   typeof gatewayProviderOptionsSchema
 >;
 
-type AdapterModelContext<TProviderOptions extends Record<string, unknown>> = {
-  provider: ProviderRuntimeInfo;
-  providerOptions: TProviderOptions;
-  model: ProviderModelInfo;
-  apiKey?: string;
-  baseURL?: string;
-  headers?: Record<string, string>;
-  fetch?: typeof fetch;
-};
+type AdapterModelContext<TProviderOptions extends Record<string, unknown>> =
+  ProviderSdkSettingsInput<TProviderOptions>;
 
 type ApiKeyProviderDescriptor<
   TProviderOptions extends Record<string, unknown>,
@@ -149,52 +116,9 @@ function mergeHeaders(input: AdapterModelContext<Record<string, unknown>>) {
   };
 }
 
-function buildOpenAICompatibleSettings(
-  input: AdapterModelContext<OpenAICompatibleProviderOptions>,
-): Parameters<typeof createOpenAICompatible>[0] {
-  return {
-    baseURL:
-      resolveBaseURL(input, { fallbackToModelURL: true }) ??
-      input.model.api.url,
-    name: input.providerOptions.name ?? input.provider.id,
-    apiKey: input.apiKey,
-    headers: mergeHeaders(input),
-    queryParams: input.providerOptions.queryParams,
-    fetch: input.fetch,
-    includeUsage: input.providerOptions.includeUsage,
-    supportsStructuredOutputs: input.providerOptions.supportsStructuredOutputs,
-  };
-}
-
-function buildOpenAISettings(
-  input: AdapterModelContext<OpenAIProviderOptions>,
-): Parameters<typeof createOpenAI>[0] {
-  return {
-    baseURL: resolveBaseURL(input),
-    apiKey: input.apiKey,
-    headers: mergeHeaders(input),
-    name: input.providerOptions.name ?? input.provider.id,
-    organization: input.providerOptions.organization,
-    project: input.providerOptions.project,
-    fetch: input.fetch,
-  };
-}
-
 function buildAnthropicSettings(
   input: AdapterModelContext<BaseProviderOptions>,
 ): Parameters<typeof createAnthropic>[0] {
-  return {
-    baseURL: resolveBaseURL(input),
-    apiKey: input.apiKey,
-    headers: mergeHeaders(input),
-    name: input.providerOptions.name ?? input.provider.id,
-    fetch: input.fetch,
-  };
-}
-
-function buildGoogleSettings(
-  input: AdapterModelContext<BaseProviderOptions>,
-): Parameters<typeof createGoogleGenerativeAI>[0] {
   return {
     baseURL: resolveBaseURL(input),
     apiKey: input.apiKey,

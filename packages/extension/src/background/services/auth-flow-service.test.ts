@@ -7,15 +7,8 @@ import {
 import {
   AuthFlowService,
   CatalogService,
-  ChatExecutionService,
-  MetaService,
-  ModelExecutionService,
-  PermissionsService,
+  type AppRuntime,
   type CatalogServiceApi,
-  type ChatExecutionServiceApi,
-  type MetaServiceApi,
-  type ModelExecutionServiceApi,
-  type PermissionsServiceApi,
 } from "@llm-bridge/runtime-core";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -23,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Stream from "effect/Stream";
 import type { RuntimeAuthMethod } from "@/background/runtime/providers/adapters/types";
+import { makeUnusedRuntimeLayer } from "@/background/test-utils/runtime-service-stubs";
 
 const authMethods: ReadonlyArray<RuntimeAuthMethod> = [
   {
@@ -120,73 +114,22 @@ function makeCatalogLayer() {
   return Layer.succeed(CatalogService, catalog);
 }
 
-function makeUnusedRuntimeLayer() {
-  const permissions: PermissionsServiceApi = {
-    getOriginState: () => Effect.die("unused"),
-    streamOriginState: () => Stream.empty,
-    listPermissions: () => Effect.die("unused"),
-    streamPermissions: () => Stream.empty,
-    getModelPermission: () => Effect.die("unused"),
-    setOriginEnabled: () => Effect.die("unused"),
-    setModelPermission: () => Effect.die("unused"),
-    createPermissionRequest: () => Effect.die("unused"),
-    resolvePermissionRequest: () => Effect.die("unused"),
-    dismissPermissionRequest: () => Effect.die("unused"),
-    listPending: () => Effect.die("unused"),
-    streamPending: () => Stream.empty,
-    waitForPermissionDecision: () => Effect.die("unused"),
-    streamOriginStates: () => Stream.empty,
-    streamPermissionsMap: () => Stream.empty,
-    streamPendingMap: () => Stream.empty,
-  };
+function makeRuntimeLayer(): Layer.Layer<AppRuntime, unknown, never> {
+  const catalogLayer = makeCatalogLayer();
+  const authFlowLayer = AuthFlowServiceLive.pipe(Layer.provide(catalogLayer));
+  const liveLayer = Layer.merge(catalogLayer, authFlowLayer);
+  const stubsLayer = makeUnusedRuntimeLayer({
+    omit: ["catalog", "authFlow"] as const,
+  }).pipe(Layer.provide(liveLayer));
 
-  const meta: MetaServiceApi = {
-    parseProviderModel: () => ({
-      providerID: "unused",
-      modelID: "unused",
-    }),
-    resolvePermissionTarget: () => Effect.die("unused"),
-  };
-
-  const modelExecution: ModelExecutionServiceApi = {
-    acquireModel: () => Effect.die("unused"),
-    generateModel: () => Effect.die("unused"),
-    streamModel: () => Effect.die("unused"),
-  };
-
-  const chatExecution: ChatExecutionServiceApi = {
-    sendMessages: () => Effect.die("unused"),
-    reconnectStream: () => Effect.die("unused"),
-    abortStream: () => Effect.die("unused"),
-  };
-
-  return Layer.mergeAll(
-    Layer.succeed(PermissionsService, permissions),
-    Layer.succeed(MetaService, meta),
-    Layer.succeed(ModelExecutionService, modelExecution),
-    Layer.succeed(ChatExecutionService, chatExecution),
-  );
-}
-
-function makeRuntimeLayer() {
-  return Layer.mergeAll(
-    makeUnusedRuntimeLayer(),
-    makeCatalogLayer(),
-    AuthFlowServiceLive.pipe(Layer.provide(makeCatalogLayer())),
+  return Layer.merge(
+    liveLayer,
+    stubsLayer,
   );
 }
 
 function runWithService<A, E>(
-  effect: Effect.Effect<
-    A,
-    E,
-    | AuthFlowService
-    | CatalogService
-    | ChatExecutionService
-    | PermissionsService
-    | MetaService
-    | ModelExecutionService
-  >,
+  effect: Effect.Effect<A, E, AppRuntime>,
 ) {
   const runtime = ManagedRuntime.make(makeRuntimeLayer());
 

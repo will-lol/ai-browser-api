@@ -19,6 +19,10 @@ import {
   refreshProviderCatalog,
   refreshProviderCatalogForProvider,
 } from "@/background/runtime/catalog/provider-registry-refresh";
+import {
+  replaceIfChanged,
+  sameArray,
+} from "@/background/services/service-snapshot-utils";
 import type {
   RuntimeDbModel,
   RuntimeDbProvider,
@@ -94,17 +98,6 @@ function sameModelSummary(
   );
 }
 
-function sameArray<A>(
-  left: ReadonlyArray<A>,
-  right: ReadonlyArray<A>,
-  sameValue: (left: A, right: A) => boolean,
-) {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => sameValue(value, right[index]!))
-  );
-}
-
 function sameCatalogSnapshot(left: CatalogSnapshot, right: CatalogSnapshot) {
   return (
     sameArray(left.providers, right.providers, sameProviderSummary) &&
@@ -147,18 +140,18 @@ export const CatalogServiceLive = Layer.effect(
         ),
       } satisfies CatalogSnapshot;
 
-      yield* SubscriptionRef.modify(snapshotRef, (current) =>
-        sameCatalogSnapshot(current, nextSnapshot)
-          ? [undefined, current]
-          : [undefined, nextSnapshot],
-      );
+      yield* SubscriptionRef.modify(snapshotRef, (current) => [
+        undefined,
+        replaceIfChanged(current, nextSnapshot, sameCatalogSnapshot),
+      ]);
     });
 
     yield* ensureProviderCatalog();
     yield* refreshSnapshots;
 
     return {
-      ensureCatalog: () => ensureProviderCatalog().pipe(Effect.zipRight(refreshSnapshots)),
+      ensureCatalog: () =>
+        ensureProviderCatalog().pipe(Effect.zipRight(refreshSnapshots)),
       refreshCatalog: () =>
         refreshProviderCatalog().pipe(Effect.zipRight(refreshSnapshots)),
       refreshCatalogForProvider: (providerID: string) =>

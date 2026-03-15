@@ -1,12 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import {
-  AuthFlowService,
-  CatalogService,
-  ChatExecutionService,
-  MetaService,
-  ModelExecutionService,
-  PermissionsService,
-} from "@llm-bridge/runtime-core";
+import { PermissionsService, type AppRuntime } from "@llm-bridge/runtime-core";
 import type {
   RuntimeCreatePermissionRequestResponse,
   RuntimePendingRequest,
@@ -18,6 +11,8 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Stream from "effect/Stream";
+import { makeUnusedRuntimeLayer } from "@/background/test-utils/runtime-service-stubs";
+import { waitForCondition } from "@/background/test-utils/wait-for";
 
 type OriginRow = {
   origin: string;
@@ -178,49 +173,13 @@ mock.module("@/background/runtime/permissions", () => ({
 
 const { PermissionsServiceLive } = await import("./permissions-service");
 
-function makeUnusedRuntimeLayer() {
-  return Layer.mergeAll(
-    Layer.succeed(CatalogService, {
-      ensureCatalog: () => Effect.die("unused"),
-      refreshCatalog: () => Effect.die("unused"),
-      refreshCatalogForProvider: () => Effect.die("unused"),
-      listProviders: () => Effect.die("unused"),
-      streamProviders: () => Stream.empty,
-      listModels: () => Effect.die("unused"),
-      streamModels: () => Stream.empty,
-    }),
-    Layer.succeed(AuthFlowService, {
-      openProviderAuthWindow: () => Effect.die("unused"),
-      getProviderAuthFlow: () => Effect.die("unused"),
-      streamProviderAuthFlow: () => Stream.empty,
-      startProviderAuthFlow: () => Effect.die("unused"),
-      cancelProviderAuthFlow: () => Effect.die("unused"),
-      disconnectProvider: () => Effect.die("unused"),
-    }),
-    Layer.succeed(MetaService, {
-      parseProviderModel: () => ({
-        providerID: "unused",
-        modelID: "unused",
-      }),
-      resolvePermissionTarget: () => Effect.die("unused"),
-    }),
-    Layer.succeed(ModelExecutionService, {
-      acquireModel: () => Effect.die("unused"),
-      generateModel: () => Effect.die("unused"),
-      streamModel: () => Effect.die("unused"),
-    }),
-    Layer.succeed(ChatExecutionService, {
-      sendMessages: () => Effect.die("unused"),
-      reconnectStream: () => Effect.die("unused"),
-      abortStream: () => Effect.die("unused"),
-    }),
-  );
-}
+function makeRuntime(): ManagedRuntime.ManagedRuntime<AppRuntime, unknown> {
+  const liveLayer = PermissionsServiceLive;
+  const stubsLayer = makeUnusedRuntimeLayer({
+    omit: ["permissions"] as const,
+  }).pipe(Layer.provide(liveLayer));
 
-function makeRuntime() {
-  return ManagedRuntime.make(
-    Layer.mergeAll(PermissionsServiceLive, makeUnusedRuntimeLayer()),
-  );
+  return ManagedRuntime.make(Layer.merge(liveLayer, stubsLayer));
 }
 
 async function getPermissionsService(
@@ -229,20 +188,6 @@ async function getPermissionsService(
   return runtime.runPromise(Effect.gen(function* () {
     return yield* PermissionsService;
   }));
-}
-
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs = 250,
-): Promise<void> {
-  const start = Date.now();
-
-  while (!predicate()) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error("Timed out waiting for condition");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
 }
 
 describe("PermissionsServiceLive", () => {
@@ -297,11 +242,11 @@ describe("PermissionsServiceLive", () => {
       ),
     );
 
-    await waitFor(() => states.length === 1);
+    await waitForCondition(() => states.length === 1);
     await runtime.runPromise(
       service.setOriginEnabled("https://example.test", false),
     );
-    await waitFor(() => states.length === 2);
+    await waitForCondition(() => states.length === 2);
 
     expect(states).toEqual([
       {
@@ -342,7 +287,7 @@ describe("PermissionsServiceLive", () => {
       ),
     );
 
-    await waitFor(() => states.length === 1);
+    await waitForCondition(() => states.length === 1);
     await runtime.runPromise(
       service.setOriginEnabled("https://example.test", true),
     );
@@ -387,7 +332,9 @@ describe("PermissionsServiceLive", () => {
       ),
     );
 
-    await waitFor(() => permissionMaps.length === 1 && pendingMaps.length === 1);
+    await waitForCondition(
+      () => permissionMaps.length === 1 && pendingMaps.length === 1,
+    );
 
     await runtime.runPromise(
       service.setModelPermission({
@@ -405,7 +352,9 @@ describe("PermissionsServiceLive", () => {
       }),
     );
 
-    await waitFor(() => permissionMaps.length >= 2 && pendingMaps.length >= 2);
+    await waitForCondition(
+      () => permissionMaps.length >= 2 && pendingMaps.length >= 2,
+    );
 
     expect(
       permissionMaps.at(-1)?.get("https://example.test"),
