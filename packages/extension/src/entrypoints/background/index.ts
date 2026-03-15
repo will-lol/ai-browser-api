@@ -36,9 +36,5 @@ const BackgroundAppLive = Layer.mergeAll(
 );
 
 export default defineBackground(() => {
-  void Effect.runPromise(Layer.launch(BackgroundAppLive)).catch(
-    (error: unknown) => {
-      console.error("background runtime failed", error);
-    },
-  );
+  void Effect.runPromise(Layer.launch(BackgroundAppLive));
 });

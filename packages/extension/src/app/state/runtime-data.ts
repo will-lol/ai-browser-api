@@ -56,7 +56,10 @@ function buildPendingRequestsResource(origin: string) {
   });
 }
 
-const modelsResources = new Map<string, ReturnType<typeof buildModelsResource>>();
+const modelsResources = new Map<
+  string,
+  ReturnType<typeof buildModelsResource>
+>();
 const providerAuthFlowResources = new Map<
   string,
   ReturnType<typeof buildProviderAuthFlowResource>

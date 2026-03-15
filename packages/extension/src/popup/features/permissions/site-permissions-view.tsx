@@ -148,6 +148,7 @@ export function SitePermissionsView({
   }
 
   if (dataState.isLoading || data == null) {
+    console.log(dataState, data);
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
         <p className="text-xs text-muted-foreground">Loading models...</p>
@@ -197,10 +198,11 @@ export function SitePermissionsView({
           disabled={controlsDisabled}
           onCheckedChange={(checked) => {
             setOriginTogglePending(true);
-            void setOriginEnabled.execute({
-              enabled: checked,
-              origin: targetOrigin,
-            })
+            void setOriginEnabled
+              .execute({
+                enabled: checked,
+                origin: targetOrigin,
+              })
               .catch((error) => {
                 console.error(
                   "[site-permissions] failed to update origin state",
