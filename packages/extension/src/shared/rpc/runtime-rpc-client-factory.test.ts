@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import * as Rpc from "@effect/rpc/Rpc";
 import * as RpcGroup from "@effect/rpc/RpcGroup";
-import { describe, it } from "bun:test";
+import { describe, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";

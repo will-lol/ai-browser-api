@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import {
   RuntimeAuthProviderError,
   type RuntimeRpcError,

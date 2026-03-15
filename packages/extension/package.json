@@ -34,6 +34,7 @@
     "@effect/rpc": "^0.73.2",
     "@llm-bridge/bridge-codecs": "workspace:*",
     "@llm-bridge/contracts": "workspace:*",
+    "@llm-bridge/effect-utils": "workspace:*",
     "@llm-bridge/reactive-core": "workspace:*",
     "@llm-bridge/runtime-core": "workspace:*",
     "@tanstack/react-router": "^1.132.24",

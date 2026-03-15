@@ -7,7 +7,6 @@ import type { ChatTransport, UIMessage } from "ai";
 import * as Effect from "effect/Effect";
 import type { BridgeConnection } from "./connection";
 import { createChatTransport } from "./chat-transport";
-import { currentOrigin } from "./shared";
 import { runClientTransport } from "./transport-boundary";
 import type {
   BridgeChatTransportOptions,
@@ -29,7 +28,6 @@ export function makeBridgeClientApi(input: {
       input.ensureConnection.pipe(
         Effect.flatMap((current) =>
           current.client.listModels({
-            origin: currentOrigin(),
             connectedOnly: true,
           }),
         ),
@@ -41,7 +39,6 @@ export function makeBridgeClientApi(input: {
       input.ensureConnection.pipe(
         Effect.flatMap((current) =>
           current.client.createPermissionRequest({
-            origin: currentOrigin(),
             modelId: payload.modelId,
           }),
         ),
@@ -54,7 +51,6 @@ export function makeBridgeClientApi(input: {
         const requestId = input.nextModelRequestId();
         const current = yield* input.ensureConnection;
         const descriptor = yield* current.client.acquireModel({
-          origin: currentOrigin(),
           requestId,
           sessionID: requestId,
           modelId,

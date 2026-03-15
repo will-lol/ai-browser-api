@@ -38,39 +38,3 @@ export function parseProviderModel(model: string) {
     modelID: rest.join("/"),
   };
 }
-
-export function getModelCapabilities(modelID: string) {
-  const lower = modelID.toLowerCase();
-  const capabilities: string[] = ["text"];
-
-  if (
-    lower.includes("gpt-4") ||
-    lower.includes("gpt-5") ||
-    lower.includes("claude") ||
-    lower.includes("gemini") ||
-    lower.includes("vision")
-  ) {
-    capabilities.push("vision");
-  }
-
-  if (
-    lower.includes("o1") ||
-    lower.includes("o3") ||
-    lower.includes("r1") ||
-    lower.includes("reason") ||
-    lower.includes("think")
-  ) {
-    capabilities.push("reasoning");
-  }
-
-  if (
-    lower.includes("code") ||
-    lower.includes("coder") ||
-    lower.includes("gpt") ||
-    lower.includes("claude")
-  ) {
-    capabilities.push("code");
-  }
-
-  return capabilities;
-}

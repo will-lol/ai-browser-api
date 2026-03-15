@@ -1,4 +1,5 @@
-import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import { APICallError } from "@ai-sdk/provider";
 import {
   RuntimeChatStreamNotFoundError,
@@ -35,6 +36,8 @@ let modelPermission: "allowed" | "denied" | "pending" = "allowed";
 let lastAbortSignal: AbortSignal | undefined;
 let queuedStreams: Array<ControlledUIStream> = [];
 let createdStreams: Array<ControlledUIStream> = [];
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
 let prepareLanguageModelCallImpl: () => Effect.Effect<{
   languageModel: {
     specificationVersion: "v3";
@@ -248,9 +251,13 @@ beforeEach(() => {
   validateMessagesMock.mockClear();
   convertMessagesMock.mockClear();
   streamTextMock.mockClear();
+  console.log = mock(() => undefined) as typeof console.log;
+  console.error = mock(() => undefined) as typeof console.error;
 });
 
 afterAll(() => {
+  console.log = originalConsoleLog;
+  console.error = originalConsoleError;
   mock.restore();
 });
 
@@ -330,6 +337,36 @@ describe("chat-execution-service", () => {
         done: false,
         value: { kind: "chunk-2" },
       });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("logs redacted chat metadata without origin or message bodies", async () => {
+    const controlled = makeControlledUIStream();
+    queuedStreams.push(controlled);
+
+    const runtime = makeRuntime();
+
+    try {
+      const reader = await openChatReader(
+        runtime,
+        Effect.flatMap(ChatExecutionService, (service) =>
+          service.sendMessages(defaultRequest),
+        ),
+      );
+
+      controlled.close();
+      await readNext(reader);
+
+      const serializedLogs = JSON.stringify(
+        (console.log as ReturnType<typeof mock>).mock.calls,
+      );
+
+      expect(serializedLogs).toContain("send.started");
+      expect(serializedLogs).toContain("messageCount");
+      expect(serializedLogs).not.toContain(defaultRequest.origin);
+      expect(serializedLogs).not.toContain("hello");
     } finally {
       await runtime.dispose();
     }

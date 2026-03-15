@@ -1,12 +1,5 @@
-import {
-  afterAll,
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  mock,
-} from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import * as Effect from "effect/Effect";
 import {
   createAuthStoreSpies,
@@ -33,6 +26,7 @@ const openAIContext = makeRuntimeAdapterContext({
     reasoning: false,
     attachment: false,
     toolcall: true,
+    code: true,
     input: {
       text: true,
       audio: false,

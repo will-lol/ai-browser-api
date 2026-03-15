@@ -10,7 +10,7 @@ import {
 import { runtimeDb } from "@/background/storage/runtime-db";
 import { runtimePermissionKey } from "@/background/storage/runtime-db-types";
 import { runTx } from "@/background/storage/runtime-db-tx";
-import { getModelCapabilities, now, randomId } from "@/background/runtime/core/util";
+import { now, randomId } from "@/background/runtime/core/util";
 
 export type PermissionStatus = "allowed" | "denied" | "pending";
 
@@ -79,6 +79,13 @@ function readPendingRequestRows(origin?: string) {
   });
 }
 
+function readModelRow(modelId: string) {
+  return Effect.tryPromise({
+    try: () => runtimeDb.models.get(modelId),
+    catch: (error) => error,
+  });
+}
+
 export function listPermissions(origin: string) {
   return readPermissionRows(origin).pipe(
     Effect.map((rows) =>
@@ -143,11 +150,14 @@ export function setModelPermission(
 
   return runTx([runtimeDb.permissions], () =>
     Effect.gen(function* () {
-      const existing = yield* Effect.tryPromise({
-        try: () =>
-          runtimeDb.permissions.get(runtimePermissionKey(origin, modelId)),
-        catch: (error) => error,
-      });
+      const [existing, modelRow] = yield* Effect.all([
+        Effect.tryPromise({
+          try: () =>
+            runtimeDb.permissions.get(runtimePermissionKey(origin, modelId)),
+          catch: (error) => error,
+        }),
+        readModelRow(modelId),
+      ]);
 
       yield* Effect.tryPromise({
         try: () =>
@@ -157,9 +167,10 @@ export function setModelPermission(
             modelId,
             status,
             capabilities:
+              modelRow?.capabilities ??
               capabilities ??
               existing?.capabilities ??
-              getModelCapabilities(modelId),
+              [],
             updatedAt,
           }),
         catch: (error) => error,
@@ -189,7 +200,7 @@ export function createPermissionRequest(input: {
   provider: string;
   modelName: string;
   capabilities?: string[];
-}) {
+  }) {
   return Effect.gen(function* () {
     const permission = yield* getModelPermission(input.origin, input.modelId);
     if (permission === "allowed") {
@@ -198,8 +209,10 @@ export function createPermissionRequest(input: {
       } satisfies CreatePermissionRequestResult;
     }
 
-    const capabilities =
-      input.capabilities ?? getModelCapabilities(input.modelId);
+    const modelRow = yield* readModelRow(input.modelId);
+    const capabilities = modelRow?.capabilities ?? input.capabilities ?? [];
+    const provider = modelRow?.providerID ?? input.provider;
+    const modelName = modelRow?.info.name ?? input.modelName;
     return yield* runTx([runtimeDb.pendingRequests, runtimeDb.permissions], () =>
       Effect.gen(function* () {
         const duplicate = yield* Effect.tryPromise({
@@ -259,8 +272,8 @@ export function createPermissionRequest(input: {
           id: randomId("prm"),
           origin: input.origin,
           modelId: input.modelId,
-          provider: input.provider,
-          modelName: input.modelName,
+          provider,
+          modelName,
           capabilities,
           requestedAt: updatedAt,
           dismissed: false,

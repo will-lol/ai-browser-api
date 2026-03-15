@@ -6,7 +6,8 @@ import type {
   UIMessageChunk,
 } from "ai";
 import type { BridgeChatTransportOptions } from "@llm-bridge/client";
-import { afterEach, beforeEach, describe, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, it } from "vitest";
+import { mock } from "./test-utils/vitest-compat";
 import { useEffect } from "react";
 
 type FakeClient = {

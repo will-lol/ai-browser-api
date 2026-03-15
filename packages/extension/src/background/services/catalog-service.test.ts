@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import { CatalogService, type AppRuntime } from "@llm-bridge/runtime-core";
 import type { RuntimeProviderSummary } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";

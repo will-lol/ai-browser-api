@@ -1,4 +1,5 @@
-import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import { RuntimeInternalError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import type {
@@ -46,7 +47,7 @@ mock.module("@/background/storage/runtime-db", () => ({
   },
 }));
 
-mock.module("./provider-registry-refresh", () => ({
+vi.mock("./provider-registry-refresh", () => ({
   ensureProviderCatalog: ensureProviderCatalogMock,
 }));
 
@@ -113,6 +114,7 @@ function createModelRow(
         reasoning: false,
         attachment: false,
         toolcall: false,
+        code: false,
         input: {
           text: true,
           audio: false,

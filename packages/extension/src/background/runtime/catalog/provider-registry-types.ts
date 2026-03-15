@@ -3,6 +3,7 @@ export interface ModelCapabilities {
   reasoning: boolean;
   attachment: boolean;
   toolcall: boolean;
+  code: boolean;
   input: {
     text: boolean;
     audio: boolean;

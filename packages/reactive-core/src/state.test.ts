@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Result } from "@effect-atom/atom-react";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { combineQueryStates, toReactiveQueryState } from "./state";
 
 describe("reactive query state", () => {

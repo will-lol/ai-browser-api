@@ -1,4 +1,5 @@
-import { afterAll, afterEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import * as Effect from "effect/Effect";
 import { gitlabAdapter } from "@/background/runtime/providers/adapters/gitlab";
 import type { AdapterAuthorizeContext } from "@/background/runtime/providers/adapters/types";

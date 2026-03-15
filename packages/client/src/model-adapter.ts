@@ -23,7 +23,6 @@ import {
 } from "./transport-boundary";
 import {
   createAbortError,
-  currentOrigin,
   isBootstrapRuntimeStreamPart,
   logBridgeDebug,
   logBridgeError,
@@ -75,7 +74,6 @@ export function createLanguageModelAdapter(input: {
 
             const current = yield* input.ensureConnection;
             const generated = yield* current.client.modelDoGenerate({
-              origin: currentOrigin(),
               requestId,
               sessionID: requestId,
               modelId,
@@ -123,7 +121,6 @@ export function createLanguageModelAdapter(input: {
 
             const current = yield* input.ensureConnection;
             return current.client.modelDoStream({
-              origin: currentOrigin(),
               requestId,
               sessionID: requestId,
               modelId,

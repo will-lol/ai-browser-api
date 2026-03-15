@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, describe, it } from "vitest";
 import { RuntimeChatStreamNotFoundError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -159,6 +159,60 @@ describe("createChatTransport", () => {
         kind: "live",
       },
     });
+  });
+
+  it("sends page bridge chat payloads without an origin field", async () => {
+    const sendCalls: Array<Record<string, unknown>> = [];
+    const reconnectCalls: Array<Record<string, unknown>> = [];
+
+    const connection = await makeConnection({
+      chatSendMessages: ((input: Record<string, unknown>) => {
+        sendCalls.push(input);
+        return Stream.empty;
+      }) as BridgeConnection["client"]["chatSendMessages"],
+      chatReconnectStream: ((input: Record<string, unknown>) => {
+        reconnectCalls.push(input);
+        return Stream.empty;
+      }) as BridgeConnection["client"]["chatReconnectStream"],
+    });
+
+    const transport = createChatTransport({
+      ensureConnection: Effect.succeed(connection),
+      abortChatStream: () => Effect.void,
+    });
+
+    await transport.sendMessages({
+      chatId: "chat-1",
+      trigger: "submit-message",
+      messageId: "message-1",
+      messages: [makeUiMessage()],
+      abortSignal: undefined,
+      headers: undefined,
+      body: {
+        modelId: "openai/gpt-4o-mini",
+      },
+      metadata: undefined,
+    });
+    await transport.reconnectToStream({
+      chatId: "chat-1",
+      headers: undefined,
+    });
+
+    assert.deepEqual(sendCalls, [
+      {
+        chatId: "chat-1",
+        modelId: "openai/gpt-4o-mini",
+        trigger: "submit-message",
+        messageId: "message-1",
+        messages: [makeUiMessage()],
+        options: undefined,
+      },
+    ]);
+    assert.deepEqual(reconnectCalls, [
+      {
+        chatId: "chat-1",
+      },
+    ]);
   });
 
   it("does not abort on reader cancel, but does abort on explicit abort signal", async () => {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, it, mock } from "bun:test";
+import { afterEach, describe, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import * as Effect from "effect/Effect";
 import * as Mailbox from "effect/Mailbox";
 import {

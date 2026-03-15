@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import { APICallError } from "@ai-sdk/provider";
 import { RuntimeUpstreamServiceError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
@@ -49,6 +50,7 @@ const getModelMock = mock(async () => ({
     reasoning: false,
     attachment: false,
     toolcall: false,
+    code: true,
     input: {
       text: true,
       audio: false,
@@ -94,6 +96,8 @@ const doStreamMock = mock(async (): Promise<{ stream: ReadableStream<unknown> }>
 
 let supportedUrlsValue: Record<string, RegExp[]> = {};
 let supportedUrlsError: Error | null = null;
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
 
 const adapter = {
   createModel: mock(() =>
@@ -166,10 +170,14 @@ beforeEach(async () => {
   adapter.createModel.mockClear();
   supportedUrlsValue = {};
   supportedUrlsError = null;
+  console.log = mock(() => undefined) as typeof console.log;
+  console.error = mock(() => undefined) as typeof console.error;
   languageModelRuntimeModule = await loadLanguageModelRuntimeModule();
 });
 
 afterEach(() => {
+  console.log = originalConsoleLog;
+  console.error = originalConsoleError;
   mock.restore();
 });
 
@@ -366,5 +374,39 @@ describe("language-model-runtime error normalization", () => {
         message: "Stream read failed",
       } satisfies Partial<RuntimeUpstreamServiceError>);
     }
+  });
+
+  it("redacts prompt bodies and headers from runtime model logs", async () => {
+    await Effect.runPromise(
+      Effect.either(
+        languageModelRuntimeModule.runLanguageModelGenerate({
+          modelID: "openai/gpt-4o-mini",
+          origin: "https://example.test",
+          sessionID: "session-1",
+          requestID: "request-4",
+          options: {
+            prompt: [
+              {
+                role: "user",
+                content: [{ type: "text", text: "super secret prompt" }],
+              },
+            ],
+            headers: {
+              authorization: "Bearer super-secret-token",
+            },
+          },
+        }),
+      ),
+    );
+
+    const serializedLogs = JSON.stringify([
+      ...(console.log as ReturnType<typeof mock>).mock.calls,
+      ...(console.error as ReturnType<typeof mock>).mock.calls,
+    ]);
+
+    expect(serializedLogs).not.toContain("super secret prompt");
+    expect(serializedLogs).not.toContain("Bearer super-secret-token");
+    expect(serializedLogs).toContain("promptMessageCount");
+    expect(serializedLogs).toContain("hasHeaders");
   });
 });

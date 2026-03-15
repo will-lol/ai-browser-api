@@ -18,7 +18,11 @@ import * as RpcClient from "@effect/rpc/RpcClient";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
-import { DEFAULT_TIMEOUT_MS } from "./shared";
+import {
+  DEFAULT_TIMEOUT_MS,
+  requireBrowserWindow,
+  type BrowserWindowLike,
+} from "./shared";
 import { runDetachedClientTransport } from "./transport-boundary";
 import type { BridgeClientOptions } from "./types";
 
@@ -35,19 +39,17 @@ export type BridgeConnection = {
 
 type CloseConnectionReason = "destroy" | "stale";
 
-function waitForBridgeReady(timeoutMs: number) {
+function waitForBridgeReady(
+  currentWindow: BrowserWindowLike,
+  timeoutMs: number,
+) {
   return Effect.async<void, BridgeInitializationTimeoutError>((resume) => {
-    if (typeof window === "undefined") {
-      resume(Effect.void);
-      return;
-    }
-
     if (document.documentElement.dataset.llmBridgeReady === "true") {
       resume(Effect.void);
       return;
     }
 
-    const timer = window.setTimeout(() => {
+    const timer = currentWindow.setTimeout(() => {
       cleanup();
       resume(
         Effect.fail(
@@ -65,11 +67,13 @@ function waitForBridgeReady(timeoutMs: number) {
     };
 
     const cleanup = () => {
-      window.clearTimeout(timer);
-      window.removeEventListener(PAGE_BRIDGE_READY_EVENT, onReady);
+      currentWindow.clearTimeout(timer);
+      currentWindow.removeEventListener(PAGE_BRIDGE_READY_EVENT, onReady);
     };
 
-    window.addEventListener(PAGE_BRIDGE_READY_EVENT, onReady, { once: true });
+    currentWindow.addEventListener(PAGE_BRIDGE_READY_EVENT, onReady, {
+      once: true,
+    });
   });
 }
 
@@ -116,7 +120,11 @@ export function createConnection(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return Effect.gen(function* () {
-    yield* waitForBridgeReady(timeoutMs);
+    const currentWindow = yield* Effect.try({
+      try: () => requireBrowserWindow(),
+      catch: (error) => error as RuntimeRpcError,
+    });
+    yield* waitForBridgeReady(currentWindow, timeoutMs);
 
     const runtimeScope = yield* Scope.make();
 
@@ -178,7 +186,7 @@ export function createConnection(
         Scope.extend(runtimeScope),
       );
 
-      window.postMessage({ type: PAGE_BRIDGE_INIT_MESSAGE }, "*", [
+      currentWindow.postMessage({ type: PAGE_BRIDGE_INIT_MESSAGE }, "*", [
         messageChannel.port2,
       ]);
 

@@ -139,10 +139,21 @@ export function nextRequestId(sequence: number) {
   return `req_${Date.now()}_${sequence}`;
 }
 
-export function currentOrigin() {
-  return typeof window === "undefined"
-    ? "https://chat.example.com"
-    : window.location.origin;
+export type BrowserWindowLike = Window & typeof globalThis;
+
+export function requireBrowserWindow(): BrowserWindowLike {
+  if (
+    typeof window === "undefined" ||
+    typeof window.location?.origin !== "string" ||
+    window.location.origin.length === 0
+  ) {
+    throw new RuntimeValidationError({
+      message:
+        "Bridge client requires a trusted browser window origin.",
+    });
+  }
+
+  return window;
 }
 
 export function logBridgeDebug(event: string, details?: unknown) {

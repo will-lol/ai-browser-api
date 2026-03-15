@@ -32,10 +32,10 @@ export const openAIProviderOptionsSchema = Schema.Struct({
 export type BaseProviderOptions = Schema.Schema.Type<
   typeof baseProviderOptionsSchema
 >;
-export type OpenAICompatibleProviderOptions = Schema.Schema.Type<
+type OpenAICompatibleProviderOptions = Schema.Schema.Type<
   typeof openAICompatibleProviderOptionsSchema
 >;
-export type OpenAIProviderOptions = Schema.Schema.Type<
+type OpenAIProviderOptions = Schema.Schema.Type<
   typeof openAIProviderOptionsSchema
 >;
 

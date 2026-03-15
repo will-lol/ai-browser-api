@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import { PermissionsService, type AppRuntime } from "@llm-bridge/runtime-core";
 import type {
   RuntimeCreatePermissionRequestResponse,
@@ -375,7 +376,7 @@ describe("PermissionsServiceLive", () => {
         modelId: "openai/gpt-5",
         modelName: "GPT-5",
         provider: "openai",
-        capabilities: [],
+        capabilities: ["text"],
         requestedAt: expect.any(Number),
         dismissed: false,
         status: "pending",
@@ -385,5 +386,111 @@ describe("PermissionsServiceLive", () => {
     await Effect.runPromise(Fiber.interrupt(permissionsFiber));
     await Effect.runPromise(Fiber.interrupt(pendingFiber));
     await runtime.dispose();
+  });
+
+  it("prefers authoritative model rows when reconstructing permission and pending entries", async () => {
+    permissionRows = [
+      {
+        origin: "https://example.test",
+        modelId: "openai/gpt-5",
+        status: "allowed",
+        capabilities: ["stale"],
+        updatedAt: 10,
+      },
+    ];
+    pendingRows = [
+      {
+        id: "request-1",
+        origin: "https://example.test",
+        modelId: "openai/gpt-5",
+        modelName: "Old Name",
+        provider: "old-provider",
+        capabilities: ["stale"],
+        requestedAt: 20,
+        dismissed: false,
+        status: "pending",
+      },
+    ];
+    modelRows = new Map([
+      [
+        "openai/gpt-5",
+        {
+          id: "openai/gpt-5",
+          providerID: "openai",
+          info: {
+            name: "GPT-5",
+          },
+          capabilities: ["text", "code"],
+        },
+      ],
+    ]);
+
+    const runtime = makeRuntime();
+    const service = await getPermissionsService(runtime);
+
+    try {
+      expect(
+        await runtime.runPromise(service.listPermissions("https://example.test")),
+      ).toEqual([
+        {
+          modelId: "openai/gpt-5",
+          modelName: "GPT-5",
+          provider: "openai",
+          status: "allowed",
+          capabilities: ["text", "code"],
+          requestedAt: 10,
+        },
+      ]);
+      expect(
+        await runtime.runPromise(service.listPending("https://example.test")),
+      ).toEqual([
+        {
+          id: "request-1",
+          origin: "https://example.test",
+          modelId: "openai/gpt-5",
+          modelName: "GPT-5",
+          provider: "openai",
+          capabilities: ["text", "code"],
+          requestedAt: 20,
+          dismissed: false,
+          status: "pending",
+        },
+      ]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("preserves slash-containing model suffixes when falling back without a model row", async () => {
+    permissionRows = [
+      {
+        origin: "https://example.test",
+        modelId: "lmstudio/qwen/qwen3-30b-a3b-2507",
+        status: "allowed",
+        capabilities: ["text"],
+        updatedAt: 30,
+      },
+    ];
+    modelRows = new Map();
+
+    const runtime = makeRuntime();
+    const service = await getPermissionsService(runtime);
+
+    try {
+      expect(
+        await runtime.runPromise(service.listPermissions("https://example.test")),
+      ).toEqual([
+        {
+          modelId: "lmstudio/qwen/qwen3-30b-a3b-2507",
+          modelName: "qwen/qwen3-30b-a3b-2507",
+          provider: "lmstudio",
+          status: "allowed",
+          capabilities: ["text"],
+          requestedAt: 30,
+        },
+      ]);
+    } finally {
+      await runtime.dispose();
+    }
   });
 });

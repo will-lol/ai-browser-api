@@ -685,6 +685,7 @@ function buildCodexOAuthProvider(provider: ProviderInfo) {
         reasoning: true,
         attachment: true,
         toolcall: true,
+        code: true,
         input: {
           text: true,
           audio: false,

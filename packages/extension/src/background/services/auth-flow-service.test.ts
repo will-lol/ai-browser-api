@@ -1,4 +1,5 @@
-import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import {
   RuntimeValidationError,
   type RuntimeAuthFlowSnapshot,

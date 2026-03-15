@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import {
   RuntimeAdminRpcGroup,
   RuntimeAdminAllowedTags,
@@ -9,8 +9,11 @@ import {
 import { PageBridgeRpcGroup } from "./page-bridge-rpc";
 
 describe("runtime rpc contract", () => {
-  it("uses the public rpc group for the page bridge", () => {
-    assert.equal(PageBridgeRpcGroup, RuntimePublicRpcGroup);
+  it("keeps the page bridge aligned with the public rpc surface", () => {
+    assert.deepEqual(
+      new Set(PageBridgeRpcGroup.requests.keys()),
+      new Set(RuntimePublicRpcGroup.requests.keys()),
+    );
   });
 
   it("keeps public access as a strict subset of admin access", () => {

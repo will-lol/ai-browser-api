@@ -13,7 +13,6 @@ import {
 import { createLanguageModelAdapter } from "./model-adapter";
 import {
   CONNECTION_INVALIDATED_MESSAGE,
-  currentOrigin,
   nextRequestId,
 } from "./shared";
 import { runClientTransport } from "./transport-boundary";
@@ -45,7 +44,6 @@ export function createBridgeClientEffect(
       ensureConnection.pipe(
         Effect.flatMap((current) =>
           current.client.abortModelCall({
-            origin: currentOrigin(),
             requestId: input.requestId,
             sessionID: input.sessionID,
           }),
@@ -57,7 +55,6 @@ export function createBridgeClientEffect(
       ensureConnection.pipe(
         Effect.flatMap((current) =>
           current.client.abortChatStream({
-            origin: currentOrigin(),
             chatId,
           }),
         ),

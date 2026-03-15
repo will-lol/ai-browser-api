@@ -4,7 +4,7 @@ import * as Fiber from "effect/Fiber";
 import * as Ref from "effect/Ref";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
-type ResettableConnectionLifecycleCloseReason<
+export type ResettableConnectionLifecycleCloseReason<
   ExtraCloseReason extends string = never,
 > = "destroy" | "stale" | ExtraCloseReason;
 
@@ -28,7 +28,7 @@ const idleState: LifecycleState<never, never> = {
   _tag: "Idle",
 };
 
-type ResettableConnectionLifecycleOptions<
+export type ResettableConnectionLifecycleOptions<
   A,
   E,
   ExtraCloseReason extends string = never,
@@ -96,7 +96,10 @@ export function makeResettableConnectionLifecycle<
               if (state._tag === "Connecting" && state.token === token) {
                 return Effect.gen(function* () {
                   yield* Deferred.failCause(deferred, cause);
-                  return [undefined, idleState as LifecycleState<A, E>] as const;
+                  return [
+                    undefined,
+                    idleState as LifecycleState<A, E>,
+                  ] as const;
                 });
               }
 
@@ -224,6 +227,6 @@ export function makeResettableConnectionLifecycle<
       ensure,
       destroy,
       destroyIfCurrent,
-    };
+    } as const;
   });
 }

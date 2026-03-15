@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import {
   createAuthStoreSpies,
@@ -19,6 +19,7 @@ const copilotContext = makeRuntimeAdapterContext({
     reasoning: false,
     attachment: false,
     toolcall: true,
+    code: true,
     input: {
       text: true,
       audio: false,

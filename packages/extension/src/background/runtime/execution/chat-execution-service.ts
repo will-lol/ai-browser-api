@@ -108,16 +108,22 @@ type PreparedChatGeneration = {
   readonly uiStream: ReadableStream<UIMessageChunk>;
 };
 
-function logChatDebug(event: string, details?: object) {
+function logChatDebug(event: string, details?: Record<string, unknown>) {
   console.log(`[chat-execution-service] ${event}`, details);
 }
 
-function logChatError(event: string, error: Error, details?: object) {
+function logChatError(
+  event: string,
+  error: Error,
+  details?: Record<string, unknown>,
+) {
   console.error(`[chat-execution-service] ${event}`, {
     details,
-    error,
-    message: error.message,
-    stack: error.stack,
+    error: {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    },
   });
 }
 
@@ -672,7 +678,7 @@ function produceGeneration(input: {
     if (normalizedError instanceof Error) {
       logChatError("stream.failed", normalizedError, {
         chatId: input.generation.chatId,
-        origin: input.generation.origin,
+        providerId: input.providerID,
       });
     }
 
@@ -726,8 +732,9 @@ function makeChatExecutionService(input: {
       logChatDebug("send.started", {
         chatId: request.chatId,
         modelId: request.modelId,
-        origin: request.origin,
         requestID,
+        messageCount: request.messages.length,
+        hasOptions: request.options != null,
       });
 
       return attachGenerationStream({

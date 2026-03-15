@@ -1,4 +1,5 @@
-import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import * as Effect from "effect/Effect";
 
 const MAX_PENDING_REQUESTS = 3;
@@ -28,6 +29,17 @@ type PermissionRow = {
 
 const pendingRows: PendingRow[] = [];
 const permissionRows = new Map<string, PermissionRow>();
+const modelRowsById = new Map<
+  string,
+  {
+    id: string;
+    providerID: string;
+    info: {
+      name: string;
+    };
+    capabilities: string[];
+  }
+>();
 const originRows = new Map<
   string,
   { origin: string; enabled: boolean; updatedAt: number }
@@ -85,6 +97,9 @@ mock.module("@/background/storage/runtime-db", () => ({
       }) => {
         originRows.set(row.origin, row);
       },
+    },
+    models: {
+      get: async (id: string) => modelRowsById.get(id),
     },
     permissions: {
       get: async (id: string) => permissionRows.get(id),
@@ -222,6 +237,7 @@ function addPendingPermission(
 beforeEach(() => {
   pendingRows.length = 0;
   permissionRows.clear();
+  modelRowsById.clear();
   originRows.clear();
   trustedTargetsById.clear();
   idSequence = 0;
@@ -235,6 +251,47 @@ afterAll(() => {
 });
 
 describe("createPermissionRequest", () => {
+  it("prefers authoritative stored model metadata and capabilities for new requests", async () => {
+    modelRowsById.set("lmstudio/qwen/qwen3-30b-a3b-2507", {
+      id: "lmstudio/qwen/qwen3-30b-a3b-2507",
+      providerID: "lmstudio",
+      info: {
+        name: "Qwen3 30B A3B",
+      },
+      capabilities: ["text", "reasoning"],
+    });
+
+    const result = await Effect.runPromise(
+      createPermissionRequest({
+        origin: TEST_ORIGIN,
+        modelId: "lmstudio/qwen/qwen3-30b-a3b-2507",
+        modelName: "spoofed",
+        provider: "spoofed",
+        capabilities: ["text"],
+      }),
+    );
+
+    expect(result).toEqual({
+      status: "requested",
+      request: {
+        id: "prm_1",
+        origin: TEST_ORIGIN,
+        modelId: "lmstudio/qwen/qwen3-30b-a3b-2507",
+        modelName: "Qwen3 30B A3B",
+        provider: "lmstudio",
+        capabilities: ["text", "reasoning"],
+        requestedAt: 101,
+        dismissed: false,
+        status: "pending",
+      },
+    });
+    expect(
+      permissionRows.get(`${TEST_ORIGIN}::lmstudio/qwen/qwen3-30b-a3b-2507`),
+    ).toMatchObject({
+      capabilities: ["text", "reasoning"],
+    });
+  });
+
   it("returns an existing duplicate pending request", async () => {
     setTrustedTarget("openai/gpt-4o-mini", "openai");
     addPendingRow({

@@ -14,20 +14,55 @@ import {
   wrapProviderError,
 } from "@/background/runtime/core/errors";
 
-function logRuntimeModelDebug(event: string, details?: unknown) {
+function hasRecordValues(
+  value: Record<string, unknown> | undefined,
+) {
+  return value != null && Object.keys(value).length > 0;
+}
+
+function toRuntimeModelLogDetails(input: {
+  modelID: string;
+  requestID: string;
+  sessionID: string;
+  options?: RuntimeLanguageModelCallOptions;
+  signal?: AbortSignal;
+  providerID?: string;
+  providerModelID?: string;
+}) {
+  return {
+    modelId: input.modelID,
+    requestId: input.requestID,
+    sessionId: input.sessionID,
+    providerId: input.providerID,
+    providerModelId: input.providerModelID,
+    hasAbortSignal: Boolean(input.signal),
+    promptMessageCount: input.options?.prompt.length ?? 0,
+    toolCount: input.options?.tools?.length ?? 0,
+    hasHeaders: hasRecordValues(input.options?.headers),
+    hasProviderOptions: hasRecordValues(input.options?.providerOptions),
+    includeRawChunks: Boolean(input.options?.includeRawChunks),
+  };
+}
+
+function logRuntimeModelDebug(
+  event: string,
+  details?: Record<string, unknown>,
+) {
   console.log(`[language-model-runtime] ${event}`, details);
 }
 
 function logRuntimeModelError(
   event: string,
   error: unknown,
-  details?: unknown,
+  details?: Record<string, unknown>,
 ) {
   console.error(`[language-model-runtime] ${event}`, {
     details,
-    error,
-    message: error instanceof Error ? error.message : String(error),
-    stack: error instanceof Error ? error.stack : undefined,
+    error: {
+      name: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    },
   });
 }
 
@@ -125,7 +160,7 @@ export function runLanguageModelGenerate(input: {
   options: RuntimeLanguageModelCallOptions;
   signal?: AbortSignal;
 }) {
-  logRuntimeModelDebug("generate.started", input);
+  logRuntimeModelDebug("generate.started", toRuntimeModelLogDetails(input));
 
   return Effect.gen(function* () {
     const preparedCall = yield* prepareRuntimeLanguageModelCall(input);
@@ -146,9 +181,9 @@ export function runLanguageModelGenerate(input: {
     );
 
     logRuntimeModelDebug("generate.succeeded", {
-      providerID: preparedCall.providerID,
-      providerModelID: preparedCall.providerModelID,
-      ...input,
+      ...toRuntimeModelLogDetails(input),
+      providerId: preparedCall.providerID,
+      providerModelId: preparedCall.providerModelID,
     });
     return result;
   }).pipe(
@@ -158,7 +193,7 @@ export function runLanguageModelGenerate(input: {
         Cause.squash(cause) instanceof Error
           ? (Cause.squash(cause) as Error)
           : new Error(String(Cause.squash(cause))),
-        input,
+        toRuntimeModelLogDetails(input),
       );
       return Effect.failCause(cause);
     }),
@@ -173,7 +208,7 @@ export function runLanguageModelStream(input: {
   options: RuntimeLanguageModelCallOptions;
   signal?: AbortSignal;
 }) {
-  logRuntimeModelDebug("stream.started", input);
+  logRuntimeModelDebug("stream.started", toRuntimeModelLogDetails(input));
 
   return Effect.gen(function* () {
     const preparedCall = yield* prepareRuntimeLanguageModelCall(input);
@@ -194,9 +229,9 @@ export function runLanguageModelStream(input: {
     );
 
     logRuntimeModelDebug("stream.succeeded", {
-      providerID: preparedCall.providerID,
-      providerModelID: preparedCall.providerModelID,
-      ...input,
+      ...toRuntimeModelLogDetails(input),
+      providerId: preparedCall.providerID,
+      providerModelId: preparedCall.providerModelID,
     });
     return readableStreamToEffectStream({
       stream: result.stream,
@@ -215,7 +250,7 @@ export function runLanguageModelStream(input: {
         Cause.squash(cause) instanceof Error
           ? (Cause.squash(cause) as Error)
           : new Error(String(Cause.squash(cause))),
-        input,
+        toRuntimeModelLogDetails(input),
       );
       return Effect.failCause(cause);
     }),

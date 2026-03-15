@@ -18,6 +18,7 @@ import {
   sameArray,
   sameMap,
 } from "@/background/services/service-snapshot-utils";
+import { parseProviderModel } from "@/background/runtime/core/util";
 import { runtimeDb } from "@/background/storage/runtime-db";
 import {
   createPermissionRequest,
@@ -144,12 +145,13 @@ function buildPermissionsMap() {
 
     for (const row of rows) {
       const modelRow = modelRows.get(row.modelId);
-      const fallbackProvider = row.modelId.split("/")[0] ?? "unknown";
-      const fallbackName = row.modelId.split("/")[1] ?? row.modelId;
+      const parsedModel = parseProviderModel(row.modelId);
+      const fallbackModelName = parsedModel.modelID || row.modelId;
+      const fallbackProvider = parsedModel.providerID || "unknown";
       const entries = grouped.get(row.origin) ?? [];
       entries.push({
         modelId: row.modelId,
-        modelName: modelRow?.info.name ?? fallbackName,
+        modelName: modelRow?.info.name ?? fallbackModelName,
         provider: modelRow?.providerID ?? fallbackProvider,
         status: row.status,
         capabilities: modelRow?.capabilities ?? row.capabilities,
@@ -175,20 +177,25 @@ function buildPendingMap() {
           .where("status")
           .equals("pending")
           .filter((item) => !item.dismissed)
-          .toArray(),
+        .toArray(),
       catch: (error) => error,
     });
+    const modelRows = yield* loadModelRows(rows.map((row) => row.modelId));
     const grouped = new Map<string, Array<RuntimePendingRequest>>();
 
     for (const row of rows) {
+      const modelRow = modelRows.get(row.modelId);
+      const parsedModel = parseProviderModel(row.modelId);
+      const fallbackModelName = parsedModel.modelID || row.modelName;
+      const fallbackProvider = parsedModel.providerID || row.provider;
       const entries = grouped.get(row.origin) ?? [];
       entries.push({
         id: row.id,
         origin: row.origin,
         modelId: row.modelId,
-        modelName: row.modelName,
-        provider: row.provider,
-        capabilities: row.capabilities,
+        modelName: modelRow?.info.name ?? fallbackModelName,
+        provider: modelRow?.providerID ?? fallbackProvider,
+        capabilities: modelRow?.capabilities ?? row.capabilities,
         requestedAt: row.requestedAt,
         dismissed: row.dismissed,
         status: row.status,

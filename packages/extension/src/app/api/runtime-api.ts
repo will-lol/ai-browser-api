@@ -1,15 +1,26 @@
 import { getRuntimeAdminRPC } from "@/app/rpc/runtime-rpc-client";
-import * as Stream from "effect/Stream";
-import type {
-  RuntimePermissionDecision,
-  RuntimeResolvedAuthMethod,
+import {
+  RuntimeValidationError,
+  type RuntimePermissionDecision,
+  type RuntimeResolvedAuthMethod,
 } from "@llm-bridge/contracts";
+import * as Stream from "effect/Stream";
 
 export type PermissionDecision = RuntimePermissionDecision;
 export type ExtensionAuthMethod = RuntimeResolvedAuthMethod;
 
 export function currentOrigin() {
-  if (typeof window === "undefined") return "https://chat.example.com";
+  if (
+    typeof window === "undefined" ||
+    typeof window.location?.origin !== "string" ||
+    window.location.origin.length === 0
+  ) {
+    throw new RuntimeValidationError({
+      message:
+        "Extension runtime API requires a trusted browser window origin.",
+    });
+  }
+
   return window.location.origin;
 }
 

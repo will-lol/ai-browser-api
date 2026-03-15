@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { RuntimePublicRpcGroup } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 import {

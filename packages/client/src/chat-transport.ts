@@ -19,7 +19,6 @@ import {
 import {
   createMissingChatModelIdError,
   createUnsupportedChatTransportHeadersError,
-  currentOrigin,
   hasRequestHeaders,
   isObjectRecord,
   toBridgeDefect,
@@ -121,7 +120,6 @@ export function createChatTransport(input: {
         Effect.gen(function* () {
           const current = yield* input.ensureConnection;
           return current.client.chatSendMessages({
-            origin: currentOrigin(),
             chatId,
             modelId,
             trigger,
@@ -151,7 +149,6 @@ export function createChatTransport(input: {
           Effect.gen(function* () {
             const current = yield* input.ensureConnection;
             return current.client.chatReconnectStream({
-              origin: currentOrigin(),
               chatId,
             });
           }),

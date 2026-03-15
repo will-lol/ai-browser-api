@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, describe, it } from "vitest";
 import { toRuntimeStreamPart } from "@llm-bridge/bridge-codecs";
 import { encodeSupportedUrls } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
@@ -10,12 +10,6 @@ import { createLanguageModelAdapter } from "./model-adapter";
 import type { BridgeConnection } from "./connection";
 
 const activeConnections: Array<BridgeConnection> = [];
-
-function asModelDoStream(
-  stream: Stream.Stream<unknown, never>,
-) {
-  return (() => stream) as BridgeConnection["client"]["modelDoStream"];
-}
 
 async function makeConnection(input: {
   modelDoStream: BridgeConnection["client"]["modelDoStream"];
@@ -72,10 +66,12 @@ afterEach(async () => {
 
 describe("createLanguageModelAdapter", () => {
   it("aborts the model request on stream cancel and explicit abort", async () => {
+    const streamCalls: Array<Record<string, unknown>> = [];
     const abortCalls = [] as Array<string>;
     const connection = await makeConnection({
-      modelDoStream: asModelDoStream(
-        Stream.concat(
+      modelDoStream: ((input: Record<string, unknown>) => {
+        streamCalls.push(input);
+        return Stream.concat(
           Stream.make(
             toRuntimeStreamPart({
               type: "stream-start",
@@ -88,8 +84,8 @@ describe("createLanguageModelAdapter", () => {
             }),
           ),
           Stream.never,
-        ),
-      ),
+        );
+      }) as BridgeConnection["client"]["modelDoStream"],
     });
 
     const model = createLanguageModelAdapter({
@@ -120,6 +116,7 @@ describe("createLanguageModelAdapter", () => {
     await canceledReader.cancel();
 
     assert.deepEqual(abortCalls, ["request-1:request-1"]);
+    assert.equal("origin" in streamCalls[0]!, false);
 
     const controller = new AbortController();
     await model.doStream({

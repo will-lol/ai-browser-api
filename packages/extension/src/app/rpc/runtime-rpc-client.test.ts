@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { describe, it, mock } from "bun:test";
+import { describe, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import type { RuntimeValidationError } from "@llm-bridge/contracts";
 import * as Effect from "effect/Effect";
 

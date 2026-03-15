@@ -1,4 +1,8 @@
 import { browser } from "@wxt-dev/browser";
+import {
+  makeResettableConnectionLifecycle,
+  type ResettableConnectionLifecycle,
+} from "@llm-bridge/effect-utils";
 import * as RpcClient from "@effect/rpc/RpcClient";
 import { RpcClientError } from "@effect/rpc/RpcClientError";
 import type * as Rpc from "@effect/rpc/Rpc";
@@ -7,10 +11,6 @@ import type {
   FromClientEncoded,
   FromServerEncoded,
 } from "@effect/rpc/RpcMessage";
-import {
-  makeResettableConnectionLifecycle,
-  type ResettableConnectionLifecycle,
-} from "./resettable-connection-lifecycle";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";

@@ -3,14 +3,19 @@ import type { AuthRecord } from "@/background/runtime/auth/auth-store";
 import { listAuth } from "@/background/runtime/auth/auth-store";
 import { getRuntimeConfig } from "@/background/runtime/config/config-store";
 import type { RuntimeProviderConfig } from "@/background/runtime/config/config-store";
-import { getModelCapabilities, mergeRecord } from "@/background/runtime/core/util";
+import { mergeRecord } from "@/background/runtime/core/util";
 import { resolveAdapterForProvider } from "@/background/runtime/providers/adapters";
 import type {
   ModelsDevModel,
   ModelsDevProvider,
 } from "@/background/runtime/catalog/models-dev";
 import { runtimeModelKey } from "@/background/storage/runtime-db-types";
+import {
+  inferCodeCapability,
+  toCapabilityTags,
+} from "./model-capabilities";
 import type {
+  ModelCapabilities,
   ProviderInfo,
   ProviderModelInfo,
 } from "./provider-registry-types";
@@ -18,12 +23,25 @@ import type {
 type RuntimeModelOverrides = NonNullable<RuntimeProviderConfig["models"]>;
 type RuntimeModelOverride = RuntimeModelOverrides[string];
 
-function toCapabilities(model: ModelsDevModel) {
+function buildModelCapabilities(
+  modelID: string,
+  model: {
+    temperature?: boolean;
+    reasoning?: boolean;
+    attachment?: boolean;
+    tool_call?: boolean;
+    modalities?: {
+      input?: ReadonlyArray<string>;
+      output?: ReadonlyArray<string>;
+    };
+  },
+): ModelCapabilities {
   return {
     temperature: Boolean(model.temperature),
     reasoning: Boolean(model.reasoning),
     attachment: Boolean(model.attachment),
     toolcall: model.tool_call ?? true,
+    code: inferCodeCapability(modelID),
     input: {
       text: model.modalities?.input?.includes("text") ?? true,
       audio: model.modalities?.input?.includes("audio") ?? false,
@@ -78,7 +96,7 @@ function toProviderModel(
     },
     headers: model.headers ?? {},
     options: model.options ?? {},
-    capabilities: toCapabilities(model),
+    capabilities: buildModelCapabilities(id, model),
     variants: model.variants,
   };
 }
@@ -165,26 +183,7 @@ function applyModelFilters(
       },
       headers: model.headers ?? {},
       options: model.options ?? {},
-      capabilities: {
-        temperature: model.temperature ?? false,
-        reasoning: model.reasoning ?? false,
-        attachment: model.attachment ?? false,
-        toolcall: model.tool_call ?? true,
-        input: {
-          text: model.modalities?.input?.includes("text") ?? true,
-          audio: model.modalities?.input?.includes("audio") ?? false,
-          image: model.modalities?.input?.includes("image") ?? false,
-          video: model.modalities?.input?.includes("video") ?? false,
-          pdf: model.modalities?.input?.includes("pdf") ?? false,
-        },
-        output: {
-          text: model.modalities?.output?.includes("text") ?? true,
-          audio: model.modalities?.output?.includes("audio") ?? false,
-          image: model.modalities?.output?.includes("image") ?? false,
-          video: model.modalities?.output?.includes("video") ?? false,
-          pdf: model.modalities?.output?.includes("pdf") ?? false,
-        },
-      },
+      capabilities: buildModelCapabilities(modelID, model),
       variants: model.variants,
     };
   }
@@ -196,7 +195,7 @@ export function providerToRows(provider: ProviderInfo, updatedAt: number) {
   const models = Object.values(provider.models).map((model) => ({
     id: runtimeModelKey(provider.id, model.id),
     providerID: provider.id,
-    capabilities: getModelCapabilities(runtimeModelKey(provider.id, model.id)),
+    capabilities: [...toCapabilityTags(model.capabilities)],
     info: model,
     updatedAt,
   }));

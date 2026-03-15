@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import {
   createAuthStoreSpies,
@@ -23,6 +23,7 @@ const googleContext = makeRuntimeAdapterContext({
     reasoning: true,
     attachment: true,
     toolcall: true,
+    code: false,
     input: {
       text: true,
       audio: false,

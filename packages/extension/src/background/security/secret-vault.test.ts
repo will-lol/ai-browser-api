@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import type { AuthRecord } from "@/background/runtime/auth/auth-types";
 import { makeSecretVault } from "./secret-vault";

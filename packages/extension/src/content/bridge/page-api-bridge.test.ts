@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { mock } from "@/test-utils/vitest-compat";
 import type { FromClientEncoded } from "@effect/rpc/RpcMessage";
 import {
   PAGE_BRIDGE_INIT_MESSAGE,
