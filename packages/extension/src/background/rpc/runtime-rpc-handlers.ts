@@ -219,6 +219,7 @@ function handleCreatePermissionRequest(input: Parameters<
 const makePublicRuntimeRpcHandlers = Effect.sync(() =>
   RuntimePublicRpcGroup.of({
     listModels: handleListModels,
+    streamModels: handleStreamModels,
     getOriginState: ({ origin }) => serializeRpcError(getOriginState(origin)),
     listPending: ({ origin }) => serializeRpcError(listPending(origin)),
     acquireModel: handleAcquireModel,

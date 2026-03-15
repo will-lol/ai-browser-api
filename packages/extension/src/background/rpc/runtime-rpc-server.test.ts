@@ -133,6 +133,7 @@ function makePublicLayer() {
     Effect.succeed(
       RuntimePublicRpcGroup.of({
         listModels: () => Effect.die("unused"),
+        streamModels: () => Stream.empty,
         getOriginState: () => Effect.die("unused"),
         listPending: () => Effect.die("unused"),
         acquireModel: () => Effect.die("unused"),

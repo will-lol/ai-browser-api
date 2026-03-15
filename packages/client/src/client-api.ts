@@ -5,6 +5,7 @@ import type {
 } from "@llm-bridge/contracts";
 import type { ChatTransport, UIMessage } from "ai";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import type { BridgeConnection } from "./connection";
 import { createChatTransport } from "./chat-transport";
 import { runClientTransport } from "./transport-boundary";
@@ -28,6 +29,17 @@ export function makeBridgeClientApi(input: {
       input.ensureConnection.pipe(
         Effect.flatMap((current) =>
           current.client.listModels({
+            connectedOnly: true,
+          }),
+        ),
+      ),
+    );
+
+  const streamModels = () =>
+    Stream.unwrap(
+      input.ensureConnection.pipe(
+        Effect.map((current) =>
+          current.client.streamModels({
             connectedOnly: true,
           }),
         ),
@@ -71,6 +83,7 @@ export function makeBridgeClientApi(input: {
 
   return {
     listModels,
+    streamModels,
     getModel,
     getChatTransport,
     requestPermission,

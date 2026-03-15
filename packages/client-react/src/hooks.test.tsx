@@ -6,20 +6,26 @@ import type {
   UIMessageChunk,
 } from "ai";
 import type { BridgeChatTransportOptions } from "@llm-bridge/client";
+import * as Effect from "effect/Effect";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
 import { afterEach, beforeEach, describe, it } from "vitest";
 import { mock } from "./test-utils/vitest-compat";
 import { useEffect } from "react";
 
+type FakeModelSummary = {
+  id: string;
+  name: string;
+  provider: string;
+  capabilities: string[];
+  connected: boolean;
+};
+
 type FakeClient = {
   listModels: () => Promise<
-    ReadonlyArray<{
-      id: string;
-      name: string;
-      provider: string;
-      capabilities: string[];
-      connected: boolean;
-    }>
+    ReadonlyArray<FakeModelSummary>
   >;
+  streamModels: () => Stream.Stream<ReadonlyArray<FakeModelSummary>, Error>;
   getModel: (modelId: string) => Promise<{ id: string }>;
   getChatTransport: (
     options?: BridgeChatTransportOptions,
@@ -31,6 +37,7 @@ type FakeClient = {
 let createClientCalls = 0;
 let closeCalls = 0;
 let listModelsCalls = 0;
+let streamModelsCalls = 0;
 let getModelCalls = 0;
 let requestPermissionCalls: Array<{ modelId: string }> = [];
 let getChatTransportCalls: Array<BridgeChatTransportOptions | undefined> = [];
@@ -40,6 +47,18 @@ let sendMessagesCalls: Array<{
 }> = [];
 let responseText = "Bridge reply";
 let transportSequence = 0;
+let modelsPubSub!: PubSub.PubSub<ReadonlyArray<FakeModelSummary>>;
+let streamModelsError: Error | null = null;
+
+const initialModels: ReadonlyArray<FakeModelSummary> = [
+  {
+    id: "google/gemini-3.1-pro-preview",
+    name: "Gemini",
+    provider: "google",
+    capabilities: ["text"],
+    connected: true,
+  },
+];
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -105,15 +124,14 @@ function createFakeClient(): FakeClient {
   return {
     listModels: async () => {
       listModelsCalls += 1;
-      return [
-        {
-          id: "google/gemini-3.1-pro-preview",
-          name: "Gemini",
-          provider: "google",
-          capabilities: ["text"],
-          connected: true,
-        },
-      ];
+      return initialModels;
+    },
+    streamModels: () => {
+      streamModelsCalls += 1;
+      if (streamModelsError) {
+        return Stream.fail(streamModelsError);
+      }
+      return Stream.fromPubSub(modelsPubSub);
     },
     getModel: async (modelId: string) => {
       getModelCalls += 1;
@@ -154,16 +172,29 @@ async function flushMicrotasks() {
   await Promise.resolve();
 }
 
-beforeEach(() => {
+async function publishModels(models: ReadonlyArray<FakeModelSummary>) {
+  await Effect.runPromise(PubSub.publish(modelsPubSub, models));
+  await flushMicrotasks();
+}
+
+beforeEach(async () => {
   createClientCalls = 0;
   closeCalls = 0;
   listModelsCalls = 0;
+  streamModelsCalls = 0;
   getModelCalls = 0;
   requestPermissionCalls = [];
   getChatTransportCalls = [];
   sendMessagesCalls = [];
   responseText = "Bridge reply";
   transportSequence = 0;
+  streamModelsError = null;
+  modelsPubSub = await Effect.runPromise(
+    PubSub.unbounded<ReadonlyArray<FakeModelSummary>>({
+      replay: 1,
+    }),
+  );
+  await Effect.runPromise(PubSub.publish(modelsPubSub, initialModels));
 });
 
 afterEach(() => {
@@ -205,7 +236,7 @@ describe("client-react hooks", () => {
     assert.equal(closeCalls, 1);
   });
 
-  it("loads models and model resources through public client methods", async () => {
+  it("streams models and loads model resources through public client methods", async () => {
     mock.module("@llm-bridge/client", () => ({
       createBridgeClient: async () => {
         createClientCalls += 1;
@@ -236,10 +267,97 @@ describe("client-react hooks", () => {
       await flushMicrotasks();
     });
 
-    assert.equal(listModelsCalls, 1);
+    assert.equal(listModelsCalls, 0);
+    assert.equal(streamModelsCalls, 1);
     assert.equal(getModelCalls, 1);
     assert.equal(latestModels.length, 1);
     assert.equal(hasModel, true);
+  });
+
+  it("reactively updates the model list without manual refresh", async () => {
+    mock.module("@llm-bridge/client", () => ({
+      createBridgeClient: async () => {
+        createClientCalls += 1;
+        return createFakeClient();
+      },
+    }));
+
+    const { BridgeProvider, useBridgeModels } = await import("./index");
+
+    let latestModels: ReadonlyArray<FakeModelSummary> = [];
+
+    function Probe() {
+      latestModels = useBridgeModels().models;
+      return null;
+    }
+
+    await act(async () => {
+      TestRenderer.create(
+        <BridgeProvider>
+          <Probe />
+        </BridgeProvider>,
+      );
+      await flushMicrotasks();
+    });
+
+    assert.equal(latestModels.length, 1);
+
+    await act(async () => {
+      await publishModels([
+        ...initialModels,
+        {
+          id: "openai/gpt-4o-mini",
+          name: "GPT-4o mini",
+          provider: "openai",
+          capabilities: ["text"],
+          connected: true,
+        },
+      ]);
+    });
+
+    assert.deepEqual(
+      latestModels.map((model) => model.id),
+      [
+        "google/gemini-3.1-pro-preview",
+        "openai/gpt-4o-mini",
+      ],
+    );
+  });
+
+  it("surfaces model stream failures through useBridgeModels", async () => {
+    streamModelsError = new Error("models failed");
+
+    mock.module("@llm-bridge/client", () => ({
+      createBridgeClient: async () => {
+        createClientCalls += 1;
+        return createFakeClient();
+      },
+    }));
+
+    const { BridgeProvider, useBridgeModels } = await import("./index");
+
+    let latestStatus = "loading";
+    let latestError: Error | null = null;
+
+    function Probe() {
+      const { status, error } = useBridgeModels();
+      latestStatus = status;
+      latestError = error;
+      return null;
+    }
+
+    await act(async () => {
+      TestRenderer.create(
+        <BridgeProvider>
+          <Probe />
+        </BridgeProvider>,
+      );
+      await flushMicrotasks();
+      await flushMicrotasks();
+    });
+
+    assert.equal(latestStatus, "error");
+    assert.equal(latestError?.message, "models failed");
   });
 
   it("mounts before readiness and sends through the ready transport once available", async () => {

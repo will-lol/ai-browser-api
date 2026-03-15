@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
 import { makeBridgeClientApi } from "./client-api";
 
 describe("makeBridgeClientApi", () => {
   it("omits caller-controlled origin fields from page bridge payloads", async () => {
     const listModelsCalls: Array<Record<string, unknown>> = [];
+    const streamModelsCalls: Array<Record<string, unknown>> = [];
     const permissionCalls: Array<Record<string, unknown>> = [];
     const acquireCalls: Array<Record<string, unknown>> = [];
 
@@ -15,6 +17,11 @@ describe("makeBridgeClientApi", () => {
           listModels: (input: Record<string, unknown>) =>
             Effect.sync(() => {
               listModelsCalls.push(input);
+              return [];
+            }),
+          streamModels: (input: Record<string, unknown>) =>
+            Stream.sync(() => {
+              streamModelsCalls.push(input);
               return [];
             }),
           createPermissionRequest: (input: Record<string, unknown>) =>
@@ -43,12 +50,18 @@ describe("makeBridgeClientApi", () => {
     });
 
     await api.listModels();
+    await Effect.runPromise(Stream.runCollect(api.streamModels()));
     await api.requestPermission({
       modelId: "openai/gpt-4o-mini",
     });
     await api.getModel("openai/gpt-4o-mini");
 
     assert.deepEqual(listModelsCalls, [
+      {
+        connectedOnly: true,
+      },
+    ]);
+    assert.deepEqual(streamModelsCalls, [
       {
         connectedOnly: true,
       },

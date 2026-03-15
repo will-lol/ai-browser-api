@@ -10,10 +10,13 @@ import {
   createMutationResource,
   createQueryResource,
   createReactiveRuntime,
+  createStreamResource,
   type MutationResource,
   type QueryResource,
+  type StreamResource,
 } from "@llm-bridge/reactive-core";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
+import * as Stream from "effect/Stream";
 
 function toError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error));
@@ -30,7 +33,7 @@ const bridgeResourceKeys = {
 
 export type BridgeResources = {
   clientResource: QueryResource<BridgeClientApi, Error>;
-  modelsResource: QueryResource<
+  modelsResource: StreamResource<
     Awaited<ReturnType<BridgeClientApi["listModels"]>>,
     Error
   >;
@@ -66,13 +69,9 @@ export function createBridgeResources(
   const clientResource = createQueryResource(runtime, {
     load: Effect.flatMap(BridgeReactClient, (client) => Effect.succeed(client)),
   });
-  const modelsResource = createQueryResource(runtime, {
-    key: bridgeResourceKeys.models,
-    load: Effect.flatMap(BridgeReactClient, (client) =>
-      Effect.tryPromise({
-        try: () => client.listModels(),
-        catch: toError,
-      }),
+  const modelsResource = createStreamResource(runtime, {
+    load: Stream.unwrap(
+      Effect.map(BridgeReactClient, (client) => client.streamModels()),
     ),
   });
   const requestPermissionResource = createMutationResource(runtime, {

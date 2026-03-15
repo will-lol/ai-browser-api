@@ -34,7 +34,6 @@ export type BridgeModelsState = BridgeQueryState<
   ReadonlyArray<BridgeModelSummary>
 > & {
   models: ReadonlyArray<BridgeModelSummary>;
-  refresh: () => Promise<void>;
 };
 
 export type BridgeModelState = BridgeQueryState<LanguageModelV3> & {

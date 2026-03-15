@@ -44,6 +44,13 @@ function createPageBridgeHandlers() {
         }),
       ),
 
+    streamModels: ({ connectedOnly, providerID }) =>
+      runtime.streamModels({
+        origin: window.location.origin,
+        connectedOnly,
+        providerID,
+      }),
+
     getOriginState: (_input) =>
       mapRuntimeEffect(
         runtime.getOriginState({

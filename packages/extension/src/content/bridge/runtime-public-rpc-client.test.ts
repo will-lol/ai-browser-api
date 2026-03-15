@@ -23,6 +23,7 @@ describe("getRuntimePublicRPC", () => {
     assert.equal("streamProviders" in runtime, false);
     assert.equal("openProviderAuthWindow" in runtime, false);
     assert.equal(typeof runtime.listModels, "function");
+    assert.equal(typeof runtime.streamModels, "function");
     assert.equal(typeof runtime.chatReconnectStream, "function");
   });
 });

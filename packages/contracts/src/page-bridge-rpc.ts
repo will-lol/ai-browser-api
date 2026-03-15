@@ -32,6 +32,13 @@ export const PageBridgeListModelsRpc = Rpc.make("listModels", {
   error: RuntimeRpcErrorSchema,
 });
 
+export const PageBridgeStreamModelsRpc = Rpc.make("streamModels", {
+  payload: PageBridgeListModelsPayloadSchema,
+  success: Schema.Array(RuntimeModelSummarySchema),
+  stream: true,
+  error: RuntimeRpcErrorSchema,
+});
+
 export const PageBridgeGetOriginStateRpc = Rpc.make("getOriginState", {
   payload: PageBridgeEmptyPayloadSchema,
   success: RuntimeOriginStateSchema,
@@ -132,6 +139,7 @@ export const PageBridgeCreatePermissionRequestRpc = Rpc.make(
 
 export const PageBridgeRpcGroup = RpcGroup.make(
   PageBridgeListModelsRpc,
+  PageBridgeStreamModelsRpc,
   PageBridgeGetOriginStateRpc,
   PageBridgeListPendingRpc,
   PageBridgeAcquireModelRpc,

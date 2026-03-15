@@ -45,6 +45,7 @@ const bindStream = <Key extends StreamRpcTag<RuntimePublicRpc>>(key: Key) =>
 export function getRuntimePublicRPC() {
   return {
     listModels: bindUnary("listModels"),
+    streamModels: bindStream("streamModels"),
     getOriginState: bindUnary("getOriginState"),
     listPending: bindUnary("listPending"),
     acquireModel: bindUnary("acquireModel"),

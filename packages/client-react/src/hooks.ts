@@ -42,12 +42,10 @@ export function useBridgeConnectionState(): BridgeConnectionState {
 export function useBridgeModels(): BridgeModelsState {
   const { modelsResource } = useBridgeResources();
   const state = useQueryResourceState(modelsResource);
-  const refresh = useQueryResourceRefresh(modelsResource);
 
   return {
     ...state,
     models: state.value ?? [],
-    refresh,
   };
 }
 

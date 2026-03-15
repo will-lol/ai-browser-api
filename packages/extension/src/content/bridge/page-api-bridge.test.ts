@@ -10,12 +10,18 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 
 const listModelsCalls: Array<Record<string, unknown>> = [];
+const streamModelsCalls: Array<Record<string, unknown>> = [];
 
 mock.module("@/content/bridge/runtime-public-rpc-client", () => ({
   getRuntimePublicRPC: () => ({
     listModels: (input: Record<string, unknown>) =>
       Effect.sync(() => {
         listModelsCalls.push(input);
+        return [];
+      }),
+    streamModels: (input: Record<string, unknown>) =>
+      Stream.sync(() => {
+        streamModelsCalls.push(input);
         return [];
       }),
     getOriginState: () => Effect.die("unused"),
@@ -202,6 +208,7 @@ async function waitFor(
 
 beforeEach(() => {
   listModelsCalls.length = 0;
+  streamModelsCalls.length = 0;
 
   currentWindow = createFakeWindow("https://page.test");
   currentDocument = {
@@ -391,9 +398,21 @@ describe("setupPageApiBridge", () => {
         connectedOnly: true,
       }),
     );
+    fakePort.emitMessage(
+      makeRequest("streamModels", {
+        connectedOnly: true,
+      }),
+    );
 
-    await waitFor(() => listModelsCalls.length === 1);
+    await waitFor(
+      () => listModelsCalls.length === 1 && streamModelsCalls.length === 1,
+    );
     expect(listModelsCalls[0]).toEqual({
+      origin: "https://page.test",
+      connectedOnly: true,
+      providerID: undefined,
+    });
+    expect(streamModelsCalls[0]).toEqual({
       origin: "https://page.test",
       connectedOnly: true,
       providerID: undefined,

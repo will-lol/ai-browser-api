@@ -5,6 +5,7 @@ import {
 import {
   RuntimeCatalogRpcGroup,
   RuntimeListModelsRpc,
+  RuntimeStreamModelsRpc,
 } from "./runtime-rpc.catalog";
 import {
   RuntimeAbortChatStreamRpc,
@@ -81,6 +82,7 @@ export type RuntimeRpc = RpcGroup.Rpcs<typeof RuntimeRpcGroup>;
 
 export const RuntimePublicRpcGroup = RpcGroup.make(
   RuntimeListModelsRpc,
+  RuntimeStreamModelsRpc,
   RuntimeGetOriginStateRpc,
   RuntimeListPendingRpc,
   RuntimeAcquireModelRpc,

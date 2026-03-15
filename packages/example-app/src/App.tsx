@@ -1,5 +1,5 @@
 import type { UIMessage } from "ai";
-import { Bot, Loader2, RefreshCw, Send, User } from "lucide-react";
+import { Bot, Loader2, Send, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   useChat,
@@ -21,7 +21,7 @@ function getMessageText(message: UIMessage) {
 }
 
 export function App() {
-  const { models, refresh, status, error: modelsError } = useBridgeModels();
+  const { models, status, error: modelsError } = useBridgeModels();
   const {
     messages,
     sendMessage,
@@ -88,20 +88,6 @@ export function App() {
         </div>
 
         <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => {
-              void refresh();
-            }}
-            disabled={isModelsLoading}
-            className="rounded-lg border border-[#334b75] bg-[#0d1730] p-2 text-[#e5edf8] transition-colors hover:bg-[#223557] disabled:cursor-not-allowed disabled:opacity-50"
-            title="Refresh models"
-          >
-            <RefreshCw
-              className={`h-5 w-5 ${isModelsLoading ? "animate-spin" : ""}`}
-            />
-          </button>
-
           <select
             className="min-w-[200px] rounded-lg border border-[#334b75] bg-[#0d1730] px-4 py-2 text-[#e5edf8] focus:border-blue-500 focus:outline-none"
             value={selectedModelId}
